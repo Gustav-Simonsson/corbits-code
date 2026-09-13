@@ -1312,15 +1312,13 @@ export function runtimeSettingsWithCatalog(
   }
   // OAuth-marked catalog rows carry live profile tokens; they overlay
   // credential-less placeholders but never a hand-named API-key row (CL-6728).
-  const overlaid = { ...fromCatalog };
-  for (const name of Object.keys(overlaid)) {
-    if (
-      (isCodexProviderName(name) || isXaiProviderName(name)) &&
-      isHandNamedProviderEntry(settings.providers[name])
-    ) {
-      delete overlaid[name];
-    }
-  }
+  const overlaid = Object.fromEntries(
+    Object.entries(fromCatalog).filter(
+      ([name]) =>
+        (!isCodexProviderName(name) && !isXaiProviderName(name)) ||
+        !isHandNamedProviderEntry(settings.providers[name]),
+    ),
+  );
   return {
     ...settings,
     providers: {
