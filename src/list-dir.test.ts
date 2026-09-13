@@ -1,7 +1,13 @@
 import { test, expect, describe } from "bun:test";
-import { mkdtemp, mkdir, writeFile, symlink } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { listDirectory } from "./util/list-dir.js";
 
 async function fixture(): Promise<string> {
@@ -80,5 +86,41 @@ describe("listDirectory", () => {
     });
     expect(out.split("\n")).toContain("other.txt");
     expect(out).not.toContain("outside the workspace");
+  });
+
+  test("lists a registered sibling worktree root (CL-6729)", async () => {
+    const dir = await fixture();
+    const sibling = await mkdtemp(join(tmpdir(), "list-dir-sibling-"));
+    await writeFile(join(sibling, "sibling-file.txt"), "");
+    const roots = [await realpath(sibling)];
+
+    const out = await listDirectory(dir, sibling, {
+      rootsProvider: () => roots,
+    });
+    expect(out.split("\n")).toContain("sibling-file.txt");
+    expect(out).not.toContain("outside the workspace");
+  });
+
+  test("lists a sibling worktree via relative traversal (CL-6729)", async () => {
+    const dir = await fixture();
+    const sibling = await mkdtemp(join(tmpdir(), "list-dir-sibling-rel-"));
+    await writeFile(join(sibling, "sibling-file.txt"), "");
+    const roots = [await realpath(sibling)];
+
+    const out = await listDirectory(dir, join("..", basename(sibling)), {
+      rootsProvider: () => roots,
+    });
+    expect(out.split("\n")).toContain("sibling-file.txt");
+    expect(out).not.toContain("outside the workspace");
+  });
+
+  test("lists through an aliased session root (CL-6729)", async () => {
+    const dir = await fixture();
+    const realDir = await realpath(dir);
+    const alias = `${realDir}-alias`;
+    await symlink(realDir, alias);
+
+    const out = await listDirectory(alias, realDir);
+    expect(out.split("\n")).toEqual(["a.ts", "b.ts", "sub/"]);
   });
 });

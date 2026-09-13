@@ -3,6 +3,7 @@ import {
   chmod,
   mkdtemp,
   mkdir,
+  realpath,
   rm,
   stat,
   symlink,
@@ -199,6 +200,46 @@ describe("deleteFilePlugin", () => {
     expect(result.isError).toBe(true);
     expect(result.content).toContain("Operator declined");
     expect(await exists(path)).toBe(true);
+  });
+
+  test("deletes a file in a registered sibling worktree (CL-6729)", async () => {
+    const sibling = await mkdtemp(join(tmpdir(), "corbits-delete-sibling-"));
+    const path = join(sibling, "old.txt");
+    await writeFile(path, "old");
+    const roots = [await realpath(sibling)];
+    const tool = deleteFilePlugin(cwd, { rootsProvider: () => roots })
+      .tools?.[0];
+    if (tool === undefined)
+      throw new Error("delete_file tool was not registered");
+
+    const result = await tool.handler(call(path), new AbortController().signal);
+
+    expect(result.isError ?? false).toBe(false);
+    expect(String(result.content)).toContain("Deleted file");
+    expect(await exists(path)).toBe(false);
+    await rm(sibling, { recursive: true, force: true });
+  });
+
+  test("still refuses a genuinely outside file when roots are registered (CL-6729)", async () => {
+    const sibling = await mkdtemp(
+      join(tmpdir(), "corbits-delete-sibling-keep-"),
+    );
+    const outside = await mkdtemp(join(tmpdir(), "corbits-delete-outside-"));
+    const path = join(outside, "keep.txt");
+    await writeFile(path, "keep");
+    const roots = [await realpath(sibling)];
+    const tool = deleteFilePlugin(cwd, { rootsProvider: () => roots })
+      .tools?.[0];
+    if (tool === undefined)
+      throw new Error("delete_file tool was not registered");
+
+    const result = await tool.handler(call(path), new AbortController().signal);
+
+    expect(result.isError).toBe(true);
+    expect(String(result.content)).toContain("outside the working directory");
+    expect(await exists(path)).toBe(true);
+    await rm(sibling, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   });
 
   test("preserves filesystem failure details", async () => {
