@@ -103,7 +103,11 @@ import {
 } from "../tools/web-search.js";
 import { createUseSkillTool } from "./use-skill.js";
 import { createSkillSearchTool } from "./skill-search.js";
-import { createToolIndex, createToolSearchTool } from "./tool-search.js";
+import {
+  createToolIndex,
+  createToolSearchTool,
+  TOOL_SEARCH_PENDING_WAIT_MS,
+} from "./tool-search.js";
 import { createSearchAgentsTool } from "./agent-search.js";
 import { createReadAgentTraceTool } from "../subagent/trace-tool.js";
 import {
@@ -319,6 +323,14 @@ export interface AgentToolset {
   // second add of an active name; failed rows retry through connectMCPServer
   // without a second persist. Still true while disable is in progress.
   hasMCPServer: (name: string) => boolean;
+  // Live MCP handshake depth: non-zero while any server is still connecting.
+  // tool_search consults this on a miss — waiting briefly and reporting a
+  // retry signal instead of a definitive negative mid-handshake.
+  pendingMcpConnectionCount: () => number;
+  // Bounded wait for in-flight MCP handshakes; resolves to the remaining
+  // count. Capped by `timeoutMs` so a hung authorization never hangs the
+  // caller — the tool_search bound passes briefly by default.
+  awaitPendingMcpConnections: (timeoutMs?: number) => Promise<number>;
   // Catalog unshadow can change local → global/none without rebuilding the
   // toolset; connectOne reads this on every late connect.
   setMcpServersSource: (source: "local" | "global" | "none") => void;
@@ -719,6 +731,12 @@ export async function createAgentToolset(
       lookup: (name) =>
         runnerHolder.current?.currentDefinitions().find((d) => d.name === name),
       promote: (names) => promoter.promote(names),
+      // Misses wait briefly for in-flight MCP handshakes (bounded, so hung
+      // OAuth cannot hang the call) and re-search before answering. Reads the
+      // connection map live — declared below, populated by the time any
+      // search runs.
+      awaitPendingConnections: (timeoutMs = TOOL_SEARCH_PENDING_WAIT_MS) =>
+        awaitPendingMcpConnections(timeoutMs),
     }),
   );
 
@@ -744,6 +762,30 @@ export async function createAgentToolset(
   const connectedClients = new Map<string, MCPClient>();
   const inFlightConnections = new Map<string, Promise<void>>();
   const inFlightEpochs = new Map<string, number>();
+  // Live handshake depth for tool_search: a miss waits briefly for these
+  // before answering, so a mid-handshake search finds late-mounting tools
+  // instead of reporting a definitive negative.
+  const pendingMcpConnectionCount = (): number => inFlightConnections.size;
+  // Bounded wait for in-flight handshakes; resolves to the remaining count.
+  // Capped by `timeoutMs` so a hung authorization never hangs the caller.
+  const awaitPendingMcpConnections = async (
+    timeoutMs = TOOL_SEARCH_PENDING_WAIT_MS,
+  ): Promise<number> => {
+    if (inFlightConnections.size === 0) return 0;
+    const pending = [...inFlightConnections.values()];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled(pending),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    return inFlightConnections.size;
+  };
   const disabledNames = new Set<string>();
   const serverAborts = new Map<string, AbortController>();
   const serverEpochs = new Map<string, number>();
@@ -1218,6 +1260,8 @@ export async function createAgentToolset(
     disconnectMCPServer: publicDisconnectMCPServer,
     hasMCPServer: (name) =>
       connectedClients.has(name) || inFlightConnections.has(name),
+    pendingMcpConnectionCount,
+    awaitPendingMcpConnections,
     setMcpServersSource: (source) => {
       mcpServersSource = source;
     },

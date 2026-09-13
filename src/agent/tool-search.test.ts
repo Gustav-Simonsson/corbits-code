@@ -317,6 +317,38 @@ describe("createToolSearchTool", () => {
     expect(out).toContain("mcp__linear__create_issue");
     expect(out).not.toContain("No tools matched");
   });
+
+  test("a hung connection never hangs the search — bounded wait, then a retry signal", async () => {
+    const tool = createToolSearchTool({
+      search: () => [],
+      lookup: () => undefined,
+      promote: () => undefined,
+      awaitPendingConnections: () =>
+        new Promise<number>(() => {
+          // Never settles: simulates a hung authorization handshake.
+        }),
+    });
+    const out = await call(tool, { query: "linear" });
+    expect(out).toContain("No tools matched");
+    expect(out).toMatch(/starting up|still connecting/);
+    expect(out).toMatch(/retry.*shortly/i);
+    expect(out).not.toContain("different keywords");
+  });
+
+  test("a genuine miss keeps the keyword advice and omits the retry caveat", async () => {
+    const tool = createToolSearchTool({
+      search: () => [],
+      lookup: () => undefined,
+      promote: () => undefined,
+      awaitPendingConnections: async () => 0,
+    });
+    const out = await call(tool, { query: "nonsense" });
+    expect(out).toContain("No tools matched");
+    expect(out).toContain("different keywords");
+    expect(out).not.toMatch(
+      /still connecting|still starting up|retry shortly/i,
+    );
+  });
 });
 
 describe("advertisedTools", () => {
