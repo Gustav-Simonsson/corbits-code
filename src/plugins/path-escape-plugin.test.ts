@@ -264,4 +264,92 @@ describe("pathEscapePlugin", () => {
       await rm(outside, { recursive: true, force: true });
     });
   });
+
+  describe("nested and alternate path keys (CL-6730)", () => {
+    const captureNext = () => {
+      let seen: Record<string, unknown> = {};
+      const next = async (call: ToolCall): Promise<ToolResult> => {
+        seen = call.arguments as Record<string, unknown>;
+        return {
+          callId: call.id,
+          content: JSON.stringify(call.arguments),
+        };
+      };
+      return { next, seen: () => seen };
+    };
+
+    test("blocks escape in a nested object under a path-like key", async () => {
+      const plugin = pathEscapePlugin("/project");
+      const handler = plugin.middleware
+        ? plugin.middleware(nextHandler)
+        : nextHandler;
+      const result = await handler(
+        makeCall("read_file", { options: { path: "../secret.txt" } }),
+        new AbortController().signal,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content).toMatch(/escapes working directory/);
+    });
+
+    test("resolves nested in-bounds paths instead of passing them through", async () => {
+      const plugin = pathEscapePlugin("/project");
+      const { next, seen } = captureNext();
+      const handler = plugin.middleware ? plugin.middleware(next) : next;
+      const result = await handler(
+        makeCall("read_file", { options: { path: "src/index.ts" } }),
+        new AbortController().signal,
+      );
+      expect(result.isError).not.toBe(true);
+      expect(seen()).toEqual({
+        options: { path: "/project/src/index.ts" },
+      });
+    });
+
+    test("blocks escape via the filepath spelling", async () => {
+      const plugin = pathEscapePlugin("/project");
+      const handler = plugin.middleware
+        ? plugin.middleware(nextHandler)
+        : nextHandler;
+      const result = await handler(
+        makeCall("read_file", { filepath: "../secret.txt" }),
+        new AbortController().signal,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content).toMatch(/escapes working directory/);
+    });
+
+    test("blocks escape in a string array under a path-like key", async () => {
+      const plugin = pathEscapePlugin("/project");
+      const handler = plugin.middleware
+        ? plugin.middleware(nextHandler)
+        : nextHandler;
+      const result = await handler(
+        makeCall("read_file", {
+          paths: ["src/index.ts", "../secret.txt"],
+        }),
+        new AbortController().signal,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content).toMatch(/escapes working directory/);
+    });
+
+    test("pathEscapeBlockReason agrees with execution time on nested escapes", async () => {
+      const { pathEscapeBlockReason } = await import("./path-escape-plugin.js");
+      expect(
+        pathEscapeBlockReason(
+          { options: { path: "../secret.txt" } },
+          "/project",
+        ),
+      ).toMatch(/escapes working directory/);
+      expect(
+        pathEscapeBlockReason({ filepath: "../secret.txt" }, "/project"),
+      ).toMatch(/escapes working directory/);
+      expect(
+        pathEscapeBlockReason(
+          { paths: ["src/index.ts", "../secret.txt"] },
+          "/project",
+        ),
+      ).toMatch(/escapes working directory/);
+    });
+  });
 });
