@@ -163,6 +163,28 @@ describe("supportedEfforts", () => {
     expect(supportedEfforts("glm-5.3")).toEqual(["low", "high", "max"]);
     expect(supportedEfforts("glm-5.3-flash")).toEqual(["low", "high", "max"]);
   });
+
+  test("Muse Spark supports minimal through high", () => {
+    expect(supportedEfforts("muse-spark-1.3-contributor")).toEqual([
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+    expect(supportedEfforts("muse-spark-1.2-contributor")).toEqual([
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+  });
+
+  test("Muse Spark never offers none", () => {
+    // The Go gateway answers HTTP 400 on reasoning.effort: "none".
+    expect(supportedEfforts("muse-spark-1.3-contributor")).not.toContain(
+      "none",
+    );
+  });
 });
 
 describe("validateEffort", () => {
@@ -187,6 +209,13 @@ describe("validateEffort", () => {
   test("accepts xhigh on grok-4.6 and rejects it on grok-4.5", () => {
     expect(validateEffort("grok-4.6", "xhigh")).toEqual({ ok: true });
     expect(validateEffort("grok-4.5", "xhigh").ok).toBe(false);
+  });
+
+  test("accepts minimal on Muse Spark and rejects none", () => {
+    expect(validateEffort("muse-spark-1.3-contributor", "minimal")).toEqual({
+      ok: true,
+    });
+    expect(validateEffort("muse-spark-1.3-contributor", "none").ok).toBe(false);
   });
 
   test("rejects medium on glm-5.3 family", () => {
@@ -470,6 +499,11 @@ describe("defaultEffortForModel", () => {
   test("glm-5.3 family defaults to max", () => {
     expect(defaultEffortForModel("glm-5.3")).toBe("max");
     expect(defaultEffortForModel("glm-5.3-flash")).toBe("max");
+  });
+
+  test("Muse Spark defaults to low", () => {
+    expect(defaultEffortForModel("muse-spark-1.3-contributor")).toBe("low");
+    expect(defaultEffortForModel("muse-spark-1.2-contributor")).toBe("low");
   });
 
   test("gpt-5 and o-series default to medium", () => {

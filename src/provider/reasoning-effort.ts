@@ -61,6 +61,20 @@ const UNKNOWN_MODEL_EFFORTS: readonly ReasoningEffort[] = [
   "high",
 ];
 
+// Muse Spark (OpenCode Go, Responses protocol) accepts minimal through high.
+// Not `none` — the Go gateway rejects it with HTTP 400 on `reasoning.effort`.
+// Measured against https://opencode.ai/zen/go/v1/responses; see CL-7867.
+const MUSE_SPARK_EFFORTS: readonly ReasoningEffort[] = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+];
+const MUSE_SPARK_MODELS: readonly string[] = [
+  "muse-spark-1.3-contributor",
+  "muse-spark-1.2-contributor",
+];
+
 // grok-4.6 accepts xhigh; grok-4.5 and composer stay on the unknown-model subset.
 const GROK_46_EFFORTS: readonly ReasoningEffort[] = [
   "low",
@@ -143,6 +157,9 @@ export function supportedEfforts(
   if (GLM_53_MODELS.includes(model)) {
     return [...GLM_53_EFFORTS];
   }
+  if (MUSE_SPARK_MODELS.includes(model)) {
+    return [...MUSE_SPARK_EFFORTS];
+  }
   return [...UNKNOWN_MODEL_EFFORTS];
 }
 
@@ -196,7 +213,7 @@ export function cycleReasoningEffort(
  * (`defaultEffortForDirector`): this is what the prompt shows and what Shift+Tab
  * advances from when the operator has not picked a level.
  *
- * Family table: grok* → high; glm-5.3* → max; Codex → medium; gpt-5.1 chat (`none` on the
+ * Family table: grok* → high; glm-5.3* → max; muse-spark* → low; Codex → medium; gpt-5.1 chat (`none` on the
  * ladder, not Codex) → none; gpt-5/gpt-6/o1/o3/o4 → medium. Unknown models with a
  * conservative rung set stay undefined so we do not invent a family default.
  */
@@ -210,6 +227,7 @@ export function defaultEffortForModel(
     supported.includes(desired) ? desired : undefined;
   if (model.startsWith("grok")) return pick("high");
   if (GLM_53_MODELS.includes(model)) return pick("max");
+  if (MUSE_SPARK_MODELS.includes(model)) return pick("low");
   if (!isCodex && supported.includes("none")) return "none";
   if (isCodex || isKnownOpenAIReasoningModel(model)) return pick("medium");
   return undefined;
