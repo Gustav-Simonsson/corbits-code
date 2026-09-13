@@ -51,7 +51,7 @@ function escapeArgs(
   cwd: string,
   rootsProvider: RootsProvider,
   allowOutside: boolean,
-  toolName?: string,
+  toolName: string,
 ): Record<string, unknown> {
   if (!allowOutside) {
     const reason = pathEscapeBlockReason(args, cwd, rootsProvider, toolName);
@@ -72,8 +72,8 @@ function escapeValue(
   cwd: string,
   rootsProvider: RootsProvider,
   allowOutside: boolean,
-  key?: string,
-  toolName?: string,
+  key: string | undefined,
+  toolName: string,
 ): unknown {
   if (typeof value === "string") {
     return key !== undefined && looksLikePath(key)
@@ -154,23 +154,29 @@ const TOOL_OUTPUT_URI_TOOL = "read_file";
 const ARCHIVE_URI_TOOLS = new Set(["read_file", "grep", "search_files"]);
 
 // "skip" when this tool may receive the virtual ref, a block message when it
-// may not, undefined when the value is an ordinary filesystem path. An
-// omitted toolName keeps the legacy skip so direct callers that predate the
-// parameter see no behavior change; the middleware and the permission gate
-// always pass a name.
+// may not, undefined when the value is an ordinary filesystem path. An omitted
+// toolName denies rather than skips: both production callers (the middleware
+// and the permission gate) always pass a name, so an omission is a caller bug
+// and must fail closed instead of silently skipping the deny.
 function virtualRefVerdict(
   value: string,
   toolName: string | undefined,
 ): "skip" | string | undefined {
   if (isToolOutputLike(value)) {
-    if (toolName === undefined || toolName === TOOL_OUTPUT_URI_TOOL) {
+    if (toolName === TOOL_OUTPUT_URI_TOOL) {
       return "skip";
+    }
+    if (toolName === undefined) {
+      return `cannot use a tool-output:// URI without a tool identity: ${value}. Use read_file with that URI to read the spilled output instead.`;
     }
     return `cannot ${toolName} a tool-output:// URI: ${value}. Use read_file with that URI to read the spilled output instead.`;
   }
   if (isArchiveLike(value)) {
-    if (toolName === undefined || ARCHIVE_URI_TOOLS.has(toolName)) {
+    if (toolName !== undefined && ARCHIVE_URI_TOOLS.has(toolName)) {
       return "skip";
+    }
+    if (toolName === undefined) {
+      return `cannot use an archive:/// ref without a tool identity: ${value}. Only read_file, grep, and search_files accept archive:/// refs.`;
     }
     return `cannot ${toolName} an archive:/// ref: ${value}. Only read_file, grep, and search_files accept archive:/// refs.`;
   }
@@ -184,7 +190,7 @@ export function pathEscapeBlockReason(
   args: Record<string, unknown>,
   cwd: string,
   rootsProvider: RootsProvider = () => [],
-  toolName?: string,
+  toolName: string,
 ): string | undefined {
   return blockReasonFor(args, cwd, rootsProvider, undefined, toolName);
 }
@@ -232,8 +238,8 @@ function blockReasonFor(
   value: unknown,
   cwd: string,
   rootsProvider: RootsProvider,
-  key?: string,
-  toolName?: string,
+  key: string | undefined,
+  toolName: string,
 ): string | undefined {
   if (typeof value === "string") {
     if (key === undefined || !looksLikePath(key)) return undefined;
@@ -272,7 +278,7 @@ function sanitizePath(
   cwd: string,
   rootsProvider: RootsProvider,
   allowOutside: boolean,
-  toolName?: string,
+  toolName: string,
 ): string {
   const verdict = virtualRefVerdict(value, toolName);
   if (verdict === "skip") {

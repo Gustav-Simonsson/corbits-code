@@ -342,15 +342,24 @@ describe("pathEscapePlugin", () => {
         pathEscapeBlockReason(
           { options: { path: "../secret.txt" } },
           "/project",
+          () => [],
+          "read_file",
         ),
       ).toMatch(/escapes working directory/);
       expect(
-        pathEscapeBlockReason({ filepath: "../secret.txt" }, "/project"),
+        pathEscapeBlockReason(
+          { filepath: "../secret.txt" },
+          "/project",
+          () => [],
+          "read_file",
+        ),
       ).toMatch(/escapes working directory/);
       expect(
         pathEscapeBlockReason(
           { paths: ["src/index.ts", "../secret.txt"] },
           "/project",
+          () => [],
+          "read_file",
         ),
       ).toMatch(/escapes working directory/);
     });
@@ -369,6 +378,8 @@ describe("pathEscapePlugin", () => {
         pathEscapeBlockReason(
           { options: { command: "../secret.txt" } },
           "/project",
+          () => [],
+          "custom_tool",
         ),
       ).toBeUndefined();
     });
@@ -386,7 +397,12 @@ describe("pathEscapePlugin", () => {
         expect(result.isError).toBe(true);
         expect(result.content).toMatch(/escapes working directory/);
         expect(
-          pathEscapeBlockReason({ [key]: "../secret.txt" }, "/project"),
+          pathEscapeBlockReason(
+            { [key]: "../secret.txt" },
+            "/project",
+            () => [],
+            "read_file",
+          ),
         ).toMatch(/escapes working directory/);
       }
     });
@@ -406,7 +422,9 @@ describe("pathEscapePlugin", () => {
       );
       expect(result.isError).not.toBe(true);
       expect(seen()).toEqual(args);
-      expect(pathEscapeBlockReason(args, "/project")).toBeUndefined();
+      expect(
+        pathEscapeBlockReason(args, "/project", () => [], "custom_tool"),
+      ).toBeUndefined();
     });
 
     test("normalizePathArguments shares the plugin rewrite identity", () => {
@@ -512,6 +530,53 @@ describe("pathEscapePlugin", () => {
         new AbortController().signal,
       );
       expect(blocked.isError).toBe(true);
+    });
+
+    test("omitted toolName fails closed on virtual refs", () => {
+      const omitted = undefined as unknown as string;
+      expect(
+        pathEscapeBlockReason(
+          { path: "tool-output:///abc123" },
+          "/project",
+          () => [],
+          omitted,
+        ),
+      ).toMatch(/tool-output/);
+      expect(
+        pathEscapeBlockReason(
+          { path: "archive:///occ-abc" },
+          "/project",
+          () => [],
+          omitted,
+        ),
+      ).toMatch(/archive/);
+    });
+
+    test("allowOutside still denies a non-reader virtual ref at execution", async () => {
+      const plugin = pathEscapePlugin("/project", () => [], {
+        allowOutside: true,
+      });
+      const handler = plugin.middleware
+        ? plugin.middleware(nextHandler)
+        : nextHandler;
+      const spill = await handler(
+        makeCall("grep", {
+          pattern: "foo",
+          path: "tool-output:///abc123",
+        }),
+        new AbortController().signal,
+      );
+      expect(spill.isError).toBe(true);
+      expect(spill.content).toMatch(/tool-output/);
+      const archive = await handler(
+        makeCall("write_file", {
+          path: "archive:///occ-abc",
+          content: "hi",
+        }),
+        new AbortController().signal,
+      );
+      expect(archive.isError).toBe(true);
+      expect(archive.content).toMatch(/archive/);
     });
   });
 });
