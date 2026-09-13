@@ -17,6 +17,7 @@ import {
   withCodexContentTypeRepair,
 } from "./codex-responses.js";
 import { GROK_RESPONSES_PROVIDER } from "./grok-responses.js";
+import { withAnthropicCacheBreakpoint } from "./anthropic-cache-breakpoint.js";
 import { withReplaySanitizer } from "./replay-sanitizer.js";
 import { isPollOnlyPendingBatch } from "../subagent/poll-exempt.js";
 import { OPENCODE_GO_PROVIDER_ID } from "../../packages/opencode-go/src/index.js";
@@ -95,6 +96,7 @@ export function createInferenceDependencies(): Promise<Dependencies> {
       import: (specifier) => Promise.resolve(localModules[specifier]),
     })
       .then(withReplaySanitizer)
+      .then(withAnthropicCacheBreakpoint)
       .then(createDependencies)
       .then((deps) => ({
         ...deps,
