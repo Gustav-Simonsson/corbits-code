@@ -164,15 +164,27 @@ describe("supportedEfforts", () => {
     expect(supportedEfforts("glm-5.3-flash")).toEqual(["low", "high", "max"]);
   });
 
-  test("Muse Spark supports minimal through high", () => {
-    expect(supportedEfforts("muse-spark-1.3-contributor")).toEqual([
+  // Five ids ship across two catalogs (packages/opencode-go and packages/zen)
+  // and nothing normalizes the model string before it reaches supportedEfforts,
+  // so every one of them has to land on the same ladder.
+  test.each([
+    "muse-spark-1.3-contributor",
+    "muse-spark-1.2-contributor",
+    "muse-spark-1.3",
+    "muse-spark-1.2",
+    "muse-spark-1.3-contributor-free",
+  ])("Muse Spark id %s supports minimal through high", (model) => {
+    expect(supportedEfforts(model)).toEqual([
       "minimal",
       "low",
       "medium",
       "high",
     ]);
-    expect(supportedEfforts("muse-spark-1.2-contributor")).toEqual([
-      "minimal",
+    expect(defaultEffortForModel(model)).toBe("low");
+  });
+
+  test("a model merely containing muse-spark is not matched", () => {
+    expect(supportedEfforts("not-muse-spark-1.3")).toEqual([
       "low",
       "medium",
       "high",
@@ -499,11 +511,6 @@ describe("defaultEffortForModel", () => {
   test("glm-5.3 family defaults to max", () => {
     expect(defaultEffortForModel("glm-5.3")).toBe("max");
     expect(defaultEffortForModel("glm-5.3-flash")).toBe("max");
-  });
-
-  test("Muse Spark defaults to low", () => {
-    expect(defaultEffortForModel("muse-spark-1.3-contributor")).toBe("low");
-    expect(defaultEffortForModel("muse-spark-1.2-contributor")).toBe("low");
   });
 
   test("gpt-5 and o-series default to medium", () => {
