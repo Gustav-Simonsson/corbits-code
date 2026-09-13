@@ -298,10 +298,10 @@ describe("createToolSearchTool", () => {
       search: (query) => createToolIndex(() => live).search(query),
       lookup: (name) => live.find((def) => def.name === name),
       promote: () => undefined,
-      awaitPendingConnections: async (timeoutMs = 50) => {
+      awaitPendingConnections: async (timeoutMs?: number) => {
         await Promise.race([
           connected,
-          new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+          new Promise((resolve) => setTimeout(resolve, timeoutMs ?? 50)),
         ]);
         return live.length === 0 ? 1 : 0;
       },
@@ -331,6 +331,19 @@ describe("createToolSearchTool", () => {
     const out = await call(tool, { query: "linear" });
     expect(out).toContain("No tools matched");
     expect(out).toMatch(/starting up|still connecting/);
+    expect(out).toMatch(/retry.*shortly/i);
+    expect(out).not.toContain("different keywords");
+  });
+
+  test("two pending connectors report the plural connecting copy", async () => {
+    const tool = createToolSearchTool({
+      search: () => [],
+      lookup: () => undefined,
+      promote: () => undefined,
+      awaitPendingConnections: async () => 2,
+    });
+    const out = await call(tool, { query: "linear" });
+    expect(out).toContain("2 connectors are still connecting");
     expect(out).toMatch(/retry.*shortly/i);
     expect(out).not.toContain("different keywords");
   });
