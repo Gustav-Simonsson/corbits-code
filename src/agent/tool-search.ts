@@ -237,6 +237,9 @@ function tokenize(text: string): string[] {
 export function createToolIndex(
   getDefs: () => readonly ToolDefinition[],
   advertisedNames: readonly string[] = ADVERTISED_TOOL_NAMES,
+  // Closed allow list (exec director overlays): when set, the index only
+  // surfaces allowed tools so search cannot promote outside the allow.
+  allow?: readonly string[] | undefined,
 ): ToolIndex {
   const score = (
     def: ToolDefinition,
@@ -264,6 +267,7 @@ export function createToolIndex(
       if (queryTokens.length === 0) return [];
       return getDefs()
         .filter((def) => !advertisedNames.includes(def.name))
+        .filter((def) => allow === undefined || allow.includes(def.name))
         .map((def) => ({
           name: def.name,
           score: score(def, queryTokens, rawQuery),

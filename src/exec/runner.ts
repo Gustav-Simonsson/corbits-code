@@ -16,7 +16,7 @@ import {
 import { xaiProfileFromProviderName } from "../config/xai-providers.js";
 import { formatDirectorSystemPrompt } from "../agent/directors/identity.js";
 import { DIRECTOR_REGISTRY } from "../agent/directors/registry.js";
-import type { DirectorId } from "../agent/directors/types.js";
+import type { DirectorId, DirectorPackage } from "../agent/directors/types.js";
 import { submitOutputDefinition } from "../agent/director.js";
 import {
   shellDefinition,
@@ -265,19 +265,51 @@ export function resolveExecDirectorOverlay(
   if (director === undefined || director === "skywalker") {
     return { mountFleet: true };
   }
-  const pkg = DIRECTOR_REGISTRY[director];
+  return resolveExecDirectorOverlayForPackage(DIRECTOR_REGISTRY[director]);
+}
+
+/**
+ * Single enforcement point for the exec allowlist. Everything the overlay
+ * permits — tool_search results, promoter activation, the call gate — flows
+ * through here, so a tool outside the allow can never become callable.
+ */
+export function isExecOverlayToolAllowed(
+  overlay: ExecDirectorOverlay,
+  name: string,
+): boolean {
+  return (
+    overlay.advertisedAllow === undefined ||
+    overlay.advertisedAllow.includes(name)
+  );
+}
+
+export function resolveExecDirectorOverlayForPackage(
+  pkg: DirectorPackage,
+): ExecDirectorOverlay {
   const allow = pkg.tools?.allow;
-  const advertisedAllow =
+  const deny = pkg.tools?.deny ?? [];
+  if ((allow === undefined || allow.length === 0) && deny.length > 0) {
+    throw new Error(
+      `Director package "${pkg.id}" sets tools.deny without tools.allow — ` +
+        "exec overlays enforce a closed allow list, so a deny-only package " +
+        "has no list to subtract from. Add tools.allow.",
+    );
+  }
+  const allowed =
     allow !== undefined && allow.length > 0
+      ? allow.filter((name) => !deny.includes(name))
+      : undefined;
+  const advertisedAllow =
+    allowed !== undefined
       ? pkg.spawn.maySpawn
         ? [
-            ...allow,
+            ...allowed,
             // Exec mounts wait_agents beside the fleet verbs (mountWaitAgents),
             // so it stays advertised here even though the package allow omits
             // it for TUI/nested mailbox-mail collection.
-            ...(!allow.includes("wait_agents") ? ["wait_agents"] : []),
+            ...(!allowed.includes("wait_agents") ? ["wait_agents"] : []),
           ]
-        : allow.filter(
+        : allowed.filter(
             (name) =>
               ![
                 "search_agents",
@@ -649,6 +681,11 @@ export async function runExec(config: Config): Promise<ExecResult> {
         : {}),
       sessionMode,
       toolAvailability,
+      // Closed director overlays unmount tool_search (unless allowed) and
+      // filter its index, so search cannot surface outside-allow tools.
+      ...(overlay.advertisedAllow !== undefined
+        ? { toolSearchAllow: overlay.advertisedAllow }
+        : {}),
       // Exec-primary keeps wait_agents mounted (with an advertised allow):
       // headless runs have no mailbox-mail flush, so wait_agents stays the
       // collection path here. TUI primary and nested orchestrators omit it.
@@ -839,10 +876,14 @@ export async function runExec(config: Config): Promise<ExecResult> {
 
     // tool_search starts as a no-op promoter; without this, the call gate
     // refuses MCP/present/plugin names the result just told the model to
-    // invoke.
+    // invoke. Under a closed overlay the promoter only activates allowed
+    // names, so outside-allow tools can never become advertised or callable.
     agentToolset.setToolPromoter(
       createExecToolPromoter({
-        activate: (names) => activatedToolNames.activate(names),
+        activate: (names) =>
+          activatedToolNames.activate(
+            names.filter((name) => isExecOverlayToolAllowed(overlay, name)),
+          ),
         currentDefinitions: () =>
           agentToolset.dynamicRunner.currentDefinitions(),
         computeAdvertised,
