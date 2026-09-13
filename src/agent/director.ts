@@ -482,8 +482,23 @@ class ChatDirectorImpl extends DefaultDirector {
     toolDefinitions: ToolDefinition[],
     options: ChatDirectorImplOptions,
   ) {
-    super(systemPrompt, toolDefinitions, {});
-    this._systemPrompt = systemPrompt;
+    // Compose before super(). The base director keeps its own copy of the
+    // system prompt and sets options.systemPrompt from it on every ordinary
+    // turn, so withCurrentTools' `?? this._systemPrompt` fallback never fires
+    // and anything appended after super() is built but never sent.
+    const familyPolicy =
+      options.modelFamilyPolicy ??
+      resolveModelFamilyPolicy({ providerName: "" });
+    const disciplineRules = familyPolicy.toolDisciplineRules;
+    // Family tool-discipline rules go at the tail. Appending there is
+    // prefix-safe: measured on OpenCode Go Responses, tail appends hold a
+    // 99.1% cache hit while an edit at the head drops it to 9%.
+    const composedPrompt =
+      disciplineRules !== undefined && disciplineRules.length > 0
+        ? `${systemPrompt}\n\n${disciplineRules}`
+        : systemPrompt;
+    super(composedPrompt, toolDefinitions, {});
+    this._systemPrompt = composedPrompt;
     this._toolDefinitions = toolDefinitions;
     this.inactivityTimeoutMs = options.inactivityTimeoutMs;
     this.totalTimeoutMs = options.totalTimeoutMs;
@@ -493,19 +508,10 @@ class ChatDirectorImpl extends DefaultDirector {
     this.onTasksChange = options.onTasksChange;
     this.compaction = createCompactionGovernor(
       options.requestContinuation,
-      systemPrompt,
+      composedPrompt,
       toolDefinitions,
     );
-    this.modelFamilyPolicy =
-      options.modelFamilyPolicy ??
-      resolveModelFamilyPolicy({ providerName: "" });
-    // Family tool-discipline rules go at the tail of the system prompt.
-    // Appending there is prefix-safe: measured on OpenCode Go Responses, tail
-    // appends hold a 99.1% cache hit while an edit at the head drops it to 9%.
-    const rules = this.modelFamilyPolicy.toolDisciplineRules;
-    if (rules !== undefined && rules.length > 0) {
-      this._systemPrompt = `${systemPrompt}\n\n${rules}`;
-    }
+    this.modelFamilyPolicy = familyPolicy;
     this.retryPolicy = options.retryPolicy ?? createCorbitsRetryPolicy();
     this.getLiveFleetCount = options.getLiveFleetCount;
   }

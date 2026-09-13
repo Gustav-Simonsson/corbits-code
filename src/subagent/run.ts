@@ -1032,6 +1032,7 @@ async function runSubAgentInner(
             providerId: params.provider.providerName,
             admission: params.admission ?? getProcessAdmissionQueue(),
           }),
+          modelFamilyPolicy.toolDisciplineRules,
         );
         director.observeForcedStop((reason) => {
           directorForcedStopReason = reason;

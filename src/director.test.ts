@@ -1661,3 +1661,43 @@ describe("chatDirector spacer echo", () => {
     expect(exhausted.some((a) => a.type === "reply")).toBe(true);
   });
 });
+
+// The rules are only worth anything if they reach the model. An earlier cut of
+// this change appended them to the director's own copy of the system prompt
+// AFTER calling super(), so the base director kept sending the original and
+// the whole feature was a no-op that every existing test passed.
+describe("tool-discipline rules on the wire", () => {
+  async function promptSentFor(model: string): Promise<string | undefined> {
+    const director = createChatDirector("BASE PROMPT", [], {
+      onTasksChange: () => undefined,
+      provider: { providerName: "opencode-go", model },
+    });
+    const event = {
+      type: "message.received",
+      message: { role: "user", content: "hi" },
+    } as unknown as ReactorInboundEvent;
+    const actions = actionsArray(
+      await director.decide(event, mockState, mockCapabilities),
+    );
+    const infer = actions.find((a) => a.type === "infer") as
+      | { options?: ExtendedInferenceOptions }
+      | undefined;
+    return infer?.options?.systemPrompt;
+  }
+
+  test("a Muse Spark session sends the rules, not just the base prompt", async () => {
+    const prompt = await promptSentFor("muse-spark-1.3-contributor");
+    expect(prompt).toContain("BASE PROMPT");
+    expect(prompt).toContain("Batch independent tool calls");
+    expect(prompt).toContain("Never re-read a file");
+  });
+
+  test("the rules ride at the tail, where they cannot disturb the cache prefix", async () => {
+    const prompt = await promptSentFor("muse-spark-1.3-contributor");
+    expect(prompt?.startsWith("BASE PROMPT")).toBe(true);
+  });
+
+  test("a family with no rules sends the prompt untouched", async () => {
+    expect(await promptSentFor("claude-sonnet-4")).toBe("BASE PROMPT");
+  });
+});
