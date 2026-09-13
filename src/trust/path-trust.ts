@@ -175,7 +175,7 @@ export async function revokePathPlugin(
 
 /**
  * One-shot migration: seed the global store from `settings.pluginPaths` when
- * no valid store file exists yet. Every registered entry that resolves to a
+ * the store file is missing (first launch). Every registered entry that resolves to a
  * plugin on disk is granted — pluginPaths lives in the user's global settings,
  * so each entry was put there by the user (add-by-path or a hand edit) and
  * registration is taken as consent at the moment the store is created, even
@@ -208,7 +208,9 @@ export async function migratePathTrustFromPluginPaths(
     return existing.store;
   }
   if (existing.state === "invalid") {
-    logger.warn`refusing path-trust migration from a corrupt store at ${pathTrustPath(home)}: delete the file to re-seed from settings.pluginPaths or re-consent through add-by-path`;
+    if (pluginPaths.length > 0) {
+      logger.warn`refusing path-trust migration from a corrupt store at ${pathTrustPath(home)}: delete the file to re-seed from settings.pluginPaths or re-consent through add-by-path`;
+    }
     return emptyStore();
   }
   if (pluginPaths.length === 0) {

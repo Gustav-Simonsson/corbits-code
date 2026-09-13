@@ -248,6 +248,7 @@ describe("path-trust (global)", () => {
 
       const plugin = join(home, "shared", "plugin");
       let resolveCalls = 0;
+      let migratedCalls = 0;
       const store = await migratePathTrustFromPluginPaths(
         [plugin],
         async (p) => {
@@ -255,10 +256,12 @@ describe("path-trust (global)", () => {
           return [p];
         },
         home,
+        { onMigrated: () => (migratedCalls += 1) },
       );
       expect(isPathPluginTrusted(store, plugin)).toBe(false);
       expect(store.trustedPluginPaths).toEqual([]);
       expect(resolveCalls).toBe(0);
+      expect(migratedCalls).toBe(0);
       expect((await readPathTrustStore(home)).state).toBe("invalid");
     } finally {
       await cleanup();
@@ -274,6 +277,7 @@ describe("path-trust (global)", () => {
 
       const plugin = join(home, "shared", "plugin");
       let resolveCalls = 0;
+      let migratedCalls = 0;
       const store = await migratePathTrustFromPluginPaths(
         [plugin],
         async (p) => {
@@ -281,10 +285,12 @@ describe("path-trust (global)", () => {
           return [p];
         },
         home,
+        { onMigrated: () => (migratedCalls += 1) },
       );
       expect(isPathPluginTrusted(store, plugin)).toBe(false);
       expect(store.trustedPluginPaths).toEqual([]);
       expect(resolveCalls).toBe(0);
+      expect(migratedCalls).toBe(0);
       expect((await readPathTrustStore(home)).state).toBe("invalid");
     } finally {
       await cleanup();
@@ -303,6 +309,7 @@ describe("path-trust (global)", () => {
       expect((await readPathTrustStore(home)).state).toBe("invalid");
 
       let resolveCalls = 0;
+      let migratedCalls = 0;
       const store = await migratePathTrustFromPluginPaths(
         [plugin],
         async (p) => {
@@ -310,10 +317,12 @@ describe("path-trust (global)", () => {
           return [p];
         },
         home,
+        { onMigrated: () => (migratedCalls += 1) },
       );
       expect(isPathPluginTrusted(store, plugin)).toBe(false);
       expect(store.trustedPluginPaths).toEqual([]);
       expect(resolveCalls).toBe(0);
+      expect(migratedCalls).toBe(0);
       expect((await readPathTrustStore(home)).state).toBe("invalid");
     } finally {
       await cleanup();
