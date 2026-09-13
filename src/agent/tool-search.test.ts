@@ -287,6 +287,36 @@ describe("createToolSearchTool", () => {
       "No tools matched",
     );
   });
+
+  test("mid-handshake search waits for a connecting server instead of reporting no match", async () => {
+    const live: ToolDefinition[] = [];
+    let resolveConnect!: () => void;
+    const connected = new Promise<void>((resolve) => {
+      resolveConnect = resolve;
+    });
+    const tool = createToolSearchTool({
+      search: (query) => createToolIndex(() => live).search(query),
+      lookup: (name) => live.find((def) => def.name === name),
+      promote: () => undefined,
+      awaitPendingConnections: async (timeoutMs = 50) => {
+        await Promise.race([
+          connected,
+          new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+        ]);
+        return live.length === 0 ? 1 : 0;
+      },
+    });
+    const pending = call(tool, { query: "linear tracker" });
+    live.push({
+      name: "mcp__linear__create_issue",
+      description: "Create an issue in the tracker",
+      inputSchema: { type: "object", properties: {}, required: [] },
+    });
+    resolveConnect();
+    const out = await pending;
+    expect(out).toContain("mcp__linear__create_issue");
+    expect(out).not.toContain("No tools matched");
+  });
 });
 
 describe("advertisedTools", () => {
