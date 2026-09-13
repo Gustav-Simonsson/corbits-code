@@ -1,6 +1,9 @@
 import { readFile, opendir, realpath, stat } from "node:fs/promises";
 import { resolve, isAbsolute } from "node:path";
-import { isSensitivePath } from "../plugins/secret-guard-plugin.js";
+import {
+  expandHome,
+  isSensitivePathResolved,
+} from "../plugins/secret-guard-plugin.js";
 
 const MAX_MENTION_FILE_BYTES = 200_000;
 const MAX_MENTION_TOTAL_BYTES = 400_000;
@@ -44,7 +47,8 @@ async function summarizeDir(abs: string): Promise<string> {
   return parts.length > 0 ? parts.join(", ") : "empty directory";
 }
 
-// An @mention is the operator directly asking the agent to read one path, once,
+// `~` expansion lives in secret-guard-plugin.ts (single owner); the comment
+// there documents the ordering. An @mention is the operator directly asking the agent to read one path, once,
 // right now — the same consent that already lets the agent read any workspace
 // file. There is no workspace-boundary check here: mentioning a path outside
 // the workspace inlines it exactly like a workspace path would, gated only by
@@ -75,14 +79,8 @@ export async function resolveAtMentions(
       });
       continue;
     }
-    if (path === "~" || path.startsWith("~/")) {
-      replacements.push({
-        full,
-        replacement: `${full} (blocked: home-relative paths are not supported)`,
-      });
-      continue;
-    }
-    if (isSensitivePath(path)) {
+    const expanded = expandHome(path);
+    if (isSensitivePathResolved(expanded)) {
       replacements.push({
         full,
         replacement: `${full} (blocked: sensitive path)`,
@@ -91,12 +89,14 @@ export async function resolveAtMentions(
     }
     let abs: string;
     try {
-      abs = await realpath(isAbsolute(path) ? path : resolve(cwd, path));
+      abs = await realpath(
+        isAbsolute(expanded) ? expanded : resolve(cwd, expanded),
+      );
     } catch {
       replacements.push({ full, replacement: `${full} (not found)` });
       continue;
     }
-    if (isSensitivePath(abs)) {
+    if (isSensitivePathResolved(abs)) {
       replacements.push({
         full,
         replacement: `${full} (blocked: sensitive path)`,

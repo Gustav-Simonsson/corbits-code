@@ -10,6 +10,7 @@ import {
   realpathNearestOr,
   UNRESOLVABLE,
 } from "../permission/path-restriction.js";
+import { buildCredentialPatterns } from "../auth/credential-surface.js";
 import { productMutationPaths } from "../agent/product-mutation-tools.js";
 import { looksLikePath } from "./path-escape-plugin.js";
 
@@ -88,6 +89,11 @@ const SENSITIVE_PATTERNS: RegExp[] = [
   /(^|\/)\.config\/gcloud\//,
   // Azure CLI's credential cache — the equivalent of ~/.aws/credentials.
   /(^|\/)\.azure\/(accessTokens|azureProfile)\.json$/,
+  // The product's own OAuth token stores and credential sidecars come from the
+  // auth-owned registry, not literals here, so a new store cannot drift off
+  // the denylist. settings.json/permissions.json keep their hand-written
+  // patterns above; the registry only adds their lock/temp sidecars.
+  ...buildCredentialPatterns(),
 ];
 
 export function isSensitivePath(value: string): boolean {
@@ -177,7 +183,7 @@ function isPathLikeShellToken(token: string): boolean {
 // resolves the home symlink instead of a (usually missing) cwd child.
 // classify.ts's outside-workspace rule would ask anyway; the expansion fixes
 // the *reason* (sensitive-path) rather than relying on that coincidence.
-function expandHome(token: string): string {
+export function expandHome(token: string): string {
   if (token === "~") return homedir();
   if (token.startsWith("~/")) return joinPath(homedir(), token.slice(2));
   return token;
