@@ -429,4 +429,89 @@ describe("pathEscapePlugin", () => {
       ).toEqual({ xpath: "src/index.ts" });
     });
   });
+
+  describe("spill URI sandbox (CL-6727)", () => {
+    test("pathEscapeBlockReason blocks a tool-output URI for a non-reader", () => {
+      const reason = pathEscapeBlockReason(
+        { path: "tool-output:///abc123" },
+        "/project",
+        () => [],
+        "grep",
+      );
+      expect(reason).toMatch(/tool-output/);
+    });
+
+    test("middleware blocks a non-reader tool-output call with no rejector plugin", async () => {
+      const plugin = pathEscapePlugin("/project");
+      const handler = plugin.middleware
+        ? plugin.middleware(nextHandler)
+        : nextHandler;
+      const result = await handler(
+        makeCall("grep", {
+          pattern: "foo",
+          path: "tool-output:///abc123",
+        }),
+        new AbortController().signal,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content).toMatch(/tool-output/);
+    });
+
+    test("read_file still passes a tool-output URI through", async () => {
+      expect(
+        pathEscapeBlockReason(
+          { path: "tool-output:///abc123" },
+          "/project",
+          () => [],
+          "read_file",
+        ),
+      ).toBeUndefined();
+      const plugin = pathEscapePlugin("/project");
+      const next = async (call: ToolCall): Promise<ToolResult> => ({
+        callId: call.id,
+        content: JSON.stringify(call.arguments),
+      });
+      const handler = plugin.middleware ? plugin.middleware(next) : next;
+      const result = await handler(
+        makeCall("read_file", { path: "tool-output:///abc123" }),
+        new AbortController().signal,
+      );
+      expect(result.isError).not.toBe(true);
+      const args = JSON.parse(String(result.content)) as { path: string };
+      expect(args.path).toBe("tool-output:///abc123");
+    });
+
+    test("archive refs pass for archive readers but not for other tools", async () => {
+      for (const name of ["read_file", "grep", "search_files"]) {
+        expect(
+          pathEscapeBlockReason(
+            { path: "archive:///occ-abc" },
+            "/project",
+            () => [],
+            name,
+          ),
+        ).toBeUndefined();
+      }
+      expect(
+        pathEscapeBlockReason(
+          { path: "archive:///occ-abc" },
+          "/project",
+          () => [],
+          "write_file",
+        ),
+      ).toMatch(/archive/);
+      const plugin = pathEscapePlugin("/project");
+      const handler = plugin.middleware
+        ? plugin.middleware(nextHandler)
+        : nextHandler;
+      const blocked = await handler(
+        makeCall("write_file", {
+          path: "archive:///occ-abc",
+          content: "hi",
+        }),
+        new AbortController().signal,
+      );
+      expect(blocked.isError).toBe(true);
+    });
+  });
 });
