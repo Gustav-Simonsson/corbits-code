@@ -495,6 +495,8 @@ export async function assembleTUISession(
   // Reload, interrupt, compaction continuation, and proxy deliver share one queue
   // so a rebuild never races an in-flight deliver.
   const sessionOps = createSessionOperationQueue();
+  // No resolveParkedCallId: the vendored reactor exposes no
+  // correlationId-to-call lookup, so the history heuristic is the path.
   const approvalResume = createApprovalResume({
     getAgent: () => state.currentAgent,
     captureGeneration: deliveryGeneration.capture,

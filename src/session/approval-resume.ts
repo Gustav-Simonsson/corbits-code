@@ -78,23 +78,24 @@ export function requestFromApprovalSnapshot(
 // along and match block.callId; without it the text-only scan stays as the
 // fallback so a genuinely late decision is still dropped.
 
-function settledAfterSuspend(
+function timeoutResultAfterSuspend(
   turns: Awaited<ReturnType<Agent["history"]>>,
   fromIndex: number,
   parkedCallId: string | undefined,
-): boolean {
-  return turns
-    .slice(fromIndex)
-    .flatMap((turn) => turn.content)
-    .some(
-      (block) =>
-        block.type === "tool_result" &&
-        (parkedCallId === undefined || block.callId === parkedCallId) &&
-        block.content.some(
-          (part) =>
-            part.type === "text" && part.text === APPROVAL_TIMEOUT_RESULT_TEXT,
-        ),
-    );
+): string | undefined {
+  for (const block of turns.slice(fromIndex).flatMap((turn) => turn.content)) {
+    if (
+      block.type === "tool_result" &&
+      (parkedCallId === undefined || block.callId === parkedCallId) &&
+      block.content.some(
+        (part) =>
+          part.type === "text" && part.text === APPROVAL_TIMEOUT_RESULT_TEXT,
+      )
+    ) {
+      return block.callId;
+    }
+  }
+  return undefined;
 }
 
 function stableArgs(value: unknown): string {
@@ -111,10 +112,18 @@ function stableArgs(value: unknown): string {
 
 // Derive this suspension's parked call id from history: the pre-watermark
 // tool_call matching the snapshot's name and arguments that has no tool
-// result anywhere yet. A parked call is neither run nor answered, so the only
-// unanswered match is this suspension's own call; a timed-out sibling is
-// answered by its timeout result and drops out of the candidates. Returns
-// undefined unless exactly one candidate matches.
+// result anywhere yet. A parked call is neither run nor answered, so an
+// unanswered match is normally this suspension's own call; a timed-out
+// sibling is answered by its timeout result and drops out of the candidates.
+// Returns undefined unless exactly one candidate matches.
+//
+// Known limitation: identical name+args twins are ambiguous. When this
+// suspension's own timeout fires while an identical twin sits unanswered,
+// the twin is the exact-one survivor, so the settled check misses and the
+// late decision is delivered instead of dropped. The sibling-timeout mirror
+// (identical args, sibling answered) still resolves to the live call and
+// delivers. Telling identical twins apart needs the resolveParkedCallId
+// lookup below; the history heuristic cannot do it.
 function parkedCallIdFromHistory(
   turns: Awaited<ReturnType<Agent["history"]>>,
   fromIndex: number,
@@ -193,6 +202,14 @@ export function createApprovalResume(args: {
   // the minted correlationId, so this is what ties them together. Takes
   // precedence over the history derivation below; absent callers fall back
   // to it.
+  //
+  // Heuristic-only in production: neither the exec nor the TUI caller wires
+  // this, because the vendored reactor surface ({ start, deliver, abort })
+  // exposes no correlationId-to-call lookup (see
+  // permission/decline-markers.ts), and the suspension snapshot carries
+  // name+arguments without the call id. Wire this if upstream ever exports
+  // the pending-operation lookup; until then the history derivation is the
+  // live path.
   resolveParkedCallId?: (correlationId: string) => string | undefined;
   gate: PermissionGate;
 }): ApprovalResume {
@@ -290,11 +307,18 @@ export function createApprovalResume(args: {
         const parkedCallId =
           args.resolveParkedCallId?.(correlationId) ??
           parkedCallIdFromHistory(history, turnsAtSuspend, approvalSnapshot);
-        if (settledAfterSuspend(history, turnsAtSuspend, parkedCallId)) {
+        const matchedTimeoutCallId = timeoutResultAfterSuspend(
+          history,
+          turnsAtSuspend,
+          parkedCallId,
+        );
+        if (matchedTimeoutCallId !== undefined) {
           // The reactor already answered the parked call (its approval timeout
           // fired while the surface was still up). Delivering now would append
           // the raw decision JSON as an uncorrelated user turn — drop and log.
-          logger.warn`late approval decision dropped correlation=${correlationId} outcome=${outcome?.allow === true ? "approved" : "rejected"}`;
+          // The matched call id rides along so a fallback drop (parkedCallId
+          // undefined) can still be attributed to the timeout that caused it.
+          logger.warn`late approval decision dropped correlation=${correlationId} timeoutCall=${matchedTimeoutCallId} outcome=${outcome?.allow === true ? "approved" : "rejected"}`;
           return true;
         }
         if (outcome === undefined || !outcome.allow) {

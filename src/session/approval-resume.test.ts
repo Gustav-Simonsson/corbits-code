@@ -165,4 +165,48 @@ describe("approval-resume parallel-parked approvals", () => {
     expect(deliveredCorrelationId(message)).toBe("corr-A");
     expect(decisionBody(message).outcome).toBe("approved");
   });
+
+  test("identical name+args twin: sibling timeout still delivers", async () => {
+    const { resume, delivered } = setup({
+      preTurns: [
+        assistantTurn([
+          { id: "call-A", name: "run_shell", command: "echo same" },
+          { id: "call-B", name: "run_shell", command: "echo same" },
+        ]),
+      ],
+      onGate: (turns) => {
+        turns.push(timeoutTurn("call-B"));
+      },
+    });
+
+    const handled = await resume.handle(suspension("corr-A", "echo same"));
+
+    expect(handled).toBe(true);
+    expect(delivered).toHaveLength(1);
+  });
+
+  // Known limitation of the exact-one history derivation: with identical
+  // name+args twins, the answered own call drops out of the candidates and
+  // the derivation resolves to the unanswered twin, so the settled check
+  // misses and the genuinely-late decision is delivered. Telling the twins
+  // apart needs the resolveParkedCallId lookup; this test locks the current
+  // shape so a future fix can flip it to a drop.
+  test("identical name+args twin: own timeout with unanswered twin delivers", async () => {
+    const { resume, delivered } = setup({
+      preTurns: [
+        assistantTurn([
+          { id: "call-A", name: "run_shell", command: "echo same" },
+          { id: "call-B", name: "run_shell", command: "echo same" },
+        ]),
+      ],
+      onGate: (turns) => {
+        turns.push(timeoutTurn("call-A"));
+      },
+    });
+
+    const handled = await resume.handle(suspension("corr-A", "echo same"));
+
+    expect(handled).toBe(true);
+    expect(delivered).toHaveLength(1);
+  });
 });
