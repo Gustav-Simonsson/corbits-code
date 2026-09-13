@@ -299,6 +299,13 @@ export function resolveExecDirectorOverlayForPackage(
     allow !== undefined && allow.length > 0
       ? allow.filter((name) => !deny.includes(name))
       : undefined;
+  if (allowed !== undefined && allowed.length === 0) {
+    throw new Error(
+      `Director package "${pkg.id}" tools.allow minus tools.deny is empty — ` +
+        "exec overlays enforce a closed allow list, so no tool would be " +
+        "advertised. Keep an allow entry outside tools.deny.",
+    );
+  }
   const advertisedAllow =
     allowed !== undefined
       ? pkg.spawn.maySpawn
@@ -391,13 +398,14 @@ export function createExecToolCallGate(
 
 export function createExecToolPromoter(args: {
   activate: (names: readonly string[]) => boolean;
+  isAllowed: (name: string) => boolean;
   currentDefinitions: () => readonly ToolDefinition[];
   computeAdvertised: (all: readonly ToolDefinition[]) => ToolDefinition[];
   updateDirectorTools: (defs: ToolDefinition[]) => void;
   persist?: () => void;
 }): (names: string[]) => void {
   return (names) => {
-    if (!args.activate(names)) return;
+    if (!args.activate(names.filter((name) => args.isAllowed(name)))) return;
     args.updateDirectorTools(args.computeAdvertised(args.currentDefinitions()));
     args.persist?.();
   };
@@ -880,10 +888,8 @@ export async function runExec(config: Config): Promise<ExecResult> {
     // names, so outside-allow tools can never become advertised or callable.
     agentToolset.setToolPromoter(
       createExecToolPromoter({
-        activate: (names) =>
-          activatedToolNames.activate(
-            names.filter((name) => isExecOverlayToolAllowed(overlay, name)),
-          ),
+        activate: (names) => activatedToolNames.activate(names),
+        isAllowed: (name) => isExecOverlayToolAllowed(overlay, name),
         currentDefinitions: () =>
           agentToolset.dynamicRunner.currentDefinitions(),
         computeAdvertised,

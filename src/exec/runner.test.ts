@@ -44,6 +44,14 @@ describe("exec director allowlist", () => {
     ]);
   });
 
+  test("an allow that deny empties is rejected loudly", () => {
+    const pkg = {
+      ...DIRECTOR_REGISTRY.explorer,
+      tools: { allow: ["run_shell"], deny: ["run_shell"] },
+    };
+    expect(() => resolveExecDirectorOverlayForPackage(pkg)).toThrow(/empty/);
+  });
+
   test("a deny-only package config is rejected loudly", () => {
     const pkg = {
       ...DIRECTOR_REGISTRY.explorer,
@@ -63,10 +71,8 @@ describe("exec director allowlist", () => {
         builtInPrefix: overlay.advertisedAllow,
       });
     const promote = createExecToolPromoter({
-      activate: (names) =>
-        activated.activate(
-          names.filter((name) => isExecOverlayToolAllowed(overlay, name)),
-        ),
+      activate: (names) => activated.activate(names),
+      isAllowed: (name) => isExecOverlayToolAllowed(overlay, name),
       currentDefinitions: () => [],
       computeAdvertised,
       updateDirectorTools: () => undefined,
@@ -77,6 +83,30 @@ describe("exec director allowlist", () => {
     expect(
       createExecToolCallGate(isAdvertised, { isCodex: false })(OUTSIDE_ALLOW),
     ).toBe(false);
+  });
+
+  test("the promoter gates allow itself — a raw activate caller gets no bypass", () => {
+    const overlay = resolveExecDirectorOverlay("explorer");
+    const { activated, computeAdvertised } = createAdvertisedToolset({
+      sessionMode: "orchestrator",
+      toolAvailability: { languageServerAvailable: true },
+      getProvider: () => ({ providerName: "test", model: "test-model" }),
+      builtInPrefix: overlay.advertisedAllow,
+    });
+    let advertisedCount = 0;
+    const promote = createExecToolPromoter({
+      activate: (names) => activated.activate(names),
+      isAllowed: (name) => isExecOverlayToolAllowed(overlay, name),
+      currentDefinitions: () => [],
+      computeAdvertised,
+      updateDirectorTools: () => {
+        advertisedCount += 1;
+      },
+    });
+    promote([OUTSIDE_ALLOW, "read_file"]);
+    expect(activated.has(OUTSIDE_ALLOW)).toBe(false);
+    expect(activated.has("read_file")).toBe(true);
+    expect(advertisedCount).toBe(1);
   });
 
   test("skywalker overlay leaves every tool allowed", () => {

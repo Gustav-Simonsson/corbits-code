@@ -784,6 +784,7 @@ describe("exec tool call gate and promoter", () => {
     const directorNames: string[][] = [];
     const promote = createExecToolPromoter({
       activate: (names) => activated.activate(names),
+      isAllowed: () => true,
       currentDefinitions: () => runner.currentDefinitions(),
       computeAdvertised,
       updateDirectorTools: (defs) => {
