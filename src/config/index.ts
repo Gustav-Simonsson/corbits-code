@@ -1221,15 +1221,19 @@ export function mergeOAuthCatalog(
   const settingsRows = buildProviderCatalog(settings, resolved);
   // A hand-named codex/<slug> or xai/<slug> API-key row is the operator's
   // explicit config, not an OAuth placeholder: keep it and skip the colliding
-  // live profile projection instead of overwriting it (CL-6728).
+  // live profile projection instead of overwriting it (CL-6728). Read the raw
+  // settings rows only: buildProviderCatalog synthesizes a [resolved] row when
+  // settings is null/empty, and when resolved is itself codex/<slug> that row
+  // carries the live apiKey with no profile marker — treating it as hand-named
+  // would eject the real marked entry for a stale token snapshot.
   const handNamed = new Set(
-    settingsRows
+    Object.entries(settings?.providers ?? {})
       .filter(
-        (e) =>
-          (isCodexProviderName(e.name) || isXaiProviderName(e.name)) &&
-          isHandNamedProviderEntry(e),
+        ([name, provider]) =>
+          (isCodexProviderName(name) || isXaiProviderName(name)) &&
+          isHandNamedProviderEntry(provider),
       )
-      .map((e) => e.name),
+      .map(([name]) => name),
   );
   return [
     ...settingsRows.filter(
