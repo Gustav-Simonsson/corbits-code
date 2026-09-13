@@ -135,7 +135,7 @@ function applyPersistedOAuthDefaults(
 // OAuth entries in settings.json carry no credentials; they are only usable
 // while a matching auth-store profile exists. Drop orphans in memory so a
 // removed profile does not pin resolution to an unauthenticatable provider.
-function dropOrphanedOAuthEntries(
+export function dropOrphanedOAuthEntries(
   settings: Settings | null,
   projected: Record<string, ProviderSettings>,
 ): Settings | null {
@@ -155,6 +155,22 @@ function dropOrphanedOAuthEntries(
     providers[defaultProvider] !== undefined
       ? { defaultProvider }
       : {}),
+  };
+}
+
+// Overlay live OAuth profile projections onto settings for runtime provider
+// resolution. Exported for tests; loadConfig is the only production caller.
+export function overlayOAuthProjections(
+  settings: Settings | null,
+  projected: Record<string, ProviderSettings>,
+): Settings | null {
+  if (Object.keys(projected).length === 0) return settings;
+  return {
+    ...(settings ?? { providers: {} }),
+    providers: {
+      ...(settings?.providers ?? {}),
+      ...projected,
+    },
   };
 }
 
@@ -936,16 +952,10 @@ export async function loadConfig(
   const liveSettings = useOAuthProfiles
     ? dropOrphanedOAuthEntries(settings, projectedOAuthProviders)
     : settings;
-  const settingsForResolution: Settings | null =
-    Object.keys(projectedOAuthProviders).length > 0
-      ? {
-          ...(liveSettings ?? { providers: {} }),
-          providers: {
-            ...(liveSettings?.providers ?? {}),
-            ...projectedOAuthProviders,
-          },
-        }
-      : liveSettings;
+  const settingsForResolution: Settings | null = overlayOAuthProjections(
+    liveSettings,
+    projectedOAuthProviders,
+  );
 
   // The per-repo selection file still applies on top of a --config source: that
   // file supplies provider definitions, while .corbits/settings.json supplies
