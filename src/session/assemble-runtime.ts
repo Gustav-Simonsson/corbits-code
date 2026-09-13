@@ -48,6 +48,7 @@ import {
   type ToolAvailability,
 } from "../agent/tool-search.js";
 import { normalizeToolDefinitionsForProvider } from "../agent/tool-schema-normalize.js";
+import { resolveModelFamilyPolicy } from "../agent/model-family-policy.js";
 import { createChatDirector, type ChatDirector } from "../agent/director.js";
 import { createDoomLoopCorrectiveNote } from "../agent/doom-loop-note.js";
 import type { Task } from "../agent/tasks.js";
@@ -369,17 +370,42 @@ export function createAdvertisedToolset(args: {
   ];
   const activated = createActivatedToolTracker();
   // Advertise then family-gate wire schemas (kimi gets a non-recursive present).
+  // The primary session is always the orchestrator (SessionMode is the single
+  // literal "orchestrator"), so orchestrator: true is passed directly instead
+  // of comparing against sessionMode — the comparison was always true and the
+  // deny always [], an unexecuted committed claim. Leaf gating lives at the
+  // worker mount in subagent/run.ts, which resolves the same policy with the
+  // leaf's provider and its own orchestrator flag.
+  // use_skill is never denied — leaves load brief-named skills by exact name.
+  const deniedFor = (provider: {
+    providerName: string;
+    model: string;
+  }): readonly string[] =>
+    resolveModelFamilyPolicy({
+      providerName: provider.providerName,
+      model: provider.model,
+      orchestrator: true,
+    }).advertisedToolDeny;
   const computeAdvertised = (
     all: readonly ToolDefinition[],
-  ): ToolDefinition[] =>
-    normalizeToolDefinitionsForProvider(
-      advertisedTools(all, activated.list(), prefix),
+  ): ToolDefinition[] => {
+    const provider = args.getProvider();
+    const denied = deniedFor(provider);
+    const gatedPrefix =
+      denied.length === 0
+        ? prefix
+        : prefix.filter((name) => !denied.includes(name));
+    return normalizeToolDefinitionsForProvider(
+      advertisedTools(all, activated.list(), gatedPrefix),
       {
-        ...args.getProvider(),
+        ...provider,
       },
     );
-  const isAdvertised = (name: string): boolean =>
-    prefix.includes(name) || activated.has(name);
+  };
+  const isAdvertised = (name: string): boolean => {
+    if (deniedFor(args.getProvider()).includes(name)) return false;
+    return prefix.includes(name) || activated.has(name);
+  };
   return { activated, computeAdvertised, isAdvertised };
 }
 

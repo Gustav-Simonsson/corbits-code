@@ -107,6 +107,9 @@ import type { CapabilityFilter } from "../agent/profiles.js";
 import type { Settings } from "../config/settings.js";
 import { toolWatchdogFromSettings } from "../config/settings.js";
 import { createSearchAgentsTool } from "../agent/agent-search.js";
+import { createSkillSearchTool } from "../agent/skill-search.js";
+import { createUseSkillTool } from "../agent/use-skill.js";
+import { discoverSkills } from "../extensions/skills.js";
 import {
   createManageTasksRunner,
   manageTasksDefinition,
@@ -719,6 +722,42 @@ async function runSubAgentInner(
       }),
     ];
 
+    // Worker skill mounts, family-gated (CL-7668): grok/kimi leaves omit
+    // skill_search and load brief-named skills straight through use_skill,
+    // which is never denied. Scoped to the dispatch's allowedSkillNames
+    // (pkg.optionalSkills). Mounted before the capability filter so worker
+    // allowlists keep them like any other named tool; the scope cannot
+    // widen — use_skill refuses names outside the allowlist.
+    // Resolved here (not below with the director wiring) so the mount itself
+    // executes the deny; toolNames/prompt derivation below inherits it.
+    const modelFamilyPolicy = resolveModelFamilyPolicy({
+      providerName: params.provider.providerName,
+      model: params.provider.model,
+      orchestrator: params.orchestrator === true,
+    });
+    const skillSnapshot = await discoverSkills(params.cwd);
+    const skillSearchDenied =
+      modelFamilyPolicy.advertisedToolDeny.includes("skill_search");
+    tools = [
+      ...tools,
+      ...(skillSearchDenied
+        ? []
+        : [
+            createSkillSearchTool({
+              skills: skillSnapshot,
+              ...(params.allowedSkillNames !== undefined
+                ? { allowedNames: params.allowedSkillNames }
+                : {}),
+            }),
+          ]),
+      createUseSkillTool(
+        params.cwd,
+        [],
+        liveTelemetry,
+        params.allowedSkillNames,
+      ),
+    ];
+
     if (params.capabilities !== undefined) {
       tools = applyCapabilityFilter(tools, params.capabilities);
     }
@@ -967,11 +1006,9 @@ async function runSubAgentInner(
       });
     };
 
-    const modelFamilyPolicy = resolveModelFamilyPolicy({
-      providerName: params.provider.providerName,
-      model: params.provider.model,
-      orchestrator: params.orchestrator === true,
-    });
+    // modelFamilyPolicy is resolved above at the skill mount so the
+    // grok/kimi skill_search deny executes there; reused here for stall
+    // timing and wire-schema normalization.
 
     // Family-gate wire schemas the same way main sessions do (kimi present rewrite).
     // Sub-agent toolsets currently omit `present` (main-session only); normalize is

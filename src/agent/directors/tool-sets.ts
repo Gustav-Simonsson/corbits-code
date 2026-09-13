@@ -1,10 +1,14 @@
 // Small, explicit tool allowlists for director packages.
 // Prefer tools.allow at mount (CapabilityFilter include) over huge deny lists.
 // manage_tasks is always mounted by runSubAgent after the filter — omit it here.
-// use_skill / tool_search / ask_operator are primary-session tools: fleet agents /
-// workers do not mount ask_operator (skill guidance is baked into package system prompts).
+// skill_search + use_skill mount on every worker, scoped at mount to the
+// dispatch's optionalSkills. ask_operator stays primary-session-only: workers
+// never mount it (Do not #1).
 
-/** Read/search/shell — no product mutation. */
+/** Skill discovery + loading — mounted on every worker surface below. */
+export const SKILL_TOOLS = ["skill_search", "use_skill"] as const;
+
+/** Read/search/shell + skill tools — no product mutation. */
 export const READ_TOOLS = [
   "read_file",
   "grep",
@@ -15,6 +19,7 @@ export const READ_TOOLS = [
   "shell_collect",
   "web_fetch",
   "web_search",
+  ...SKILL_TOOLS,
 ] as const;
 
 /**
@@ -60,7 +65,7 @@ export const DOCS_TOOLS = [
   "update_plan",
 ] as const;
 
-/** Review / counsel: read surface + path writes (lane discipline in prompts). */
+/** Review / counsel: read surface + path writes (skill tools arrive via READ_TOOLS; lane discipline in prompts). */
 export const REVIEW_TOOLS = [...READ_TOOLS, ...PRODUCT_WRITE_TOOLS] as const;
 
 /** Mechanical intern: shell-first + path writes when the brief requires them. */
@@ -69,6 +74,7 @@ export const INTERN_TOOLS = [
   "read_file",
   "list_dir",
   ...PRODUCT_WRITE_TOOLS,
+  ...SKILL_TOOLS,
 ] as const;
 
 /**

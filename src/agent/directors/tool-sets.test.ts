@@ -7,6 +7,7 @@ import {
   READ_TOOLS,
   REVIEW_TOOLS,
   INTERN_TOOLS,
+  SKILL_TOOLS,
   SKYWALKER_TOOLS,
 } from "./tool-sets.js";
 
@@ -92,11 +93,36 @@ describe("SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
     );
   });
 
-  test("skill_search is not on Skywalker or worker orchestrator allowlists", () => {
-    expect(SKYWALKER_TOOLS as readonly string[]).not.toContain("skill_search");
-    expect(ORCHESTRATOR_TOOLS as readonly string[]).not.toContain(
-      "skill_search",
-    );
+  test("skill_search + use_skill mount on every worker surface, never ask_operator", () => {
+    expect([...SKILL_TOOLS]).toEqual(["skill_search", "use_skill"]);
+    for (const surface of [
+      READ_TOOLS,
+      BUILD_TOOLS,
+      DOCS_TOOLS,
+      REVIEW_TOOLS,
+      INTERN_TOOLS,
+      ORCHESTRATOR_TOOLS,
+      SKYWALKER_TOOLS,
+    ] as const) {
+      expect(surface as readonly string[]).toContain("skill_search");
+      expect(surface as readonly string[]).toContain("use_skill");
+      expect(surface as readonly string[]).not.toContain("ask_operator");
+    }
+  });
+
+  test("no surface lists a tool twice (SKILL_TOOLS spread once via READ_TOOLS)", () => {
+    for (const surface of [
+      READ_TOOLS,
+      BUILD_TOOLS,
+      DOCS_TOOLS,
+      REVIEW_TOOLS,
+      INTERN_TOOLS,
+      ORCHESTRATOR_TOOLS,
+      SKYWALKER_TOOLS,
+    ] as const) {
+      const names = surface as readonly string[];
+      expect(new Set(names).size).toBe(names.length);
+    }
   });
 });
 
