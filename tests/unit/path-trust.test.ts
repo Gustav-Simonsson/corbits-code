@@ -278,6 +278,35 @@ describe("path-trust (global)", () => {
     }
   });
 
+  test("revoke then corrupt: migration refuses to re-grant and leaves the store invalid", async () => {
+    const { home, cleanup } = await scratch();
+    try {
+      const plugin = join(home, "shared", "plugin");
+      await trustPathPlugin(plugin, home);
+      await revokePathPlugin(plugin, home);
+      expect((await readPathTrustStore(home)).state).toBe("valid");
+
+      await writeStoreFile(home, "{not json");
+      expect((await readPathTrustStore(home)).state).toBe("invalid");
+
+      let resolveCalls = 0;
+      const store = await migratePathTrustFromPluginPaths(
+        [plugin],
+        async (p) => {
+          resolveCalls += 1;
+          return [p];
+        },
+        home,
+      );
+      expect(isPathPluginTrusted(store, plugin)).toBe(false);
+      expect(store.trustedPluginPaths).toEqual([]);
+      expect(resolveCalls).toBe(0);
+      expect((await readPathTrustStore(home)).state).toBe("invalid");
+    } finally {
+      await cleanup();
+    }
+  });
+
   test("non-absolute stored entries are rejected at load", async () => {
     const { home, cleanup } = await scratch();
     try {
