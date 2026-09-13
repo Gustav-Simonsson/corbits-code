@@ -55,31 +55,71 @@ function escapeArgs(
     const reason = pathEscapeBlockReason(args, cwd, rootsProvider);
     if (reason !== undefined) throw new Error(reason);
   }
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === "string" && looksLikePath(key)) {
-      out[key] = sanitizePath(value, cwd, rootsProvider, allowOutside);
-    } else {
-      out[key] = value;
-    }
-  }
-  return out;
+  return escapeValue(args, cwd, rootsProvider, allowOutside) as Record<
+    string,
+    unknown
+  >;
 }
 
+function escapeValue(
+  value: unknown,
+  cwd: string,
+  rootsProvider: RootsProvider,
+  allowOutside: boolean,
+  key?: string,
+): unknown {
+  if (typeof value === "string") {
+    return key !== undefined && looksLikePath(key)
+      ? sanitizePath(value, cwd, rootsProvider, allowOutside)
+      : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) =>
+      escapeValue(entry, cwd, rootsProvider, allowOutside, key),
+    );
+  }
+  if (typeof value === "object" && value !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [entryKey, entryValue] of Object.entries(value)) {
+      out[entryKey] = escapeValue(
+        entryValue,
+        cwd,
+        rootsProvider,
+        allowOutside,
+        entryKey,
+      );
+    }
+    return out;
+  }
+  return value;
+}
+
+// Explicit allowlist of argument keys treated as filesystem paths. Keys are
+// matched case- and separator-insensitively, so `filePath`, `FILE_PATH`,
+// and `file-path` all count alongside `file_path`; any key ending in
+// `path`/`paths` (e.g. `somepath`, `outputPaths`) counts too. Anything else
+// passes through untouched by design: MCP and custom tools may use arbitrary
+// keys whose values only their server interprets, so unknown keys are that
+// server's contract, not this sandbox's.
 export function looksLikePath(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[-_]/g, "");
   return (
-    key === "path" ||
-    key === "file_path" ||
-    key === "target" ||
-    key === "cwd" ||
-    key === "directory" ||
-    key === "dir" ||
-    key === "dest" ||
-    key === "source" ||
-    key === "from" ||
-    key === "to" ||
-    key === "filename" ||
-    key.endsWith("Path")
+    normalized === "path" ||
+    normalized === "paths" ||
+    normalized === "filepath" ||
+    normalized === "filepaths" ||
+    normalized === "target" ||
+    normalized === "cwd" ||
+    normalized === "directory" ||
+    normalized === "dir" ||
+    normalized === "dest" ||
+    normalized === "source" ||
+    normalized === "from" ||
+    normalized === "to" ||
+    normalized === "filename" ||
+    normalized === "filenames" ||
+    normalized.endsWith("path") ||
+    normalized.endsWith("paths")
   );
 }
 
@@ -91,11 +131,34 @@ export function pathEscapeBlockReason(
   cwd: string,
   rootsProvider: RootsProvider = () => [],
 ): string | undefined {
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value !== "string" || !looksLikePath(key)) continue;
-    if (isToolOutputLike(value) || isArchiveLike(value)) continue;
+  return blockReasonFor(args, cwd, rootsProvider);
+}
+
+function blockReasonFor(
+  value: unknown,
+  cwd: string,
+  rootsProvider: RootsProvider,
+  key?: string,
+): string | undefined {
+  if (typeof value === "string") {
+    if (key === undefined || !looksLikePath(key)) return undefined;
+    if (isToolOutputLike(value) || isArchiveLike(value)) return undefined;
     if (resolveWorkspacePath(cwd, value, rootsProvider) === undefined) {
       return `Path escapes working directory: ${value}`;
+    }
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const reason = blockReasonFor(entry, cwd, rootsProvider, key);
+      if (reason !== undefined) return reason;
+    }
+    return undefined;
+  }
+  if (typeof value === "object" && value !== null) {
+    for (const [entryKey, entryValue] of Object.entries(value)) {
+      const reason = blockReasonFor(entryValue, cwd, rootsProvider, entryKey);
+      if (reason !== undefined) return reason;
     }
   }
   return undefined;
