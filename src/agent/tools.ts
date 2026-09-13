@@ -19,6 +19,7 @@ import { advertiseEditFileLineRange } from "../plugins/edit-file-line-range.js";
 import { advertiseArchiveSurface } from "../plugins/evidence-archive-search-plugin.js";
 import type { Telemetry } from "../telemetry/index.js";
 import type { PermissionGate } from "../permission/gate.js";
+import { createWorktreeRootsProvider } from "../permission/worktree-roots.js";
 import { buildCorePosixToolPlugins } from "./posix-tool-plugins.js";
 import { createLazyBlobReader } from "./lazy-blob-reader.js";
 import type { BlobReader } from "@intx/types/runtime";
@@ -583,6 +584,7 @@ export async function createAgentToolset(
     }),
     createListDirTool(cwd, {
       allowOutside: () => permissionGate.getSkipPermissions(),
+      rootsProvider: createWorktreeRootsProvider(cwd),
     }),
     createUseSkillTool(cwd, skillDirs, args.telemetry),
     createSkillSearchTool({ skills }),

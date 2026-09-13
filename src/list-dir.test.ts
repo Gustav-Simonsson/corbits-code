@@ -1,11 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import {
-  mkdtemp,
-  mkdir,
-  realpath,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { listDirectory } from "./util/list-dir.js";

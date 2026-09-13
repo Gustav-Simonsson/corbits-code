@@ -1,8 +1,10 @@
-import { lstat, readFile, realpath, unlink } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { lstat, readFile, unlink } from "node:fs/promises";
+import { resolve } from "node:path";
 import { type } from "arktype";
 import type { ExtraTool, ToolPlugin } from "@intx/tools-posix";
 import type { ToolCall, ToolResult } from "@intx/types/runtime";
+import { resolveWorkspacePath } from "../permission/path-restriction.js";
+import type { RootsProvider } from "../permission/worktree-roots.js";
 import { formatChangeDiff } from "./change-diff.js";
 
 const DeleteFileArgs = type({ path: "string>0" });
@@ -43,19 +45,14 @@ function failureDetail(error: unknown): string {
   return code === undefined ? error.message : `${code}: ${error.message}`;
 }
 
-function isWithin(root: string, path: string): boolean {
-  const rel = relative(root, path);
-  return (
-    rel === "" ||
-    (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-  );
-}
-
 export interface DeleteFilePluginOptions {
   // When true (yolo / --dangerously-skip-permissions), delete outside the
   // working directory. A getter is resolved per call so `/yolo` mid-session
   // takes effect without rebuilding the plugin stack.
   allowOutside?: boolean | (() => boolean);
+  // Workspace roots beyond cwd (the session's registered git worktrees).
+  // Defaults to cwd alone.
+  rootsProvider?: RootsProvider;
 }
 
 function resolveAllowOutside(
@@ -84,18 +81,24 @@ export function deleteFilePlugin(
       }
 
       const allowOutside = resolveAllowOutside(options.allowOutside);
+      // Containment is delegated to the shared workspace resolver, which
+      // realpaths the session root before comparing and admits registered
+      // sibling worktree roots — the same boundary pathEscapePlugin enforces.
+      if (
+        !allowOutside &&
+        resolveWorkspacePath(
+          cwd,
+          args.path,
+          options.rootsProvider ?? (() => []),
+        ) === undefined
+      ) {
+        return errorResult(
+          call.id,
+          `${args.path} resolves outside the working directory`,
+        );
+      }
       const target = resolve(cwd, args.path);
       try {
-        const [physicalRoot, physicalParent] = await Promise.all([
-          realpath(cwd),
-          realpath(dirname(target)),
-        ]);
-        if (!allowOutside && !isWithin(physicalRoot, physicalParent)) {
-          return errorResult(
-            call.id,
-            `${args.path} resolves outside the working directory`,
-          );
-        }
         const info = await lstat(target);
         if (info.isDirectory()) {
           return errorResult(
