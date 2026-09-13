@@ -1,11 +1,11 @@
 /**
  * URL click-through (CL-7346): Ctrl+click opens http(s) URLs in the
- * transcript's plain and structured text rows, and holding Ctrl over one
- * highlights it first.
- *
- * Markdown prose is out of scope: the library paints it through childless
- * code renderers with no stable text-leaf API to arm or hit-test, so
- * assistant-message links stay terminal business for now (see docs/TUI.md).
+ * transcript. Plain and structured rows are armed per node (armLinkLine):
+ * holding Ctrl over a link highlights it, press-and-release on the same URL
+ * opens it. Assistant markdown paints through childless library renderers
+ * with no node to arm, so it is covered by a bubbling handler on the
+ * transcript root (armMarkdownLinks) that resolves clicks through the
+ * renderer's getLinkAt link map — click-to-open only, no hover highlight.
  *
  * The gesture is modifier-gated end to end. Without the modifier nothing here
  * runs: rows keep today's expand and selection behavior, and with mouse
@@ -22,6 +22,7 @@ import {
   underline as underlineChunk,
   type CliRenderer,
   type MouseEvent,
+  type Renderable,
   type TextChunk,
 } from "@opentui/core";
 import { stringWidth } from "./view/height.js";
@@ -556,8 +557,16 @@ export function armLinkLine(
   node.onMouseUp = (event) => {
     const start = press;
     press = null;
-    if (start !== null && isUrlOpenClick(event) && at(event) === start)
+    if (start !== null && isUrlOpenClick(event) && at(event) === start) {
       openUrl(start);
+      // Armed rows register in the same link map getLinkAt reads, so the
+      // leaf's open would otherwise be repeated by the transcript-root
+      // armMarkdownLinks handler this event bubbles to. This handler runs
+      // first in the bubble; stopping propagation starves the root of the
+      // release and keeps exactly one open per gesture. The press
+      // deliberately keeps bubbling so drag-select still works.
+      event.stopPropagation();
+    }
   };
   node.onMouseOver = (event) => {
     if (event.modifiers.ctrl !== true) return;
@@ -585,4 +594,35 @@ export function armLinkLine(
 
 export function isUnderlined(attributes: number): boolean {
   return (attributes & TextAttributes.UNDERLINE) !== 0;
+}
+
+/**
+ * Arm a transcript ancestor as the markdown click target: mouse events bubble
+ * up from the hit leaf, and markdown blocks paint through childless library
+ * renderers with no node of ours to arm, so this ancestor handler is the only
+ * hook that sees their clicks. Ctrl+press stores the link under the pointer
+ * (getLinkAt reads the same terminal-absolute coordinates events carry); the
+ * open fires on release only over the same URL, so a press on a link that
+ * drags away never opens. Armed rows stop propagation after opening
+ * themselves, so a click there still opens exactly once; everything goes
+ * through openUrl, which gates to http(s) — markdown links can carry any
+ * scheme and getLinkAt hands the raw target back.
+ */
+export function armMarkdownLinks(
+  target: Renderable,
+  renderer: CliRenderer,
+): void {
+  let press: string | null = null;
+  target.onMouseDown = (event) => {
+    press = isUrlOpenClick(event) ? renderer.getLinkAt(event.x, event.y) : null;
+  };
+  target.onMouseUp = (event) => {
+    const start = press;
+    press = null;
+    if (start === null || !isUrlOpenClick(event)) return;
+    if (renderer.getLinkAt(event.x, event.y) === start) openUrl(start);
+  };
+  target.onMouseOut = () => {
+    press = null;
+  };
 }

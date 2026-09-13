@@ -844,10 +844,12 @@ url.dll,FileProtocolHandler` — argv spawns, never through a shell).
     the existing capture; the pickers and setup screens stay opted out.
   - Wrapped URLs resolve whole: a URL broken across continuation lines
     highlights and opens as the one target from any of its fragments.
-  - Markdown prose (assistant messages) is not covered: the renderer paints
-    it through childless code renderers with no stable text-leaf API to
-    highlight or hit-test, so those links stay terminal business until the
-    library exposes one.
+  - Markdown prose (assistant messages) is click-to-open only: the renderer
+    paints it through childless code renderers with no node to arm, so there
+    is no hover underline. A bubbling handler on the transcript root resolves
+    the click through the renderer's `getLinkAt` link map (OpenTUI 0.5.11+)
+    and opens on press-and-release over the same URL — armed rows keep their
+    hover underline and open through their own node handlers.
 
 Arrow keys never scroll anything — inside the prompt they are caret motion
 or, at the buffer's edges, prompt-history recall; inside an open overlay's
