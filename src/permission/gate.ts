@@ -22,7 +22,7 @@ import {
 } from "./auto-shell-policy.js";
 import { commandReferencesSensitivePath } from "../plugins/secret-guard-plugin.js";
 import {
-  looksLikePath,
+  normalizePathArguments,
   pathEscapeBlockReason,
 } from "../plugins/path-escape-plugin.js";
 import { runShellAuthzBlockReason } from "../shell/run-shell-authz.js";
@@ -38,10 +38,7 @@ import {
   tokenize,
   stripCommentLines,
 } from "./command.js";
-import {
-  createPathRestriction,
-  resolveWorkspacePath,
-} from "./path-restriction.js";
+import { createPathRestriction } from "./path-restriction.js";
 import {
   createWorktreeRootsProvider,
   type RootsProvider,
@@ -475,23 +472,15 @@ function canSafelyMintPerSegment(pattern: string): boolean {
 }
 
 // posix pathEscapePlugin rewrites path-like args to resolveWorkspacePath before
-// gateToolCall. Cache identity must use that same resolution so an authorizeCall
-// allow is not treated as a different call (and re-decided) at execution.
+// gateToolCall. Cache identity must use that same resolution — deep, like the
+// plugin's escapeValue walk — so an authorizeCall allow is not treated as a
+// different call (and re-decided) at execution.
 function identityArguments(
   args: ToolCall["arguments"],
   cwd: string,
   rootsProvider: RootsProvider,
 ): string {
-  const normalized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === "string" && looksLikePath(key)) {
-      normalized[key] =
-        resolveWorkspacePath(cwd, value, rootsProvider) ?? value;
-    } else {
-      normalized[key] = value;
-    }
-  }
-  return JSON.stringify(normalized);
+  return JSON.stringify(normalizePathArguments(args, cwd, rootsProvider));
 }
 
 export function createPermissionGate(

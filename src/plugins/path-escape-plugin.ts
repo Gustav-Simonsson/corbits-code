@@ -97,12 +97,24 @@ function escapeValue(
 // Explicit allowlist of argument keys treated as filesystem paths. Keys are
 // matched case- and separator-insensitively, so `filePath`, `FILE_PATH`,
 // and `file-path` all count alongside `file_path`; any key ending in
-// `path`/`paths` (e.g. `somepath`, `outputPaths`) counts too. Anything else
+// `path`/`paths` (e.g. `somepath`, `outputPaths`) counts too, except query-
+// language and JVM keys (`xpath`, `jsonpath`, `classpath` and their plurals)
+// whose values are expressions, not filesystem paths. Anything else
 // passes through untouched by design: MCP and custom tools may use arbitrary
 // keys whose values only their server interprets, so unknown keys are that
 // server's contract, not this sandbox's.
 export function looksLikePath(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[-_]/g, "");
+  if (
+    normalized.endsWith("xpath") ||
+    normalized.endsWith("xpaths") ||
+    normalized.endsWith("jsonpath") ||
+    normalized.endsWith("jsonpaths") ||
+    normalized.endsWith("classpath") ||
+    normalized.endsWith("classpaths")
+  ) {
+    return false;
+  }
   return (
     normalized === "path" ||
     normalized === "paths" ||
@@ -132,6 +144,45 @@ export function pathEscapeBlockReason(
   rootsProvider: RootsProvider = () => [],
 ): string | undefined {
   return blockReasonFor(args, cwd, rootsProvider);
+}
+
+// Deep-walk identity for the permission gate's authorize/execution cache.
+// Same key propagation as escapeValue (innermost key wins; array entries
+// inherit the array key), but non-throwing: in-bounds paths resolve to their
+// workspace-absolute form while escapes and non-path values pass through
+// untouched. Both cache sides compute it, so a fail-closed re-decide still
+// agrees — the point is only that authorize-time relative and execution-time
+// rewritten arguments share one identity.
+export function normalizePathArguments(
+  args: Record<string, unknown>,
+  cwd: string,
+  rootsProvider: RootsProvider = () => [],
+): Record<string, unknown> {
+  return normalizeValue(args, cwd, rootsProvider) as Record<string, unknown>;
+}
+
+function normalizeValue(
+  value: unknown,
+  cwd: string,
+  rootsProvider: RootsProvider,
+  key?: string,
+): unknown {
+  if (typeof value === "string") {
+    if (key === undefined || !looksLikePath(key)) return value;
+    if (isToolOutputLike(value) || isArchiveLike(value)) return value;
+    return resolveWorkspacePath(cwd, value, rootsProvider) ?? value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeValue(entry, cwd, rootsProvider, key));
+  }
+  if (typeof value === "object" && value !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [entryKey, entryValue] of Object.entries(value)) {
+      out[entryKey] = normalizeValue(entryValue, cwd, rootsProvider, entryKey);
+    }
+    return out;
+  }
+  return value;
 }
 
 function blockReasonFor(
