@@ -1,3 +1,4 @@
+import type { FileSink } from "bun";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
@@ -410,8 +411,7 @@ async function runLifecycleHook(
     stdout: "ignore",
     stderr: "pipe",
   });
-  proc.stdin.write(JSON.stringify(payload));
-  proc.stdin.end();
+  const delivered = await deliverPayload(proc.stdin, JSON.stringify(payload));
   const [exitCode, stderr] = await Promise.all([
     proc.exited,
     new Response(proc.stderr).text(),
@@ -419,8 +419,41 @@ async function runLifecycleHook(
   return {
     code: exitCode,
     signal: proc.signalCode,
-    stderr,
+    stderr: delivered
+      ? stderr
+      : `${stderr}${stderr.length > 0 && !stderr.endsWith("\n") ? "\n" : ""}hook exited without reading its payload\n`,
   };
+}
+
+/**
+ * Writes the payload to the hook and says whether the hook took it. A hook
+ * that exits before reading — a shell hook that handles one lifecycle kind
+ * and ignores the other — closes its end of the pipe, and a payload larger
+ * than the pipe buffers (a long session's run summary) then fails with
+ * EPIPE. Unawaited, that rejection was fatal to the whole process at the end
+ * of a finished run. It is the hook's outcome, not the run's.
+ */
+async function deliverPayload(
+  stdin: FileSink,
+  payload: string,
+): Promise<boolean> {
+  try {
+    await stdin.write(payload);
+    await stdin.end();
+    return true;
+  } catch (err: unknown) {
+    if (isBrokenPipe(err)) return false;
+    throw err;
+  }
+}
+
+function isBrokenPipe(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "EPIPE"
+  );
 }
 
 function hookCommand(hook: LifecycleHook, kind: HookKind): string[] {
