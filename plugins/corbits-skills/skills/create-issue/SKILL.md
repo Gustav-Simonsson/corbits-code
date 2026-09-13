@@ -388,3 +388,90 @@ Issues:
   4. "Add theme persistence to user preferences"
      - Blocked by: #1
 ```
+
+### Validation Project
+
+```
+User: "We need to validate if customers want our new <product-name> product"
+
+Project: Get 10 customer leads for <product-name> through direct outreach
+  Lead: <to be assigned>
+  Target: 2 weeks
+  Description:
+    Hypothesis - Teams we know and can reach out to have a need for <product-name>.
+
+    Experiment
+    Direct Outreach
+
+    - [ ] Create list of targets
+    - [ ] Create collateral if needed
+    - [ ] Create strategy for outreach including any templates
+    - [ ] Execute outreach
+    - [ ] Conduct customer interviews
+    - [ ] Analyze results
+
+  Milestones:
+    1. Target list and collateral ready
+    2. Outreach completed
+    3. Customer interviews recorded
+    4. Analysis complete
+
+Issues:
+  1. "Create target list for <product-name> outreach"
+  2. "Create outreach collateral and templates"
+  3. "Execute outreach campaign"
+     - Blocked by: #1, #2
+  4. "Conduct and record customer interviews"
+     - Blocked by: #3
+  5. "Analyze results and present findings"
+     - Blocked by: #4
+```
+
+### Strategic Goal to Initiative
+
+```
+User: "We need to expand our platform to support enterprise customers"
+
+Initiative: Enterprise platform expansion
+  Owner: <executive-owner>
+  Target: <target-quarter>
+
+Projects:
+  1. "Multi-tenant architecture" - Isolate customer data and resources
+  2. "Enterprise SSO integration" - Support SAML and OIDC providers
+  3. "Admin dashboard" - Self-service management for enterprise admins
+  4. "Audit logging" - Compliance-ready activity tracking
+```
+
+### Planning Document to Issues
+
+```
+User: "Create issues from our product doc" or "--from-doc"
+
+[Skill searches for PRODUCT.md, ARCHITECTURE.md, IMPLEMENTATION.md]
+[Finds PRODUCT.md with feature descriptions]
+
+Skill: I found PRODUCT.md which describes the following features:
+  - User authentication with SSO
+  - Usage metrics dashboard
+  - Export functionality
+
+Based on the document, I propose:
+
+**Project**: User authentication with SSO support
+  (From PRODUCT.md: "Users need secure login with enterprise SSO...")
+
+**Issues**:
+  1. "Implement basic email/password authentication"
+     # Background
+     From PRODUCT.md: Users need secure login...
+
+     # Outcome
+     - [ ] Users can register with email/password
+     - [ ] Users can log in and log out
+
+  2. "Integrate SAML SSO provider"
+     ...
+
+Which features would you like me to create issues for?
+```
