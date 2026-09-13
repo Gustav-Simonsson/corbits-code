@@ -35,6 +35,7 @@ export function pathEscapePlugin(
           cwd,
           rootsProvider,
           resolveAllowOutside(options.allowOutside),
+          call.name,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -50,15 +51,20 @@ function escapeArgs(
   cwd: string,
   rootsProvider: RootsProvider,
   allowOutside: boolean,
+  toolName?: string,
 ): Record<string, unknown> {
   if (!allowOutside) {
-    const reason = pathEscapeBlockReason(args, cwd, rootsProvider);
+    const reason = pathEscapeBlockReason(args, cwd, rootsProvider, toolName);
     if (reason !== undefined) throw new Error(reason);
   }
-  return escapeValue(args, cwd, rootsProvider, allowOutside) as Record<
-    string,
-    unknown
-  >;
+  return escapeValue(
+    args,
+    cwd,
+    rootsProvider,
+    allowOutside,
+    undefined,
+    toolName,
+  ) as Record<string, unknown>;
 }
 
 function escapeValue(
@@ -67,15 +73,16 @@ function escapeValue(
   rootsProvider: RootsProvider,
   allowOutside: boolean,
   key?: string,
+  toolName?: string,
 ): unknown {
   if (typeof value === "string") {
     return key !== undefined && looksLikePath(key)
-      ? sanitizePath(value, cwd, rootsProvider, allowOutside)
+      ? sanitizePath(value, cwd, rootsProvider, allowOutside, toolName)
       : value;
   }
   if (Array.isArray(value)) {
     return value.map((entry) =>
-      escapeValue(entry, cwd, rootsProvider, allowOutside, key),
+      escapeValue(entry, cwd, rootsProvider, allowOutside, key, toolName),
     );
   }
   if (typeof value === "object" && value !== null) {
@@ -87,6 +94,7 @@ function escapeValue(
         rootsProvider,
         allowOutside,
         entryKey,
+        toolName,
       );
     }
     return out;
@@ -135,6 +143,40 @@ export function looksLikePath(key: string): boolean {
   );
 }
 
+// Only read_file can consume a spilled tool-output blob; every other tool
+// rejects the scheme in toolOutputUriPlugin. The sandbox skips containment
+// for the same tool so a non-reader is denied here too instead of only by
+// plugin order.
+// archive:/// refs are served to read_file, grep, and search_files by
+// evidenceArchiveSearchPlugin (see advertiseArchiveSurface); other tools have
+// no archive reader, so the sandbox only skips containment for those three.
+const TOOL_OUTPUT_URI_TOOL = "read_file";
+const ARCHIVE_URI_TOOLS = new Set(["read_file", "grep", "search_files"]);
+
+// "skip" when this tool may receive the virtual ref, a block message when it
+// may not, undefined when the value is an ordinary filesystem path. An
+// omitted toolName keeps the legacy skip so direct callers that predate the
+// parameter see no behavior change; the middleware and the permission gate
+// always pass a name.
+function virtualRefVerdict(
+  value: string,
+  toolName: string | undefined,
+): "skip" | string | undefined {
+  if (isToolOutputLike(value)) {
+    if (toolName === undefined || toolName === TOOL_OUTPUT_URI_TOOL) {
+      return "skip";
+    }
+    return `cannot ${toolName} a tool-output:// URI: ${value}. Use read_file with that URI to read the spilled output instead.`;
+  }
+  if (isArchiveLike(value)) {
+    if (toolName === undefined || ARCHIVE_URI_TOOLS.has(toolName)) {
+      return "skip";
+    }
+    return `cannot ${toolName} an archive:/// ref: ${value}. Only read_file, grep, and search_files accept archive:/// refs.`;
+  }
+  return undefined;
+}
+
 // Same sandbox pathEscapePlugin enforces at execution. The permission gate
 // consults this at authorize time so it can deny instead of asking for a call
 // the plugin will reject after Accept.
@@ -142,8 +184,9 @@ export function pathEscapeBlockReason(
   args: Record<string, unknown>,
   cwd: string,
   rootsProvider: RootsProvider = () => [],
+  toolName?: string,
 ): string | undefined {
-  return blockReasonFor(args, cwd, rootsProvider);
+  return blockReasonFor(args, cwd, rootsProvider, undefined, toolName);
 }
 
 // Deep-walk identity for the permission gate's authorize/execution cache.
@@ -190,10 +233,13 @@ function blockReasonFor(
   cwd: string,
   rootsProvider: RootsProvider,
   key?: string,
+  toolName?: string,
 ): string | undefined {
   if (typeof value === "string") {
     if (key === undefined || !looksLikePath(key)) return undefined;
-    if (isToolOutputLike(value) || isArchiveLike(value)) return undefined;
+    const verdict = virtualRefVerdict(value, toolName);
+    if (verdict === "skip") return undefined;
+    if (typeof verdict === "string") return verdict;
     if (resolveWorkspacePath(cwd, value, rootsProvider) === undefined) {
       return `Path escapes working directory: ${value}`;
     }
@@ -201,14 +247,20 @@ function blockReasonFor(
   }
   if (Array.isArray(value)) {
     for (const entry of value) {
-      const reason = blockReasonFor(entry, cwd, rootsProvider, key);
+      const reason = blockReasonFor(entry, cwd, rootsProvider, key, toolName);
       if (reason !== undefined) return reason;
     }
     return undefined;
   }
   if (typeof value === "object" && value !== null) {
     for (const [entryKey, entryValue] of Object.entries(value)) {
-      const reason = blockReasonFor(entryValue, cwd, rootsProvider, entryKey);
+      const reason = blockReasonFor(
+        entryValue,
+        cwd,
+        rootsProvider,
+        entryKey,
+        toolName,
+      );
       if (reason !== undefined) return reason;
     }
   }
@@ -220,9 +272,14 @@ function sanitizePath(
   cwd: string,
   rootsProvider: RootsProvider,
   allowOutside: boolean,
+  toolName?: string,
 ): string {
-  if (isToolOutputLike(value) || isArchiveLike(value)) {
+  const verdict = virtualRefVerdict(value, toolName);
+  if (verdict === "skip") {
     return value;
+  }
+  if (typeof verdict === "string") {
+    throw new Error(verdict);
   }
   const resolved = resolveWorkspacePath(cwd, value, rootsProvider);
   if (resolved !== undefined) {

@@ -666,6 +666,7 @@ export function createPermissionGate(
       call.arguments,
       effectiveCwd,
       escapeRoots,
+      call.name,
     );
     if (escapeReason !== undefined) {
       return { kind: "deny", reason: escapeReason };
