@@ -32,6 +32,12 @@ export interface ModelFamilyPolicy {
    * denied. Orchestrators keep the full surface.
    */
   advertisedToolDeny: readonly string[];
+  /**
+   * Tool-discipline rules appended to the system prompt for families that do
+   * not self-terminate a tool loop. Empty for families that need none. Appended
+   * at the tail so it cannot disturb the cached prompt prefix.
+   */
+  toolDisciplineRules?: string;
 }
 
 const DEFAULT_WRAP_UP_NUDGE_TEXT =
@@ -86,6 +92,23 @@ const GROK_POLICY: Omit<ModelFamilyPolicy, "family"> = {
 // once eval data exists.
 const KIMI_POLICY: Omit<ModelFamilyPolicy, "family"> = { ...DEFAULT_POLICY };
 
+// Muse Spark does not reliably stop a tool loop at medium reasoning effort: on
+// a two-file fixture with a bounded fix it re-read files it had already read
+// and ran out the 8-turn ceiling without finishing. The same run with these
+// three rules appended finished in 3 turns on 4.3x fewer input tokens. At
+// minimal effort it terminates either way, so the rules earn their keep exactly
+// at the rungs where each wasted turn is most expensive. See CL-7869.
+const MUSE_TOOL_DISCIPLINE_RULES =
+  "Tool discipline:\n" +
+  "- Batch independent tool calls into a single turn.\n" +
+  "- Never re-read a file you have already read this session.\n" +
+  "- Do not narrate; act.";
+
+const MUSE_POLICY: Omit<ModelFamilyPolicy, "family"> = {
+  ...DEFAULT_POLICY,
+  toolDisciplineRules: MUSE_TOOL_DISCIPLINE_RULES,
+};
+
 export function resolveModelFamilyPolicy(input: {
   providerName: string;
   model?: string;
@@ -111,6 +134,8 @@ export function resolveModelFamilyPolicy(input: {
         ...KIMI_POLICY,
         advertisedToolDeny: orchestrator ? [] : ["skill_search"],
       };
+    case "muse":
+      return { family, ...MUSE_POLICY };
     default:
       return { family: "default", ...DEFAULT_POLICY };
   }
