@@ -213,8 +213,7 @@ Credentials are scoped to the exact server name and endpoint URL, not the displa
 name alone. Corbits Code parses and normalizes the URL, removes its fragment, and
 hashes the unambiguous `[serverName, normalizedURL]` tuple. The full path and query
 remain part of the identity, so credentials cannot cross origins, paths, or query
-variants. The bounded slug prefix is derived from the server name for readability;
-the raw URL never appears in the filename.
+variants. The bounded slug prefix is derived from the server name for readability: characters outside `[A-Za-z0-9_-]` are replaced with `_` (case preserved; an empty result becomes `server`), truncated to 48 characters; the raw URL never appears in the filename.
 
 Tokens never appear in `settings.json`. The settings file holds only the URL;
 secret material stays in the endpoint-scoped auth file. Legacy name-only files
