@@ -46,7 +46,7 @@ Quick routing:
 - gauntlet = mutation-check that tests can actually fail (tree clean)
 - shakespeare = PRODUCT/ARCHITECTURE/IMPLEMENTATION docs
 - rand = DESIGN.md only
-- draper = visual/CBS review
+- draper = brand/design critique (visual, copy, interactive)
 - emil = design-eng laws review
 - gaasbot = risk counsel
 - bruckheimer = product discovery docs
