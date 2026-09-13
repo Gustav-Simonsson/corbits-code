@@ -338,8 +338,8 @@ for `/status` or an operator question mid-run.
 
 Alt+O swaps the transcript for a running child's stream without stealing the
 parent reactor (`enterSubagentObserve`, `src/tui/shell/observe.ts`); Esc
-leaves observe and restores the parent transcript. With no live subagent
-session, the chord paints a system row saying so instead of opening anything.
+leaves observe and restores the parent transcript. With no subagent session at
+all, the chord paints a system row saying so instead of opening anything.
 
 ## How pop-ups should feel
 
