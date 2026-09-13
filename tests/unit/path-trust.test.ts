@@ -240,26 +240,32 @@ describe("path-trust (global)", () => {
     }
   });
 
-  test("a zero-byte store file is invalid and migration re-seeds it", async () => {
+  test("a zero-byte store file is invalid and migration refuses to seed it", async () => {
     const { home, cleanup } = await scratch();
     try {
       await writeStoreFile(home, "");
       expect((await readPathTrustStore(home)).state).toBe("invalid");
 
       const plugin = join(home, "shared", "plugin");
+      let resolveCalls = 0;
       const store = await migratePathTrustFromPluginPaths(
         [plugin],
-        async () => [plugin],
+        async (p) => {
+          resolveCalls += 1;
+          return [p];
+        },
         home,
       );
-      expect(isPathPluginTrusted(store, plugin)).toBe(true);
-      expect((await readPathTrustStore(home)).state).toBe("valid");
+      expect(isPathPluginTrusted(store, plugin)).toBe(false);
+      expect(store.trustedPluginPaths).toEqual([]);
+      expect(resolveCalls).toBe(0);
+      expect((await readPathTrustStore(home)).state).toBe("invalid");
     } finally {
       await cleanup();
     }
   });
 
-  test("a corrupt store file is invalid, loads empty, and migration re-seeds it", async () => {
+  test("a corrupt store file is invalid, loads empty, and migration refuses to seed it", async () => {
     const { home, cleanup } = await scratch();
     try {
       await writeStoreFile(home, "{not json");
@@ -267,12 +273,19 @@ describe("path-trust (global)", () => {
       expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([]);
 
       const plugin = join(home, "shared", "plugin");
+      let resolveCalls = 0;
       const store = await migratePathTrustFromPluginPaths(
         [plugin],
-        async () => [plugin],
+        async (p) => {
+          resolveCalls += 1;
+          return [p];
+        },
         home,
       );
-      expect(isPathPluginTrusted(store, plugin)).toBe(true);
+      expect(isPathPluginTrusted(store, plugin)).toBe(false);
+      expect(store.trustedPluginPaths).toEqual([]);
+      expect(resolveCalls).toBe(0);
+      expect((await readPathTrustStore(home)).state).toBe("invalid");
     } finally {
       await cleanup();
     }
