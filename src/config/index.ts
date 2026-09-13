@@ -142,9 +142,10 @@ export function dropOrphanedOAuthEntries(
   if (settings === null) return null;
   const providers = Object.fromEntries(
     Object.entries(settings.providers).filter(
-      ([name]) =>
+      ([name, provider]) =>
         (!isCodexProviderName(name) && !isXaiProviderName(name)) ||
-        projected[name] !== undefined,
+        projected[name] !== undefined ||
+        isHandNamedProviderEntry(provider),
     ),
   );
   const { defaultProvider, ...rest } = settings;
@@ -158,6 +159,18 @@ export function dropOrphanedOAuthEntries(
   };
 }
 
+// A codex/<slug> or xai/<slug> settings row carrying its own credential is the
+// operator's explicit config, not an OAuth placeholder: OAuth profile
+// projections must never overwrite it, orphan-sweep it, or drop it from the
+// catalog. Credential-less namespaced rows stay placeholders (CL-6728).
+function isHandNamedProviderEntry(
+  entry: Pick<ProviderSettings, "apiKey" | "keyless"> | undefined,
+): boolean {
+  if (entry === undefined) return false;
+  if (entry.keyless === true) return true;
+  return typeof entry.apiKey === "string" && entry.apiKey.length > 0;
+}
+
 // Overlay live OAuth profile projections onto settings for runtime provider
 // resolution. Exported for tests; loadConfig is the only production caller.
 export function overlayOAuthProjections(
@@ -165,12 +178,13 @@ export function overlayOAuthProjections(
   projected: Record<string, ProviderSettings>,
 ): Settings | null {
   if (Object.keys(projected).length === 0) return settings;
+  const providers = { ...(settings?.providers ?? {}) };
+  for (const [name, entry] of Object.entries(projected)) {
+    if (!isHandNamedProviderEntry(providers[name])) providers[name] = entry;
+  }
   return {
     ...(settings ?? { providers: {} }),
-    providers: {
-      ...(settings?.providers ?? {}),
-      ...projected,
-    },
+    providers,
   };
 }
 
@@ -1204,15 +1218,29 @@ export function mergeOAuthCatalog(
       ? ["xai"]
       : []),
   ]);
+  const settingsRows = buildProviderCatalog(settings, resolved);
+  // A hand-named codex/<slug> or xai/<slug> API-key row is the operator's
+  // explicit config, not an OAuth placeholder: keep it and skip the colliding
+  // live profile projection instead of overwriting it (CL-6728).
+  const handNamed = new Set(
+    settingsRows
+      .filter(
+        (e) =>
+          (isCodexProviderName(e.name) || isXaiProviderName(e.name)) &&
+          isHandNamedProviderEntry(e),
+      )
+      .map((e) => e.name),
+  );
   return [
-    ...buildProviderCatalog(settings, resolved).filter(
+    ...settingsRows.filter(
       (e) =>
-        !isCodexProviderName(e.name) &&
-        !isXaiProviderName(e.name) &&
-        !dropBare.has(e.name),
+        handNamed.has(e.name) ||
+        (!isCodexProviderName(e.name) &&
+          !isXaiProviderName(e.name) &&
+          !dropBare.has(e.name)),
     ),
-    ...codexEntries,
-    ...xaiEntries,
+    ...codexEntries.filter((e) => !handNamed.has(e.name)),
+    ...xaiEntries.filter((e) => !handNamed.has(e.name)),
   ].map((entry) =>
     isOpenCodeGoProvider(entry)
       ? { ...entry, models: [...selectableGoModelIds()] }
@@ -1282,11 +1310,22 @@ export function runtimeSettingsWithCatalog(
   if (settings === undefined) {
     return { providers: fromCatalog };
   }
+  // OAuth-marked catalog rows carry live profile tokens; they overlay
+  // credential-less placeholders but never a hand-named API-key row (CL-6728).
+  const overlaid = { ...fromCatalog };
+  for (const name of Object.keys(overlaid)) {
+    if (
+      (isCodexProviderName(name) || isXaiProviderName(name)) &&
+      isHandNamedProviderEntry(settings.providers[name])
+    ) {
+      delete overlaid[name];
+    }
+  }
   return {
     ...settings,
     providers: {
       ...settings.providers,
-      ...fromCatalog,
+      ...overlaid,
     },
   };
 }
