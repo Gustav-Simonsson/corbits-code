@@ -253,4 +253,140 @@ describe("Ctrl+clicking a transcript URL", () => {
       { width: 80, height: 24 },
     );
   });
+
+  test("a wrapped URL in a thinking row opens the full target", async () => {
+    await withTestRenderer(
+      async (h) => {
+        const shell = createAppShell(h.renderer, {
+          terminal: { columns: 40, rows: 24 },
+          wireKeys: false,
+          run: "idle",
+        });
+        const opened: string[] = [];
+        setUrlOpener((url) => {
+          opened.push(url);
+        });
+        try {
+          // Agent thinking paints through the same plain-row path as user
+          // rows; the long URL wraps mid-run at this width. Before the fix
+          // the row armed the first fragment as its own truncated target.
+          const full =
+            "https://example.com/abcdefghijklmnopqrstuvwxyz0123456789";
+          appendStreamRow(shell, {
+            role: "system",
+            meta: "thinking",
+            text: `checking ${full} today`,
+          });
+          await h.renderOnce();
+
+          const link = findCell(h.captureCharFrame(), "example.com");
+          expect(link).not.toBeNull();
+          const at = defined(link);
+
+          await h.mockMouse.click(at.x, at.y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([full]);
+        } finally {
+          resetUrlOpener();
+          shell.dispose();
+        }
+      },
+      { width: 40, height: 24 },
+    );
+  });
+
+  test("a URL wrapped across bubble lines opens the full target", async () => {
+    await withTestRenderer(
+      async (h) => {
+        const shell = createAppShell(h.renderer, {
+          terminal: { columns: 40, rows: 24 },
+          wireKeys: false,
+          run: "idle",
+        });
+        const opened: string[] = [];
+        setUrlOpener((url) => {
+          opened.push(url);
+        });
+        try {
+          // The bubble body is narrower than the terminal, so the long URL
+          // wraps across continuation rows. Every fragment must resolve to
+          // the one target, not to its own truncated text.
+          const full =
+            "https://example.com/abcdefghijklmnopqrstuvwxyz0123456789";
+          appendStreamRow(shell, {
+            role: "user",
+            text: `see ${full} ok`,
+          });
+          await h.renderOnce();
+
+          const link = findCell(h.captureCharFrame(), "example.com");
+          expect(link).not.toBeNull();
+          const at = defined(link);
+
+          await h.mockMouse.click(at.x, at.y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([full]);
+        } finally {
+          resetUrlOpener();
+          shell.dispose();
+        }
+      },
+      { width: 40, height: 24 },
+    );
+  });
+
+  test("assistant markdown links stay terminal business (no opener call)", async () => {
+    await withTestRenderer(
+      async (h) => {
+        const shell = createAppShell(h.renderer, {
+          terminal: { columns: 80, rows: 24 },
+          wireKeys: false,
+          run: "idle",
+        });
+        const opened: string[] = [];
+        setUrlOpener((url) => {
+          opened.push(url);
+        });
+        try {
+          // Markdown prose paints through childless library renderers with
+          // no text-leaf API to arm or hit-test (docs/TUI.md), so neither
+          // the bare URL nor the explicit link label opens through us.
+          // The real terminal owns those cells; this pins that remainder.
+          appendStreamRow(shell, {
+            role: "assistant",
+            text: "see https://example.com/docs and [guide](https://example.com/guide) ok",
+          });
+          // Assistant rows are markdown; their blocks highlight
+          // asynchronously (see shell.test.ts), so the frame only carries
+          // the prose after a settle.
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          await h.renderOnce();
+
+          const bare = findCell(h.captureCharFrame(), "example.com/docs");
+          expect(bare).not.toBeNull();
+          await h.mockMouse.click(defined(bare).x, defined(bare).y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([]);
+
+          const label = findCell(h.captureCharFrame(), "guide");
+          expect(label).not.toBeNull();
+          await h.mockMouse.click(defined(label).x, defined(label).y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([]);
+        } finally {
+          resetUrlOpener();
+          shell.dispose();
+        }
+      },
+      { width: 80, height: 24 },
+    );
+  });
 });

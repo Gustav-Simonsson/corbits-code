@@ -842,6 +842,8 @@ url.dll,FileProtocolHandler` — argv spawns, never through a shell).
     prefix-match. Hover highlighting needs pointer-motion reports, so the
     main shell enables them (`enableMouseMovement`, DEC ?1003) alongside
     the existing capture; the pickers and setup screens stay opted out.
+  - Wrapped URLs resolve whole: a URL broken across continuation lines
+    highlights and opens as the one target from any of its fragments.
   - Markdown prose (assistant messages) is not covered: the renderer paints
     it through childless code renderers with no stable text-leaf API to
     highlight or hit-test, so those links stay terminal business until the

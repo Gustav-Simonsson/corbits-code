@@ -18,6 +18,7 @@ import {
   findLinks,
   paintLinkLine,
   splitLinkSpans,
+  splitWrappedLinkSpans,
 } from "../url-links.js";
 import {
   splitAtSettledHeading,
@@ -33,6 +34,7 @@ import {
   isSentenceRow,
   MAIN_AGENT,
   paintStreamRow,
+  plainRowWrapWidth,
   rowGroupGap,
   streamRowGutter,
   toolRowLines,
@@ -205,7 +207,12 @@ function retextStreamRowBody(
     return false;
   if (node instanceof TextRenderable) {
     if (isMarkdownRow(row)) return false;
-    paintPlainRowNode(node, paintStreamRow(row, layout));
+    paintPlainRowNode(
+      node,
+      row,
+      paintStreamRow(row, layout),
+      plainRowWrapWidth(row, layout),
+    );
     return true;
   }
 
@@ -354,7 +361,12 @@ export function buildRowNode(
   }
 
   if (!isMarkdownRow(row)) {
-    return buildPlainRowNode(ctx, paintStreamRow(row, layout));
+    return buildPlainRowNode(
+      ctx,
+      row,
+      paintStreamRow(row, layout),
+      plainRowWrapWidth(row, layout),
+    );
   }
 
   const gutter = streamRowGutter(row, layout);
@@ -385,14 +397,25 @@ function markdownBodyOptions(gutter: PaintedStreamLine, width: number) {
  */
 function buildPlainRowNode(
   ctx: CliRenderer,
+  row: StreamRow,
   painted: PaintedStreamLine,
+  wrapWidth: number,
 ): TextRenderable {
   const node = new TextRenderable(ctx, {
     content: painted.content,
     fg: painted.fg,
   });
-  paintPlainRowNode(node, painted);
+  paintPlainRowNode(node, row, painted, wrapWidth);
   return node;
+}
+
+/**
+ * Links a plain row's pre-wrap text holds: wrapped fragments reassemble to
+ * one of these, which is what tells a real wrap across a short fragment line
+ * apart from a natural line break after the fact.
+ */
+function plainRowSourceUrls(row: StreamRow): string[] {
+  return findLinks(`${row.text}\n${row.summary ?? ""}`).map((hit) => hit.url);
 }
 
 /**
@@ -402,7 +425,9 @@ function buildPlainRowNode(
  */
 function paintPlainRowNode(
   node: TextRenderable,
+  row: StreamRow,
   painted: PaintedStreamLine,
+  wrapWidth: number,
 ): void {
   const lines = painted.content.split("\n");
   if (!lines.some((line) => findLinks(line).length > 0)) {
@@ -415,7 +440,11 @@ function paintPlainRowNode(
   }
   paintLinkLine(
     node,
-    lines.map((line) => splitLinkSpans([{ text: line, fg: painted.fg }])),
+    splitWrappedLinkSpans(
+      lines.map((text) => ({ text: text.trimEnd(), fg: painted.fg })),
+      wrapWidth,
+      plainRowSourceUrls(row),
+    ),
   );
 }
 

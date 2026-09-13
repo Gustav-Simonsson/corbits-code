@@ -8,6 +8,7 @@ import {
   setUrlOpener,
   resetUrlOpener,
   splitLinkSpans,
+  splitWrappedLinkSpans,
 } from "../../../src/tui/url-links.js";
 
 afterEach(() => {
@@ -109,6 +110,118 @@ describe("splitLinkSpans", () => {
       },
       { text: " ok", fg: "#abc", bold: undefined, url: null },
     ]);
+  });
+});
+
+describe("splitWrappedLinkSpans", () => {
+  const urls = (rows: { url: string | null }[][]): (string | null)[][] =>
+    rows.map((row) => row.map((span) => span.url));
+
+  test("a URL broken across two lines resolves to one target", () => {
+    const full = "https://example.com/ab";
+    const rows = splitWrappedLinkSpans(
+      [
+        { text: "x https://example.co", fg: "#abc" },
+        { text: "m/ab", fg: "#abc" },
+      ],
+      20,
+    );
+    expect(rows).toEqual([
+      [
+        { text: "x ", fg: "#abc", bold: undefined, url: null },
+        { text: "https://example.co", fg: "#abc", bold: undefined, url: full },
+      ],
+      [{ text: "m/ab", fg: "#abc", bold: undefined, url: full }],
+    ]);
+  });
+
+  test("a chain runs through a full middle line to a mid-line end", () => {
+    const full = "https://example.com/ab";
+    const rows = splitWrappedLinkSpans(
+      [
+        { text: "o https://", fg: "#abc" },
+        { text: "example.co", fg: "#abc" },
+        { text: "m/ab end", fg: "#abc" },
+      ],
+      10,
+    );
+    expect(urls(rows)).toEqual([[null, full], [full], [full, null]]);
+  });
+
+  test("a short seed line never starts a chain", () => {
+    const rows = splitWrappedLinkSpans(
+      [
+        { text: "x https://", fg: "#abc" },
+        { text: "example.com", fg: "#abc" },
+      ],
+      10,
+    );
+    expect(urls(rows)).toEqual([[null], [null]]);
+  });
+
+  test("a short continuation with text after it is a natural break", () => {
+    const rows = splitWrappedLinkSpans(
+      [
+        { text: "x https://example.co", fg: "#abc" },
+        { text: "m/ab", fg: "#abc" },
+        { text: "more words here", fg: "#abc" },
+      ],
+      20,
+    );
+    expect(urls(rows)).toEqual([[null, "https://example.co"], [null], [null]]);
+  });
+
+  test("a blank continuation line breaks the chain", () => {
+    const rows = splitWrappedLinkSpans(
+      [
+        { text: "o https://", fg: "#abc" },
+        { text: "", fg: "#abc" },
+      ],
+      10,
+    );
+    expect(urls(rows)).toEqual([[null], [null]]);
+  });
+
+  test("a user-bubble pad row ends the chain", () => {
+    const full = "https://example.com/ab";
+    const rows = splitWrappedLinkSpans(
+      [
+        { text: "o https://", fg: "#abc" },
+        { text: "example.co", fg: "#abc" },
+        { text: "m/ab", fg: "#abc" },
+        { text: "▍", fg: "#abc" },
+      ],
+      10,
+    );
+    expect(urls(rows)).toEqual([[null, full], [full], [full], [null]]);
+  });
+
+  test("a hitless seed with a short tail fuses against its source URL", () => {
+    // Geometry alone reads this as prose that happens to scan (see the
+    // short-seed test above), but the row's pre-wrap text settles it: the
+    // fragments reassemble to a link the row actually holds.
+    const full = "https://x.y";
+    const rows = splitWrappedLinkSpans(
+      [
+        { text: "o https://", fg: "#abc" },
+        { text: "x.y", fg: "#abc" },
+      ],
+      10,
+      [full],
+    );
+    expect(urls(rows)).toEqual([[null, full], [full]]);
+  });
+
+  test("a fused candidate the source never held stays unfused", () => {
+    const rows = splitWrappedLinkSpans(
+      [
+        { text: "x https://example.co", fg: "#abc" },
+        { text: "m/ab", fg: "#abc" },
+      ],
+      20,
+      ["https://other.example/z"],
+    );
+    expect(urls(rows)).toEqual([[null, "https://example.co"], [null]]);
   });
 });
 
