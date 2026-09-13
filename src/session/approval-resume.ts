@@ -71,11 +71,17 @@ export function requestFromApprovalSnapshot(
 // The reactor's approval timeout answers the parked call with this exact
 // upstream text (see permission/decline-markers.ts) before removing the
 // correlation, so its presence after the suspension watermark marks the
-// correlation as settled.
+// correlation as settled — but only when the result answers this very call.
+// Parallel-parked calls each time out into their own tool result (callId is
+// the original tool-call id, not the minted correlationId), so matching text
+// alone abandons a still-valid sibling decision. The parked call id must come
+// along and match block.callId; without it the text-only scan stays as the
+// fallback so a genuinely late decision is still dropped.
 
 function settledAfterSuspend(
   turns: Awaited<ReturnType<Agent["history"]>>,
   fromIndex: number,
+  parkedCallId: string | undefined,
 ): boolean {
   return turns
     .slice(fromIndex)
@@ -83,11 +89,58 @@ function settledAfterSuspend(
     .some(
       (block) =>
         block.type === "tool_result" &&
+        (parkedCallId === undefined || block.callId === parkedCallId) &&
         block.content.some(
           (part) =>
             part.type === "text" && part.text === APPROVAL_TIMEOUT_RESULT_TEXT,
         ),
     );
+}
+
+function stableArgs(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableArgs).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableArgs(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+// Derive this suspension's parked call id from history: the pre-watermark
+// tool_call matching the snapshot's name and arguments that has no tool
+// result anywhere yet. A parked call is neither run nor answered, so the only
+// unanswered match is this suspension's own call; a timed-out sibling is
+// answered by its timeout result and drops out of the candidates. Returns
+// undefined unless exactly one candidate matches.
+function parkedCallIdFromHistory(
+  turns: Awaited<ReturnType<Agent["history"]>>,
+  fromIndex: number,
+  snapshot: ApprovalSnapshot,
+): string | undefined {
+  const answered = new Set<string>();
+  for (const turn of turns) {
+    for (const block of turn.content) {
+      if (block.type === "tool_result") answered.add(block.callId);
+    }
+  }
+  const wanted = stableArgs(snapshot.arguments ?? {});
+  const candidates = new Set<string>();
+  for (const turn of turns.slice(0, fromIndex)) {
+    for (const block of turn.content) {
+      if (
+        block.type === "tool_call" &&
+        block.name === snapshot.name &&
+        stableArgs(block.arguments) === wanted &&
+        !answered.has(block.id)
+      ) {
+        candidates.add(block.id);
+      }
+    }
+  }
+  return candidates.size === 1 ? [...candidates][0] : undefined;
 }
 
 function decisionMessage(
@@ -134,6 +187,13 @@ export function createApprovalResume(args: {
   // TUI: interrupt/clear bump this to reject the parked call on the old
   // agent before close/rebuild. Cleared when handle returns.
   registerParkedCancel?: (cancel: (() => void) | undefined) => void;
+  // Pending-operation lookup: map this suspension's correlationId to the
+  // parked tool-call id (PendingOperation.suspendedCall.id). The timeout
+  // result carries the original call id while the suspension carries only
+  // the minted correlationId, so this is what ties them together. Takes
+  // precedence over the history derivation below; absent callers fall back
+  // to it.
+  resolveParkedCallId?: (correlationId: string) => string | undefined;
   gate: PermissionGate;
 }): ApprovalResume {
   const { getAgent, gate } = args;
@@ -226,9 +286,11 @@ export function createApprovalResume(args: {
           return true;
         }
         args.registerParkedCancel?.(undefined);
-        if (
-          settledAfterSuspend(await requireAgent().history(), turnsAtSuspend)
-        ) {
+        const history = await requireAgent().history();
+        const parkedCallId =
+          args.resolveParkedCallId?.(correlationId) ??
+          parkedCallIdFromHistory(history, turnsAtSuspend, approvalSnapshot);
+        if (settledAfterSuspend(history, turnsAtSuspend, parkedCallId)) {
           // The reactor already answered the parked call (its approval timeout
           // fired while the surface was still up). Delivering now would append
           // the raw decision JSON as an uncorrelated user turn — drop and log.
