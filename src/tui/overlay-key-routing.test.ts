@@ -9,9 +9,11 @@ import { describe, expect, test } from "bun:test";
 
 import { withTestRenderer } from "./harness";
 import type { PaletteCommand } from "./command-catalog";
+import { openPermissionsOverlay, openOperatorOverlay } from "./overlays";
 import { createAppShell } from "./shell/index";
 import type { AppShell } from "./shell/internals";
-import { openHelpOverlay } from "./shell/palette";
+import { isSlashPopupOpen } from "./shell/internals";
+import { openHelpOverlay, openPalette } from "./shell/palette";
 
 const CATALOG: readonly PaletteCommand[] = [
   { id: "model", label: "/model" },
@@ -58,14 +60,40 @@ describe("unclaimed overlay keys reach the prompt", () => {
     });
   });
 
-  test("ephemeral popup symmetry: slash filter typing still reaches the prompt", async () => {
+  test("palette symmetry: unclaimed printable with a palette open reaches the prompt via the fallthrough", async () => {
     await withShell(async ({ shell, press }) => {
-      press("/");
+      openPalette(shell, { catalog: CATALOG });
       expect(shell.overlayKind).toBe("palette");
+      expect(isSlashPopupOpen(shell)).toBe(false);
 
-      press("m");
-      expect(shell.prompt.value).toBe("/m");
+      press("x");
+      expect(shell.prompt.value).toBe("x");
       expect(shell.overlayKind).toBe("palette");
+    });
+  });
+
+  test("permission gate keeps printable keys: prompt stays empty, gate stays open", async () => {
+    await withShell(async ({ shell, press }) => {
+      openPermissionsOverlay(shell, { items: ["Allow once", "Deny"] });
+      expect(shell.overlayKind).toBe("permissions");
+
+      press("x");
+      expect(shell.prompt.value).toBe("");
+      expect(shell.overlayKind).toBe("permissions");
+    });
+  });
+
+  test("operator gate keeps printable keys: prompt stays empty, gate stays open", async () => {
+    await withShell(async ({ shell, press }) => {
+      openOperatorOverlay(shell, {
+        body: "Proceed?",
+        choices: ["Cancel", "Continue"],
+      });
+      expect(shell.overlayKind).toBe("operator");
+
+      press("x");
+      expect(shell.prompt.value).toBe("");
+      expect(shell.overlayKind).toBe("operator");
     });
   });
 
