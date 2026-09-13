@@ -1,5 +1,5 @@
 import { lstat, readFile, unlink } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { type } from "arktype";
 import type { ExtraTool, ToolPlugin } from "@intx/tools-posix";
 import type { ToolCall, ToolResult } from "@intx/types/runtime";
@@ -81,14 +81,19 @@ export function deleteFilePlugin(
       }
 
       const allowOutside = resolveAllowOutside(options.allowOutside);
-      // Containment is delegated to the shared workspace resolver, which
-      // realpaths the session root before comparing and admits registered
-      // sibling worktree roots — the same boundary pathEscapePlugin enforces.
+      // Containment is keyed off the parent directory, not the full target:
+      // lstat/unlink never follow the final component, so unlinking a link
+      // itself cannot escape even when the link dangles or points outside.
+      // Resolving the full target would refuse both (UNRESOLVABLE / outside
+      // referent). The shared workspace resolver still realpaths the session
+      // root before comparing and admits registered sibling worktree roots —
+      // the same boundary pathEscapePlugin enforces.
+      const target = resolve(cwd, args.path);
       if (
         !allowOutside &&
         resolveWorkspacePath(
           cwd,
-          args.path,
+          dirname(target),
           options.rootsProvider ?? (() => []),
         ) === undefined
       ) {
@@ -97,7 +102,6 @@ export function deleteFilePlugin(
           `${args.path} resolves outside the working directory`,
         );
       }
-      const target = resolve(cwd, args.path);
       try {
         const info = await lstat(target);
         if (info.isDirectory()) {

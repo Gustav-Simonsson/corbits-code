@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   chmod,
+  lstat,
   mkdtemp,
   mkdir,
+  readFile,
   realpath,
   rm,
   stat,
@@ -25,6 +27,15 @@ function call(path: unknown): ToolCall {
 async function exists(path: string): Promise<boolean> {
   try {
     await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function linkExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
     return true;
   } catch {
     return false;
@@ -127,6 +138,43 @@ describe("deleteFilePlugin", () => {
     expect(result.isError).toBe(true);
     expect(result.content).toContain("resolves outside the working directory");
     expect(await exists(path)).toBe(true);
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  test("deletes a dangling symlink inside cwd (CL-6729)", async () => {
+    const link = join(cwd, "broken-link");
+    await symlink(join(cwd, "does-not-exist.txt"), link);
+    expect(await linkExists(link)).toBe(true);
+
+    const result = await handler()(
+      call("broken-link"),
+      new AbortController().signal,
+    );
+
+    expect(result.isError ?? false).toBe(false);
+    expect(String(result.content)).toContain("Deleted file: broken-link");
+    expect(await linkExists(link)).toBe(false);
+  });
+
+  test("deletes a link with an outside referent without touching the referent (CL-6729)", async () => {
+    const outside = await mkdtemp(
+      join(tmpdir(), "corbits-delete-link-referent-"),
+    );
+    const referent = join(outside, "keep.txt");
+    await writeFile(referent, "keep");
+    const link = join(cwd, "outside-link");
+    await symlink(referent, link);
+    expect(await linkExists(link)).toBe(true);
+
+    const result = await handler()(
+      call("outside-link"),
+      new AbortController().signal,
+    );
+
+    expect(result.isError ?? false).toBe(false);
+    expect(String(result.content)).toContain("Deleted file: outside-link");
+    expect(await linkExists(link)).toBe(false);
+    expect(await readFile(referent, "utf8")).toBe("keep");
     await rm(outside, { recursive: true, force: true });
   });
 
