@@ -4,8 +4,10 @@ import type {
   ExtendedInferenceOptions,
   ProviderAdapter,
 } from "@intx/inference";
-import { OPENCODE_GO_MESSAGES_PROVIDER } from "./opencode-go-anthropic-adapter.js";
-import { ZEN_MESSAGES_PROVIDER } from "./zen-anthropic-adapter.js";
+import {
+  OPENCODE_GO_MESSAGES_PROVIDER,
+  ZEN_MESSAGES_PROVIDER,
+} from "./anthropic-session-adapter.js";
 
 const ANTHROPIC_MESSAGES_PROVIDERS: ReadonlySet<string> = new Set([
   "anthropic",

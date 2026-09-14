@@ -10,8 +10,7 @@ import * as codexResponses from "./codex-responses.js";
 import * as grokResponses from "./grok-responses.js";
 import * as bifrostAdapter from "./bifrost-adapter.js";
 import * as openaiResponses from "./openai-responses.js";
-import * as opencodeGoAnthropic from "./opencode-go-anthropic-adapter.js";
-import * as zenAnthropic from "./zen-anthropic-adapter.js";
+import * as anthropicSession from "./anthropic-session-adapter.js";
 import {
   CODEX_RESPONSES_PROVIDER,
   withCodexContentTypeRepair,
@@ -23,8 +22,10 @@ import { isPollOnlyPendingBatch } from "../subagent/poll-exempt.js";
 import { OPENCODE_GO_PROVIDER_ID } from "../../packages/opencode-go/src/index.js";
 import { BIFROST_PROVIDER } from "./bifrost-adapter.js";
 import { OPENAI_RESPONSES_PROVIDER } from "./openai-responses.js";
-import { OPENCODE_GO_MESSAGES_PROVIDER } from "./opencode-go-anthropic-adapter.js";
-import { ZEN_MESSAGES_PROVIDER } from "./zen-anthropic-adapter.js";
+import {
+  OPENCODE_GO_MESSAGES_PROVIDER,
+  ZEN_MESSAGES_PROVIDER,
+} from "./anthropic-session-adapter.js";
 
 // Corbits Code ships first-party adapters on top of the built-in provider set:
 // openai-compatible and OpenCode Go chat-completions adapters, Codex/Grok
@@ -64,12 +65,12 @@ const manifest: AdapterManifest = [
   },
   {
     provider: OPENCODE_GO_MESSAGES_PROVIDER,
-    specifier: "opencode-go-anthropic-adapter",
+    specifier: "anthropic-session-adapter",
     export: "createOpenCodeGoAnthropicAdapter",
   },
   {
     provider: ZEN_MESSAGES_PROVIDER,
-    specifier: "zen-anthropic-adapter",
+    specifier: "anthropic-session-adapter",
     export: "createZenAnthropicAdapter",
   },
 ];
@@ -81,8 +82,7 @@ const localModules: Record<string, unknown> = {
   "grok-responses": grokResponses,
   "bifrost-adapter": bifrostAdapter,
   "openai-responses": openaiResponses,
-  "opencode-go-anthropic-adapter": opencodeGoAnthropic,
-  "zen-anthropic-adapter": zenAnthropic,
+  "anthropic-session-adapter": anthropicSession,
 };
 
 let cached: Promise<Dependencies> | undefined;

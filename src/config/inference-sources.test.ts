@@ -15,7 +15,7 @@ import { createOpenAICompatibleAdapter } from "../provider/openai-compatible-ada
 import { createInferenceDependencies } from "../provider/inference-dependencies.js";
 import { clearSourceCredentials } from "./source-credentials.js";
 import { OPENAI_RESPONSES_PROVIDER } from "../provider/openai-responses.js";
-import { ZEN_MESSAGES_PROVIDER } from "../provider/zen-anthropic-adapter.js";
+import { ZEN_MESSAGES_PROVIDER } from "../provider/anthropic-session-adapter.js";
 import { firstClassProviderById } from "../../packages/first-class-providers/src/index.js";
 import {
   ZEN_DEFAULT_BASE_URL,

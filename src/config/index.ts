@@ -58,14 +58,16 @@ import {
 import { BIFROST_PROVIDER } from "../provider/bifrost-adapter.js";
 import { isOllamaProviderId, ollamaOpenAIBaseURL } from "../provider/ollama.js";
 import { selectableGoModelIds } from "../provider/opencode-go-models.js";
-import { ZEN_MESSAGES_PROVIDER } from "../provider/zen-anthropic-adapter.js";
+import {
+  OPENCODE_GO_MESSAGES_PROVIDER,
+  ZEN_MESSAGES_PROVIDER,
+} from "../provider/anthropic-session-adapter.js";
 import { selectableZenModelIds } from "../provider/zen-models.js";
 import {
   OPENAI_RESPONSES_PROVIDER,
   OPENAI_SESSION_ID_OPTION,
 } from "../provider/openai-responses.js";
 import { OPENCODE_SESSION_ID_OPTION } from "../provider/opencode-session.js";
-import { OPENCODE_GO_MESSAGES_PROVIDER } from "../provider/opencode-go-anthropic-adapter.js";
 import {
   OPENCODE_GO_BASE_URL,
   OPENCODE_GO_PROVIDER_ID,
