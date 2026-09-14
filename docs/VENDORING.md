@@ -227,14 +227,14 @@ those packages now resolves to the single root instance. As of this sync,
 
 ## Patched vs. verbatim
 
-Of the eleven vendored paths, four carry local patches:
+Of the twelve vendored paths, four carry local patches:
 `@intx/inference`, `@intx/types`, `@intx/storage-isogit`, and
 `@intx/agent` — every divergence is a real fix not yet upstream, listed
-one-per-patch in that package's `PATCHES.md`. The other seven paths
-(six whole packages plus the partial `vendor/intx-workflow-host/adapters/`
-tree) are verbatim copies of upstream — no modifications. A diff against a
+one-per-patch in that package's `PATCHES.md`. The other eight paths
+(six whole packages plus the two partial `vendor/intx-workflow-host/`
+paths) are verbatim copies of upstream — no modifications. A diff against a
 pristine upstream checkout at the same commit and paths will show 100%
-upstream-authored lines for those seven.
+upstream-authored lines for those eight.
 
 ## Notable upstream shape changes carried by the 2026-08-22 sync
 
