@@ -26,8 +26,12 @@ registered in global settings (`pluginPaths`), so consent is global once granted
 | `path`          | `settings.pluginPaths` entries (add-by-path)                                                                                  | **No** until granted once                                         | `~/.corbits/trust/path-plugins.json` (global) |
 
 Untrusted `project` / `path` plugins are discovered as **metadata-only**: the
-loader reads `manifest.json` (or equivalent) but does **not** `import()` the
-module and does **not** load markdown agents/commands. Enabling a listed
+loader reads the native `manifest.json` or `.claude-plugin/manifest.json` only
+(the `.claude-plugin/plugin.json` convention is not read on this path; kind
+records `"command"` until the trusted full load) but does **not** `import()`
+the module and does **not** load markdown agents/commands. (`loadDataOnlyPlugin`
+on the full-load path prefers the native manifest, then `plugin.json`, then the
+manifest variant, inferring kind.) Enabling a listed
 project plugin in `/plugins` records project trust for that cwd; adding a path
 via the UI (or enabling a path stub) records global path trust and full-loads
 the module. Path trust survives opening a different project directory; project
@@ -176,9 +180,11 @@ parent never needs `read_file` on `~/.claude/plugins/...` (path-escape still
 blocks those roots for path tools; writes/deletes outside cwd stay denied). JS
 Claude plugins (if any) stay on explicit `pluginPaths`.
 
-`settings.workflowPlugins` / `settings.agentPlugins` (specifier arrays) become
-thin aliases: at load they are appended to `pluginPaths` and flow through the
-same pipeline. They are kept for back-compat for one release, then removed.
+`settings.workflowPlugins` / `settings.agentPlugins` (specifier arrays) are
+removed outright: settings carrying them warn on load (`src/config/settings.ts`)
+and the keys are dropped on the next save. Install those plugins under
+`.corbits/plugins/` (or via `/plugins` add-by-path) and enable them in
+`/plugins`.
 
 ### One registration switch
 
@@ -220,7 +226,9 @@ and never delete `~/.claude`. Every remove writes `enabled: false` rather
 than dropping `settings.plugins[id]` so in-session command gating holds;
 disk and unique `pluginPaths` entries are still removed so the plugin is
 gone after restart. Everything persists to global settings
-immediately.
+immediately. Each row carries an origin marker — origin `repo` renders
+`[bundled]`, others `[user]`/`[project]`/`[path]`; the same marker appears on
+plugin slash commands in the picker.
 
 ## Implemented capabilities
 
@@ -278,7 +286,7 @@ shape.
 - Profile precedence: built-in defaults < plugin profiles < local
   `.agents/agents/*.json` (most specific wins on same-id conflicts).
 - Per-kind verify in `/plugins` (agent = profile count check).
-- Add-by-path (`a`) uses the same path suggestion UX as `@` mentions
+- Add-by-path (Alt+A) uses the same path suggestion UX as `@` mentions
   (`listPathSuggestions`) so registering a plugin from disk can browse directories.
 
 ### Data-only command plugins
@@ -327,10 +335,10 @@ shape.
   (`git-rebase`, `linear-issue-workflow`, `style`, `philosophy`,
   `native-integration`, `typescript`, `ponytail`, `opsh`). Background libs
   such as `git-worktrees` set both flags. Bodies that stay out of discovery
-  such as `idiot-proof` and `native-runtime` also set both flags (not a slash,
-  and hidden from the skill listing — though an explicit `use_skill` load by
-  name still resolves). The slash command is a direct
-  user entry point on top.
+  such as `idiot-proof` and `native-runtime` also set both flags (baked into
+  workers; not a slash and not listed by `skill_search`/`discoverSkills`, but
+  still loadable by explicit `use_skill`/`resolveSkillBody` name). The slash
+  command is a direct user entry point on top.
 - **First-party catalog.** `plugins/corbits-skills/` (id `corbits-skills`,
   kind `command`, `defaultEnabled: true`) is the bundled skill catalog. Origin
   `repo` is auto-trusted. Auto-enable applies only when `origin === "repo"` AND
