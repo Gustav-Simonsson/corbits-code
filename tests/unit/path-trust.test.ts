@@ -240,26 +240,35 @@ describe("path-trust (global)", () => {
     }
   });
 
-  test("a zero-byte store file is invalid and migration re-seeds it", async () => {
+  test("a zero-byte store file is invalid and migration refuses to seed it", async () => {
     const { home, cleanup } = await scratch();
     try {
       await writeStoreFile(home, "");
       expect((await readPathTrustStore(home)).state).toBe("invalid");
 
       const plugin = join(home, "shared", "plugin");
+      let resolveCalls = 0;
+      let migratedCalls = 0;
       const store = await migratePathTrustFromPluginPaths(
         [plugin],
-        async () => [plugin],
+        async (p) => {
+          resolveCalls += 1;
+          return [p];
+        },
         home,
+        { onMigrated: () => (migratedCalls += 1) },
       );
-      expect(isPathPluginTrusted(store, plugin)).toBe(true);
-      expect((await readPathTrustStore(home)).state).toBe("valid");
+      expect(isPathPluginTrusted(store, plugin)).toBe(false);
+      expect(store.trustedPluginPaths).toEqual([]);
+      expect(resolveCalls).toBe(0);
+      expect(migratedCalls).toBe(0);
+      expect((await readPathTrustStore(home)).state).toBe("invalid");
     } finally {
       await cleanup();
     }
   });
 
-  test("a corrupt store file is invalid, loads empty, and migration re-seeds it", async () => {
+  test("a corrupt store file is invalid, loads empty, and migration refuses to seed it", async () => {
     const { home, cleanup } = await scratch();
     try {
       await writeStoreFile(home, "{not json");
@@ -267,12 +276,54 @@ describe("path-trust (global)", () => {
       expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([]);
 
       const plugin = join(home, "shared", "plugin");
+      let resolveCalls = 0;
+      let migratedCalls = 0;
       const store = await migratePathTrustFromPluginPaths(
         [plugin],
-        async () => [plugin],
+        async (p) => {
+          resolveCalls += 1;
+          return [p];
+        },
         home,
+        { onMigrated: () => (migratedCalls += 1) },
       );
-      expect(isPathPluginTrusted(store, plugin)).toBe(true);
+      expect(isPathPluginTrusted(store, plugin)).toBe(false);
+      expect(store.trustedPluginPaths).toEqual([]);
+      expect(resolveCalls).toBe(0);
+      expect(migratedCalls).toBe(0);
+      expect((await readPathTrustStore(home)).state).toBe("invalid");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("revoke then corrupt: migration refuses to re-grant and leaves the store invalid", async () => {
+    const { home, cleanup } = await scratch();
+    try {
+      const plugin = join(home, "shared", "plugin");
+      await trustPathPlugin(plugin, home);
+      await revokePathPlugin(plugin, home);
+      expect((await readPathTrustStore(home)).state).toBe("valid");
+
+      await writeStoreFile(home, "{not json");
+      expect((await readPathTrustStore(home)).state).toBe("invalid");
+
+      let resolveCalls = 0;
+      let migratedCalls = 0;
+      const store = await migratePathTrustFromPluginPaths(
+        [plugin],
+        async (p) => {
+          resolveCalls += 1;
+          return [p];
+        },
+        home,
+        { onMigrated: () => (migratedCalls += 1) },
+      );
+      expect(isPathPluginTrusted(store, plugin)).toBe(false);
+      expect(store.trustedPluginPaths).toEqual([]);
+      expect(resolveCalls).toBe(0);
+      expect(migratedCalls).toBe(0);
+      expect((await readPathTrustStore(home)).state).toBe("invalid");
     } finally {
       await cleanup();
     }
