@@ -37,6 +37,22 @@ describe("createCorrelationAcceptance", () => {
     acceptance.settle("missing");
   });
 
+  test("abandon drops the waiter without resolving it", async () => {
+    const acceptance = createCorrelationAcceptance();
+    const pending = acceptance.wait("corr-1");
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    acceptance.abandon("corr-1");
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(settled).toBe(false);
+    const retry = acceptance.wait("corr-1");
+    acceptance.settle("corr-1");
+    await retry;
+  });
+
   test("an approved correlation does not settle until tool.start", async () => {
     const acceptance = createCorrelationAcceptance();
     const pending = acceptance.wait("corr-1");
