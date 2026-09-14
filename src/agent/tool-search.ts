@@ -283,7 +283,17 @@ export interface ToolSearchDeps {
   // invoke them this turn. The next inference also declares them on the wire
   // for strict providers.
   promote: (names: string[]) => void;
+  // Resolves to the remaining in-flight MCP handshake count after waiting up
+  // to `timeoutMs`. The toolset bounds its own wait; the handler re-races
+  // below so even a stuck dependency can never hang the call. Omitted callers
+  // (tests, ad-hoc indexes) have no pending handshakes to wait for.
+  awaitPendingConnections?: (timeoutMs?: number) => Promise<number>;
 }
+
+// Brief bound a tool_search miss waits for in-flight MCP handshakes before
+// answering. A hung authorization must never hang the call, so both the
+// toolset wait and the handler race below are capped by this.
+export const TOOL_SEARCH_PENDING_WAIT_MS = 1_000;
 
 const ToolSearchArgs = type({ query: "string" });
 
@@ -305,6 +315,28 @@ function indent(text: string, pad: string): string {
     .join("\n");
 }
 
+// Race the dependency's pending-count wait against the same bound, so a
+// stuck dependency (hung OAuth that never settles) cannot hang the call.
+// Resolves undefined when this race itself times out.
+async function racePendingCount(
+  awaitPending: (timeoutMs?: number) => Promise<number>,
+): Promise<number | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      awaitPending(TOOL_SEARCH_PENDING_WAIT_MS),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(
+          () => resolve(undefined),
+          TOOL_SEARCH_PENDING_WAIT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export function createToolSearchTool(deps: ToolSearchDeps): AgentTool {
   return stringTool({
     definition: toolSearchDefinition,
@@ -316,7 +348,25 @@ export function createToolSearchTool(deps: ToolSearchDeps): AgentTool {
       const query = parsed.query.trim();
       if (query.length === 0)
         return "Error: tool_search requires a non-empty query.";
-      const names = deps.search(query);
+      let names = deps.search(query);
+      if (names.length === 0 && deps.awaitPendingConnections !== undefined) {
+        // Miss while connectors start up: wait briefly, then re-search so
+        // late-mounting tools land. The race bounds even a stuck dependency
+        // (hung OAuth) — undefined means the wait itself timed out.
+        const stillPending = await racePendingCount(
+          deps.awaitPendingConnections,
+        );
+        names = deps.search(query);
+        if (names.length === 0 && (stillPending ?? 1) > 0) {
+          const detail =
+            stillPending === undefined
+              ? "a connector may still be starting up"
+              : stillPending === 1
+                ? "1 connector is still connecting"
+                : `${stillPending} connectors are still connecting`;
+          return `No tools matched "${query}" yet — ${detail}. Retry this search shortly.`;
+        }
+      }
       if (names.length === 0) {
         return `No tools matched "${query}". Try different keywords describing the capability.`;
       }
