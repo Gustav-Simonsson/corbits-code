@@ -12,7 +12,7 @@
 import { type } from "arktype";
 
 import { isReactorErrorFatal } from "../agent/reactor-events.js";
-import type { TurnStatus } from "./session-chrome.js";
+import type { TurnStatus } from "./chrome-state.js";
 
 // Bound on the accumulated stream text kept for the current cycle. Comfortably
 // larger than what the cross-cycle fingerprint comparison needs.

@@ -41,7 +41,7 @@ import {
   resolveRampPhase,
   resolveTurnLabel,
   sendFailureText,
-} from "./session-chrome.js";
+} from "./chrome-state.js";
 import { shouldAutoRetryQuota } from "./quota-retry.js";
 import { RUNTIME_FLASH_MS } from "./runtime-notices.js";
 import {

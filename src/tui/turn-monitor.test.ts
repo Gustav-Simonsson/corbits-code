@@ -10,7 +10,7 @@ import { noticeText } from "./shell/chrome.js";
 import { createAppShell } from "./shell/index.js";
 import { withTestRenderer } from "./harness.js";
 import { RUNTIME_FLASH_MS } from "./runtime-notices.js";
-import { LIVE_WORD_MS } from "./session-chrome.js";
+import { LIVE_WORD_MS } from "./chrome-state.js";
 import {
   STALL_NOTICE_MESSAGE,
   STALL_RECOVERY_MESSAGE,

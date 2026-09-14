@@ -5,7 +5,7 @@ import {
   isArchiveLike,
   parseArchiveRef,
   parseArchiveTarget,
-} from "./archive-uri.js";
+} from "./compaction-archive.js";
 
 describe("archive URI", () => {
   test("formats and parses archive:/// occurrence refs", () => {

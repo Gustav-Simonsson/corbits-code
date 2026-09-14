@@ -4,6 +4,7 @@
 import { homedir } from "node:os";
 import {
   clampBoardRows,
+  type ActivityState,
   type AgentPanelRow,
   type ChromeZoneContent,
   type TaskPanelRow,
@@ -33,7 +34,6 @@ import {
   type LockupInput,
 } from "../lockup.js";
 import type { RampPhase, StallAge } from "../ramp.js";
-import type { ActivityState } from "../session-chrome.js";
 import {
   BORDER,
   composeAttentionLabel,

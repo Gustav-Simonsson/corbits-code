@@ -18,7 +18,7 @@ import { streamRowCount } from "./shell/transcript";
 import { STEER_WAIT_NOTICE_MS } from "./notice-line";
 import { withTestRenderer } from "./harness";
 import { badgeCount } from "./delivery-queue";
-import { LIVE_ACTIVITY_WORDS } from "./session-chrome";
+import { LIVE_ACTIVITY_WORDS } from "./chrome-state";
 
 describe("mapReactorLike", () => {
   test("operator-originated message.received → user", () => {

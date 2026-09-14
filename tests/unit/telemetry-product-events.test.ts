@@ -50,7 +50,7 @@ import {
 import {
   captureAuthFailure,
   classifyAgentSendFailure,
-} from "../../src/tui/session-chrome.js";
+} from "../../src/tui/chrome-state.js";
 
 interface BatchBody {
   batch: { event: string; properties: Record<string, unknown> }[];

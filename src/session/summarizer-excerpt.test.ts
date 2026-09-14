@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ArchiveOccurrence } from "./compaction-archive-schema.js";
-import { buildArchiveSummaryExcerpt } from "./summary-excerpt.js";
+import { buildArchiveSummaryExcerpt } from "./summarizer.js";
 
 function occ(
   partial: Pick<ArchiveOccurrence, "occurrenceId" | "kind"> &

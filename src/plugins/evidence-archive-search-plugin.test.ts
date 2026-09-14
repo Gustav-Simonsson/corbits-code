@@ -8,9 +8,9 @@ import {
   advertiseArchiveSurface,
   evidenceArchiveSearchPlugin,
 } from "./evidence-archive-search-plugin.js";
-import { formatArchiveRef } from "../session/archive-uri.js";
 import {
   createCompactionArchive,
+  formatArchiveRef,
   type CompactionArchive,
 } from "../session/compaction-archive.js";
 import { CATALOG_TOOL_NAMES, CORE_TOOL_NAMES } from "../agent/tool-search.js";
