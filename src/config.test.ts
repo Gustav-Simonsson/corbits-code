@@ -23,7 +23,10 @@ import {
   SOURCE_MAX_TOKENS,
 } from "./config/index.js";
 import { DIRECTOR_IDS } from "./agent/directors/types.js";
-import { clearSourceCredentials, peekSourceCredentialSecret } from "./config/source-credentials.js";
+import {
+  clearSourceCredentials,
+  peekSourceCredentialSecret,
+} from "./config/source-credentials.js";
 import type { Config, UnconfiguredConfig } from "./config/index.js";
 import {
   mergeProviderIntoSettings,
