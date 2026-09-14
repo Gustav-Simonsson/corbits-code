@@ -25,7 +25,7 @@ import {
   captureAuthFailure,
   classifyAgentSendFailure,
   shouldSettleUiAfterSendFailure,
-} from "../session-chrome.js";
+} from "../chrome-state.js";
 import { ingestOperatorPrompt } from "../prompt-attachments.js";
 import {
   imageAttachmentFromPath,

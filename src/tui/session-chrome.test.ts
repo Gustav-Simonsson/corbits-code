@@ -10,7 +10,7 @@ import {
   resolveTurnLabel,
   sendFailureText,
   shouldSettleUiAfterSendFailure,
-} from "./session-chrome.js";
+} from "./chrome-state.js";
 
 // The load-bearing guarantee: whatever tool identifier, MCP server name, or
 // plugin name the runtime hands us, the rendered ticker string must land in

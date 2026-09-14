@@ -1,4 +1,4 @@
-import type { TurnStatus } from "./session-chrome.js";
+import type { TurnStatus } from "./chrome-state.js";
 
 // How long the run can be continuously awaiting a response with no new content
 // before the watchdog fires and aborts the in-flight request.
