@@ -174,11 +174,6 @@ Corbits Code fans work out to short-lived **fleet agents** — workers with thei
 
 Dispatch uses a structured brief (context / goal / optional goals seed) and returns a structured report. The TUI Agents strip and fleet board show who is running; live tool progress updates the status bar without dumping the child transcript into the parent chat. There is no turn budget. A tool-less final turn completes only with the four-heading report envelope. Printed `<tool_call>` markup in assistant text gets one corrective nudge to issue a real tool call and does not count as the wrap-up; without the envelope, one incomplete-report nudge is given and a second tool-less turn without the envelope salvages as `incomplete-report-stop`. Counsel and `intent=plan` also require plan substance in Findings (files/paths, acceptance criteria, non-goals, risks, ordered steps); headings-only or stub Findings salvage as `incomplete-report`, not an attachable plan. A silent worker (no activity for `stallTimeoutMs`, opt-in) gets one continuation nudge, then salvages as `stalled` only after a full `stallTimeoutMs` grace with still no activity — queued checks inside that window wait, they do not salvage. An opt-in `deadlineMs`, or an operator cancel, can also end a run early. Each of these returns a salvage report so a runaway or idle child cannot quietly burn a large token budget or look done after prose alone.
 
-## Roadmap (planned, not yet shipped)
-
-- **Fast provider/model switching** in the TUI with a persisted default.
-- **Perpetual-session context management** — compaction/curation so a long-running session's context window stays bounded.
-
 ## Business Justification
 
 - Raw feature throughput: the agent completes tasks without human babysitting.
