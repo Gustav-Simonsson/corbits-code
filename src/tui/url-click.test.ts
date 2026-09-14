@@ -17,7 +17,9 @@ import { withTestRenderer } from "./harness";
 import { appendStreamRow, replaceStreamRowAt } from "./shell/chrome";
 import { createAppShell } from "./shell/index";
 import {
+  isOpenableUrl,
   isUnderlined,
+  markdownLinkAt,
   paintLinkLine,
   resetUrlOpener,
   setUrlOpener,
@@ -508,6 +510,254 @@ describe("Ctrl+clicking a transcript URL", () => {
           });
           await h.renderOnce();
           expect(opened).toEqual(["https://example.com/x"]);
+        } finally {
+          resetUrlOpener();
+          shell.dispose();
+        }
+      },
+      { width: 80, height: 24 },
+    );
+  });
+});
+
+describe("transcript markdown resolver edges (CL-7955)", () => {
+  test("adjacent-link boundary cells miss and never resolve garbage", async () => {
+    await withTestRenderer(
+      async (h) => {
+        const shell = createAppShell(h.renderer, {
+          terminal: { columns: 80, rows: 24 },
+          wireKeys: false,
+          run: "idle",
+        });
+        const opened: string[] = [];
+        setUrlOpener((url) => {
+          opened.push(url);
+        });
+        try {
+          appendStreamRow(shell, {
+            role: "assistant",
+            text: "[a](https://a.com)[b](https://b.com)",
+          });
+          const painted = await waitForPaintedCell(h, "a.com");
+          const line = h.captureCharFrame().split("\n")[painted.y] ?? "";
+
+          // Every resolved cell is a real openable target: the junction
+          // between two adjacent links must miss rather than fuse their
+          // sources into a garbage URL.
+          for (let x = 0; x < line.length; x += 1) {
+            const hit = markdownLinkAt(h.renderer, x, painted.y);
+            if (hit === null) continue;
+            expect(isOpenableUrl(hit)).toBe(true);
+            expect([`https://a.com`, `https://b.com`]).toContain(hit);
+          }
+
+          // The junction cell itself (the ")" before "b (") misses, and
+          // Ctrl+clicking it opens nothing.
+          const junction = line.indexOf(")b (");
+          expect(junction).toBeGreaterThan(-1);
+          expect(markdownLinkAt(h.renderer, junction, painted.y)).toBeNull();
+          await h.mockMouse.click(junction, painted.y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([]);
+
+          // Either side still opens its own target: the labels are
+          // unambiguous, so the miss stays pinned to the boundary.
+          const labelA = findCell(h.captureCharFrame(), " a (");
+          expect(labelA).not.toBeNull();
+          await h.mockMouse.click(defined(labelA).x + 1, defined(labelA).y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual(["https://a.com"]);
+
+          opened.length = 0;
+          const targetB = findCell(h.captureCharFrame(), "https://b.com");
+          expect(targetB).not.toBeNull();
+          await h.mockMouse.click(defined(targetB).x, defined(targetB).y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual(["https://b.com"]);
+        } finally {
+          resetUrlOpener();
+          shell.dispose();
+        }
+      },
+      { width: 80, height: 24 },
+    );
+  });
+
+  test("non-link prose in a markdown row misses", async () => {
+    await withTestRenderer(
+      async (h) => {
+        const shell = createAppShell(h.renderer, {
+          terminal: { columns: 80, rows: 24 },
+          wireKeys: false,
+          run: "idle",
+        });
+        const opened: string[] = [];
+        setUrlOpener((url) => {
+          opened.push(url);
+        });
+        try {
+          appendStreamRow(shell, {
+            role: "assistant",
+            text: "see https://example.com/docs ok",
+          });
+          const bare = await waitForPaintedCell(h, "example.com/docs");
+          const prose = findCell(h.captureCharFrame(), "see ");
+          expect(prose).not.toBeNull();
+          const at = defined(prose);
+          expect(markdownLinkAt(h.renderer, at.x, at.y)).toBeNull();
+          await h.mockMouse.click(at.x, at.y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([]);
+
+          await h.mockMouse.click(bare.x, bare.y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual(["https://example.com/docs"]);
+        } finally {
+          resetUrlOpener();
+          shell.dispose();
+        }
+      },
+      { width: 80, height: 24 },
+    );
+  });
+
+  test("image markup never opens, even with a URL-shaped label", async () => {
+    await withTestRenderer(
+      async (h) => {
+        const shell = createAppShell(h.renderer, {
+          terminal: { columns: 80, rows: 24 },
+          wireKeys: false,
+          run: "idle",
+        });
+        const opened: string[] = [];
+        setUrlOpener((url) => {
+          opened.push(url);
+        });
+        try {
+          appendStreamRow(shell, {
+            role: "assistant",
+            text: "see ![logo](https://example.com/logo.png) ok",
+          });
+          const logo = await waitForPaintedCell(h, "logo");
+          expect(markdownLinkAt(h.renderer, logo.x, logo.y)).toBeNull();
+          await h.mockMouse.click(logo.x, logo.y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([]);
+
+          // A URL-shaped image label paints as URL text but stays an
+          // image: Ctrl+clicking it must not open the label.
+          appendStreamRow(shell, {
+            role: "assistant",
+            text: "see ![https://evil.example/x](https://img.example/y.png) ok",
+          });
+          const evil = await waitForPaintedCell(h, "evil.example");
+          await h.mockMouse.click(evil.x + 1, evil.y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([]);
+        } finally {
+          resetUrlOpener();
+          shell.dispose();
+        }
+      },
+      { width: 80, height: 24 },
+    );
+  });
+
+  test("a markdown bare URL wrapped across rows opens the full target", async () => {
+    await withTestRenderer(
+      async (h) => {
+        const shell = createAppShell(h.renderer, {
+          terminal: { columns: 40, rows: 24 },
+          wireKeys: false,
+          run: "idle",
+        });
+        const opened: string[] = [];
+        setUrlOpener((url) => {
+          opened.push(url);
+        });
+        try {
+          const full =
+            "https://example.com/abcdefghijklmnopqrstuvwxyz0123456789";
+          appendStreamRow(shell, {
+            role: "assistant",
+            text: `checking ${full} today`,
+          });
+          const first = await waitForPaintedCell(h, "example.com");
+          await h.mockMouse.click(first.x, first.y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual([full]);
+        } finally {
+          resetUrlOpener();
+          shell.dispose();
+        }
+      },
+      { width: 40, height: 24 },
+    );
+  });
+
+  test("a markdown link still opens at its post-scroll position", async () => {
+    await withTestRenderer(
+      async (h) => {
+        const shell = createAppShell(h.renderer, {
+          terminal: { columns: 80, rows: 24 },
+          wireKeys: false,
+          run: "idle",
+        });
+        const opened: string[] = [];
+        setUrlOpener((url) => {
+          opened.push(url);
+        });
+        try {
+          for (let i = 0; i < 25; i += 1) {
+            appendStreamRow(shell, {
+              role: "assistant",
+              text: `filler line ${i}`,
+            });
+          }
+          appendStreamRow(shell, {
+            role: "assistant",
+            text: "see https://example.com/docs ok",
+          });
+          for (let i = 0; i < 3; i += 1) {
+            appendStreamRow(shell, {
+              role: "assistant",
+              text: `trailing filler ${i}`,
+            });
+          }
+          const before = await waitForPaintedCell(h, "example.com/docs");
+          for (let i = 0; i < 2; i += 1) {
+            await h.mockMouse.scroll(before.x, before.y, "up");
+          }
+          // Let in-flight scroll work land before clicking: a Ctrl+click
+          // whose down/up straddles a scroll re-render never arms, so the
+          // keeper settles first and tests the post-scroll position itself.
+          await new Promise((r) => setTimeout(r, 100));
+          await h.renderOnce();
+          await h.renderOnce();
+          const after = findCell(h.captureCharFrame(), "example.com/docs");
+          expect(after).not.toBeNull();
+          expect(defined(after).y).not.toBe(before.y);
+          await h.mockMouse.click(defined(after).x, defined(after).y, 0, {
+            modifiers: { ctrl: true },
+          });
+          await h.renderOnce();
+          expect(opened).toEqual(["https://example.com/docs"]);
         } finally {
           resetUrlOpener();
           shell.dispose();

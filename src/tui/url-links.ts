@@ -636,14 +636,44 @@ function findMarkdownLinks(line: string): LinkHit[] {
 }
 
 /**
+ * Whole `![label](target)` ranges: bare-URL scanning cannot tell image markup
+ * from links, so the resolver discards bare matches touching these ranges and
+ * the spans above already skip them. Images stay non-openable by policy.
+ */
+function findImageRanges(line: string): { start: number; end: number }[] {
+  const ranges: { start: number; end: number }[] = [];
+  for (const match of line.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
+    const start = match.index ?? 0;
+    ranges.push({ start, end: start + match[0].length });
+  }
+  return ranges;
+}
+
+/**
  * The link target under one source offset: bare URLs first (fidelity for
- * URL-shaped link labels), then inline `[label](target)` spans.
+ * URL-shaped link labels), then inline `[label](target)` spans. A bare match
+ * fused across a link span's boundary (`[a](u1)[b](u2)` scans as one run) or
+ * inside image markup is the matcher's artifact, not a link the line holds,
+ * so only a bare match one span fully contains — or no span touches — counts.
  */
 function markdownUrlAt(line: string, offset: number): string | null {
+  const spans = findMarkdownLinks(line);
+  const images = findImageRanges(line);
   for (const hit of findLinks(line)) {
-    if (offset >= hit.start && offset < hit.end) return hit.url;
+    if (offset >= hit.start && offset < hit.end) {
+      const fused = spans.some(
+        (span) =>
+          hit.start < span.end &&
+          hit.end > span.start &&
+          (hit.start < span.start || hit.end > span.end),
+      );
+      const imaged = images.some(
+        (image) => hit.start < image.end && hit.end > image.start,
+      );
+      if (!fused && !imaged) return hit.url;
+    }
   }
-  for (const span of findMarkdownLinks(line)) {
+  for (const span of spans) {
     if (offset >= span.start && offset < span.end) return span.url;
   }
   return null;
@@ -734,13 +764,15 @@ function codeBlockLinkAt(
 
 /**
  * The markdown click target: the raw link target under terminal-absolute
- * (x, y), or null when the cell paints no link. Walks from the hit leaf up
- * to the nearest painted code block (assistant markdown paints through
- * library CodeRenderables, one per block); clicks landing between blocks
- * still resolve through the parent markdown node, which pairs the same full
- * source with its own line info. TextRenderable rows never resolve here —
- * their own armed node handlers own those clicks. Never throws: anything
- * unexpected resolves to null so a missed click stays a missed click.
+ * (x, y), or null when the cell paints no link. Walks from the hit leaf up to
+ * the nearest painted code block (assistant markdown paints through library
+ * CodeRenderables, one per block), and that first block decides: its answer
+ * stands, with no retry at an ancestor, so a miss inside one block never
+ * falls through to a wider ancestor that pairs the same column with a link
+ * the narrower block already rejected. Clicks landing outside any block miss.
+ * TextRenderable rows never resolve here — their own armed node handlers own
+ * those clicks. Never throws: anything unexpected resolves to null so a
+ * missed click stays a missed click.
  */
 export function markdownLinkAt(
   renderer: CliRenderer,
@@ -756,8 +788,7 @@ export function markdownLinkAt(
     }
     while (current) {
       if (current instanceof CodeRenderable) {
-        const url = codeBlockLinkAt(current, x, y);
-        if (url !== null) return url;
+        return codeBlockLinkAt(current, x, y);
       }
       current = current.parent;
     }
