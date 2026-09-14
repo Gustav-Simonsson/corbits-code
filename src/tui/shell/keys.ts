@@ -437,6 +437,22 @@ export function createShellKeyHandlers(
           return;
         }
       }
+      // Unclaimed printables fall through to the prompt instead of vanishing:
+      // the prompt does not hold focus while the overlay is open, so the
+      // InputRenderable cannot insert them itself. Decision surfaces are the
+      // modal exception (focus-routing): a permission/operator gate keeps
+      // every key until it is answered or dismissed. The overlay stays open
+      // (no dismiss, no idle-notify) so a queued gate cannot drain mid-list.
+      if (
+        shell.overlayKind !== "permissions" &&
+        shell.overlayKind !== "operator" &&
+        isPrintableInsertKey(key)
+      ) {
+        key.preventDefault();
+        shell.prompt.insertText(key.sequence as string);
+        shell.sentHistory = sentHistoryOnEdit(shell.sentHistory);
+        return;
+      }
       return;
     }
 
