@@ -71,7 +71,12 @@ import {
   steerCount,
   type RunState,
 } from "../session-queue.js";
-import { agentVoicesIn, isCollapsibleRow, type StreamRow } from "../stream.js";
+import {
+  agentVoicesIn,
+  isCollapsibleRow,
+  MAIN_AGENT,
+  type StreamRow,
+} from "../stream.js";
 import { UI } from "../theme.js";
 import {
   isDecisionOverlay,
@@ -1098,7 +1103,13 @@ const systemPushSequence = new WeakMap<AppShell, number>();
 function isDuplicateSystemEcho(shell: AppShell, row: StreamRow): boolean {
   if (row.role !== "system") return false;
   const top = shell.streamLog[shell.streamLog.length - 1];
-  if (top === undefined || top.role !== "system" || top.text !== row.text) {
+  if (
+    top === undefined ||
+    top.role !== "system" ||
+    top.text !== row.text ||
+    (top.agent ?? MAIN_AGENT) !== (row.agent ?? MAIN_AGENT) ||
+    top.meta !== row.meta
+  ) {
     return false;
   }
   // The in-flight call already advanced the sequence, so the top row is
