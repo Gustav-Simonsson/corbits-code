@@ -157,7 +157,9 @@ export function createBoundedModelCatalog(args: {
         parsed.data.map(({ id }) => id.trim()).filter((id) => id.length > 0),
       ),
     ];
-    return models.length > 0 ? { status: "models", models } : { status: "empty" };
+    return models.length > 0
+      ? { status: "models", models }
+      : { status: "empty" };
   }
 
   function selectableModelIds(): readonly string[] {

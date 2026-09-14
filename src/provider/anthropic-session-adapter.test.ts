@@ -22,9 +22,11 @@ const factories = {
 describe("session header Anthropic adapter", () => {
   for (const [name, factory] of Object.entries(factories)) {
     test(`${name}: delegates Anthropic request construction and adds only the session header`, () => {
-      const request = factory(
-        { sourceId: name, provider: `${name}-messages`, model: "minimax-m3" },
-      ).buildRequest(messages, "minimax-m3", {
+      const request = factory({
+        sourceId: name,
+        provider: `${name}-messages`,
+        model: "minimax-m3",
+      }).buildRequest(messages, "minimax-m3", {
         providerOptions: { opencodeSessionId: "sess-1" },
       } as InferenceOptions);
       expect(request.headers["x-opencode-session"]).toBe("sess-1");
