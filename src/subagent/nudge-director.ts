@@ -234,12 +234,20 @@ export class SubAgentDirector extends DefaultDirector {
     requireEvidence = false,
     requirePlanSubstance = false,
     retryPolicy: RetryPolicy = createCorbitsRetryPolicy(),
+    toolDisciplineRules?: string,
   ) {
-    super(systemPrompt, toolDefinitions, {});
-    this._systemPrompt = systemPrompt;
+    // Composed before super() for the same reason as ChatDirectorImpl: the base
+    // director keeps its own copy and sends that, so anything appended after
+    // super() is never on the wire.
+    const composedPrompt =
+      toolDisciplineRules !== undefined && toolDisciplineRules.length > 0
+        ? `${systemPrompt}\n\n${toolDisciplineRules}`
+        : systemPrompt;
+    super(composedPrompt, toolDefinitions, {});
+    this._systemPrompt = composedPrompt;
     this.compaction = createCompactionGovernor(
       requestContinuation,
-      systemPrompt,
+      composedPrompt,
       toolDefinitions,
     );
     this.stallTimeoutMs = stallTimeoutMs;
