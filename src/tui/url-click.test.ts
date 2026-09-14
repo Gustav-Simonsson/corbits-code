@@ -497,7 +497,7 @@ describe("Ctrl+clicking a transcript URL", () => {
         try {
           // The armed row's own release handler opens and stops propagation;
           // the transcript-root markdown handler must not see the same
-          // gesture and open the (getLinkAt-resolved) target a second time.
+          // gesture and open the (resolver-resolved) target a second time.
           appendStreamRow(shell, {
             role: "user",
             text: "see https://example.com/x ok",
