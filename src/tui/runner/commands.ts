@@ -37,7 +37,14 @@ import { contextTokensFromUsage } from "../../provider/context-window.js";
 import { fleetDigest } from "../../subagent/index.js";
 import { renameSession } from "../../session/index.js";
 import { truncateSessionLabel } from "../../session/session-label.js";
-import { surfaceSystemNotice, attachClipboardImage } from "../shell/prompt.js";
+import {
+  surfaceSystemNotice,
+  attachClipboardImage,
+  setPromptModelLabel,
+} from "../shell/prompt.js";
+import { yoloModeLabel } from "../components/prompt-action-bar-label.js";
+import { isCodexProviderName } from "../../config/codex-providers.js";
+import { resolveSessionEffort } from "../../provider/reasoning-effort.js";
 import type { InferenceErrorLike } from "../../inference-gateway-error.js";
 import { terminalProviderFailureMessage } from "../../inference-error-message.js";
 import type { InferenceAttemptIdentity } from "./state.js";
@@ -109,6 +116,17 @@ export function createCommandLayer(
     setSkipPermissions: (value: boolean) => {
       services.permissionGate.setSkipPermissions(value);
       state.config.dangerouslySkipPermissions = value;
+      const effort = resolveSessionEffort(
+        state.config.model,
+        state.config.reasoningEffort,
+        isCodexProviderName(state.config.providerName),
+      );
+      setPromptModelLabel(hostOf(state).shell, {
+        profile: state.config.providerName,
+        model: state.config.model,
+        ...(effort !== undefined ? { effort } : {}),
+        mode: yoloModeLabel(value),
+      });
       void services.globalSettingsWriter.enqueue(async () => {
         try {
           const result = await persistSkipPermissionsDefault(

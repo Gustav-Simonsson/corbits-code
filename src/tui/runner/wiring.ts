@@ -35,7 +35,10 @@ import {
 import { scheduleUpgradeNotice } from "../../upgrade/index.js";
 import pkg from "../../../package.json" with { type: "json" };
 import { hydrateTasksFromTurns } from "../../agent/director.js";
-import { cycleReasoningEffort } from "../../provider/reasoning-effort.js";
+import {
+  cycleReasoningEffort,
+  resolveSessionEffort,
+} from "../../provider/reasoning-effort.js";
 import { isCodexProviderName } from "../../config/codex-providers.js";
 import { RUNTIME_FLASH_MS } from "../runtime-notices.js";
 import {
@@ -54,6 +57,11 @@ import {
   surfaceSystemNotice,
 } from "../shell/prompt.js";
 import { listPathSuggestions } from "../components/at-mention/list.js";
+import {
+  composePromptActionBarModelLabel,
+  yoloModeLabel,
+} from "../components/prompt-action-bar-label.js";
+import { composeSessionHeader } from "../components/session-header.js";
 import { listCommands } from "../commands/registry.js";
 import type { MCPConnectCallbacks } from "../../agent/tools.js";
 import { createRuntimeShutdown } from "./shutdown.js";
@@ -374,6 +382,7 @@ export function wirePostStartup(
       profile: state.config.providerName,
       model: state.config.model,
       effort: next,
+      mode: yoloModeLabel(state.config.dangerouslySkipPermissions),
     });
     setStatusFlash(hostOf(state).shell, `reasoning effort: ${next}`, {
       ttlMs: RUNTIME_FLASH_MS,
@@ -464,6 +473,30 @@ export function wirePostStartup(
         },
       );
     });
+
+  // The branded session header goes first among the deferred startup rows:
+  // it is the row the deferred queue flushes ahead of every other startup
+  // notice once the landing clears (a re-filed telemetry disclosure still
+  // lands ahead of it). A startup snapshot — later /yolo or effort toggles
+  // move the prompt border label only. While the landing holds, the notice
+  // strip shows the latest deferred wording; the transcript keeps the full
+  // order.
+  const headerEffort = resolveSessionEffort(
+    state.config.model,
+    state.config.reasoningEffort,
+    isCodexProviderName(state.config.providerName),
+  );
+  surfaceSystemNotice(
+    hostOf(state).shell,
+    composeSessionHeader({
+      essentials: composePromptActionBarModelLabel({
+        profile: state.config.providerName,
+        model: state.config.model,
+        ...(headerEffort !== undefined ? { effort: headerEffort } : {}),
+        mode: yoloModeLabel(state.config.dangerouslySkipPermissions),
+      }),
+    }),
+  );
 
   // Surface fire-and-forget startup notices now that there is a shell (queued
   // above, before `host` existed). Plugin load warnings are NOT notices — they

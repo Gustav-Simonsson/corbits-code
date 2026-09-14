@@ -131,7 +131,7 @@ full output, hiding the preview; the idiom and the arrow are unchanged.
 
 The prompt box's border carries the metadata that would otherwise cost a
 titlebar row: the model label sits right-aligned in the top rule as
-`profile · model · effort` (empty segments omitted), and a
+`profile · model · effort · mode` (empty segments omitted), and a
 compact `mcp !` sits immediately left of it when any MCP server still needs
 authorization (`/mcp` is the surface that names them), painted in
 `UI.warning` (sand, `#d1ad7d`) — the same role `plugin !` uses. Orange is
