@@ -4,8 +4,8 @@
  * holding Ctrl over a link highlights it, press-and-release on the same URL
  * opens it. Assistant markdown paints through childless library renderers
  * with no node to arm, so it is covered by a bubbling handler on the
- * transcript root (armMarkdownLinks) that resolves clicks through the
- * renderer's getLinkAt link map — click-to-open only, no hover highlight.
+ * transcript root (armMarkdownLinks) that resolves clicks through
+ * markdownLinkAt below — click-to-open only, no hover highlight.
  *
  * The gesture is modifier-gated end to end. Without the modifier nothing here
  * runs: rows keep today's expand and selection behavior, and with mouse
@@ -13,6 +13,8 @@
  * sees one. Only http(s) targets ever open; every other scheme is ignored.
  */
 import {
+  CodeRenderable,
+  Renderable,
   StyledText,
   TextAttributes,
   TextRenderable,
@@ -21,8 +23,8 @@ import {
   link as linkChunk,
   underline as underlineChunk,
   type CliRenderer,
+  type LineInfo,
   type MouseEvent,
-  type Renderable,
   type TextChunk,
 } from "@opentui/core";
 import { stringWidth } from "./view/height.js";
@@ -559,9 +561,8 @@ export function armLinkLine(
     press = null;
     if (start !== null && isUrlOpenClick(event) && at(event) === start) {
       openUrl(start);
-      // Armed rows register in the same link map getLinkAt reads, so the
-      // leaf's open would otherwise be repeated by the transcript-root
-      // armMarkdownLinks handler this event bubbles to. This handler runs
+      // The bubbled release would otherwise be resolved again by the
+      // transcript-root armMarkdownLinks handler. This handler runs
       // first in the bubble; stopping propagation starves the root of the
       // release and keeps exactly one open per gesture. The press
       // deliberately keeps bubbling so drag-select still works.
@@ -597,16 +598,186 @@ export function isUnderlined(attributes: number): boolean {
 }
 
 /**
+ * Link-markup characters whose painted width the resolver cannot know. The
+ * renderer conceals markdown link markup — observed: `[guide](…)` paints as
+ * `guide (…)` — and highlight state is not readable from here, so each of
+ * these characters is modeled as taking painted width 0 or 1. Every other
+ * character paints at its measured width.
+ */
+const CONCEALABLE = new Set(["[", "]", "(", ")"]);
+
+/**
+ * Inline `[label](target)` links in one source line. The label and the
+ * target both open the target. Images (`![alt](target)`) are skipped:
+ * nothing specifies their click behavior, and a missed click is safer
+ * than a wrong open.
+ */
+function findMarkdownLinks(line: string): LinkHit[] {
+  const spans: LinkHit[] = [];
+  const pattern = /\[([^\]]*)\]\(([^)\s]+)\)/g;
+  for (const match of line.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > 0 && line[index - 1] === "!") continue;
+    const url = match[2] ?? "";
+    const rawStart = index + match[0].lastIndexOf(url);
+    const end = trimUrlEnd(line, rawStart, rawStart + url.length);
+    if (end <= rawStart) continue;
+    const target = line.slice(rawStart, end);
+    const label = match[1] ?? "";
+    if (label.length > 0)
+      spans.push({
+        url: target,
+        start: index + 1,
+        end: index + 1 + label.length,
+      });
+    spans.push({ url: target, start: rawStart, end });
+  }
+  return spans;
+}
+
+/**
+ * The link target under one source offset: bare URLs first (fidelity for
+ * URL-shaped link labels), then inline `[label](target)` spans.
+ */
+function markdownUrlAt(line: string, offset: number): string | null {
+  for (const hit of findLinks(line)) {
+    if (offset >= hit.start && offset < hit.end) return hit.url;
+  }
+  for (const span of findMarkdownLinks(line)) {
+    if (offset >= span.start && offset < span.end) return span.url;
+  }
+  return null;
+}
+
+/**
+ * Source offsets a painted column can mean within one rendered row. Each
+ * offset starts painting somewhere in [min, max] (the spread comes from
+ * concealable markup before it) and paints up to wMax wide; the column hits
+ * the offset when it falls in that range. Columns before any markup map
+ * exactly; around markup the set holds neighbors too — the caller opens
+ * only when every plausible offset agrees on one URL.
+ */
+function paintedColumnToSource(
+  line: string,
+  base: number,
+  length: number,
+  column: number,
+): number[] {
+  if (column < 0) return [];
+  const plausible: number[] = [];
+  let min = 0;
+  let max = 0;
+  let offset = base;
+  const end = Math.min(line.length, base + length);
+  while (offset < end) {
+    const char = line[offset] ?? "";
+    const codePoint = line.codePointAt(offset) ?? 0;
+    const wMax = CONCEALABLE.has(char)
+      ? 1
+      : stringWidth(String.fromCodePoint(codePoint));
+    if (min <= column && column < max + wMax) plausible.push(offset);
+    min += CONCEALABLE.has(char) ? 0 : wMax;
+    max += wMax;
+    if (min > column) break;
+    offset += codePoint > 0xffff ? 2 : 1;
+  }
+  return plausible;
+}
+
+/**
+ * The link target under terminal-absolute (x, y) inside one painted code
+ * block: the row maps through the block's own line info to a source line,
+ * the column maps to plausible source offsets, and the click opens only
+ * when every plausible offset agrees on one URL — concealment ambiguity
+ * misses rather than opening wrong. Stale layout or an unexpected library
+ * shape resolves to null, never throws.
+ */
+function codeBlockLinkAt(
+  block: CodeRenderable,
+  x: number,
+  y: number,
+): string | null {
+  let content: string;
+  let info: LineInfo;
+  try {
+    content = block.content;
+    info = block.lineInfo;
+  } catch {
+    return null;
+  }
+  const row = y - block.screenY;
+  const column = x - block.screenX;
+  if (row < 0 || column < 0) return null;
+  const source = info.lineSources[row];
+  const base = info.lineStartCols[row];
+  const length = info.lineWidthCols[row];
+  if (
+    source === undefined ||
+    base === undefined ||
+    length === undefined ||
+    !Number.isInteger(source) ||
+    !Number.isInteger(base) ||
+    !Number.isInteger(length)
+  )
+    return null;
+  const line = content.split("\n")[source];
+  if (typeof line !== "string") return null;
+  let found: string | null = null;
+  for (const offset of paintedColumnToSource(line, base, length, column)) {
+    const url = markdownUrlAt(line, offset);
+    if (url === null) continue;
+    if (found === null) found = url;
+    else if (found !== url) return null;
+  }
+  return found;
+}
+
+/**
+ * The markdown click target: the raw link target under terminal-absolute
+ * (x, y), or null when the cell paints no link. Walks from the hit leaf up
+ * to the nearest painted code block (assistant markdown paints through
+ * library CodeRenderables, one per block); clicks landing between blocks
+ * still resolve through the parent markdown node, which pairs the same full
+ * source with its own line info. TextRenderable rows never resolve here —
+ * their own armed node handlers own those clicks. Never throws: anything
+ * unexpected resolves to null so a missed click stays a missed click.
+ */
+export function markdownLinkAt(
+  renderer: CliRenderer,
+  x: number,
+  y: number,
+): string | null {
+  try {
+    let current: Renderable | null | undefined;
+    try {
+      current = Renderable.renderablesByNumber.get(renderer.hitTest(x, y));
+    } catch {
+      return null;
+    }
+    while (current) {
+      if (current instanceof CodeRenderable) {
+        const url = codeBlockLinkAt(current, x, y);
+        if (url !== null) return url;
+      }
+      current = current.parent;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Arm a transcript ancestor as the markdown click target: mouse events bubble
  * up from the hit leaf, and markdown blocks paint through childless library
  * renderers with no node of ours to arm, so this ancestor handler is the only
  * hook that sees their clicks. Ctrl+press stores the link under the pointer
- * (getLinkAt reads the same terminal-absolute coordinates events carry); the
- * open fires on release only over the same URL, so a press on a link that
+ * (markdownLinkAt reads the same terminal-absolute coordinates events carry);
+ * the open fires on release only over the same URL, so a press on a link that
  * drags away never opens. Armed rows stop propagation after opening
  * themselves, so a click there still opens exactly once; everything goes
  * through openUrl, which gates to http(s) — markdown links can carry any
- * scheme and getLinkAt hands the raw target back.
+ * scheme and markdownLinkAt hands the raw target back.
  */
 export function armMarkdownLinks(
   target: Renderable,
@@ -614,13 +785,15 @@ export function armMarkdownLinks(
 ): void {
   let press: string | null = null;
   target.onMouseDown = (event) => {
-    press = isUrlOpenClick(event) ? renderer.getLinkAt(event.x, event.y) : null;
+    press = isUrlOpenClick(event)
+      ? markdownLinkAt(renderer, event.x, event.y)
+      : null;
   };
   target.onMouseUp = (event) => {
     const start = press;
     press = null;
     if (start === null || !isUrlOpenClick(event)) return;
-    if (renderer.getLinkAt(event.x, event.y) === start) openUrl(start);
+    if (markdownLinkAt(renderer, event.x, event.y) === start) openUrl(start);
   };
   target.onMouseOut = () => {
     press = null;

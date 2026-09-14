@@ -857,9 +857,11 @@ url.dll,FileProtocolHandler` — argv spawns, never through a shell).
   - Markdown prose (assistant messages) is click-to-open only: the renderer
     paints it through childless code renderers with no node to arm, so there
     is no hover underline. A bubbling handler on the transcript root resolves
-    the click through the renderer's `getLinkAt` link map (OpenTUI 0.5.11+)
-    and opens on press-and-release over the same URL — armed rows keep their
-    hover underline and open through their own node handlers.
+    the click through the source-text markdown resolver (each painted code
+    block pairs its content with its own line info, so wrapped and concealed
+    links still map) and opens on press-and-release over the same URL —
+    armed rows keep their hover underline and open through their own node
+    handlers.
 
 Arrow keys never scroll anything — inside the prompt they are caret motion
 or, at the buffer's edges, prompt-history recall; inside an open overlay's
