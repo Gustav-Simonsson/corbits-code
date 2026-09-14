@@ -46,7 +46,7 @@ const RunStateSchema = type({
   // MCP servers connected during the session, with the tool count each
   // contributed. Empty until the first server finishes connecting.
   "mcpServers?": ConnectedMcpServerSchema.array(),
-  // Tool names promoted onto the wire via tool_search this session. Persisted
+  // Tool names promoted via tool_search this session. Persisted
   // so a resume can re-activate them before the first post-resume inference —
   // the transcript still tells the model they are callable.
   "activatedTools?": "string[]",
