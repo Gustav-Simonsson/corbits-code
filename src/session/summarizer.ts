@@ -32,6 +32,12 @@ import { readSourceCredentialMaterial } from "../config/source-credentials.js";
 
 const logger = getLogger([LOG_NAMESPACE_ROOT, "session", "summarizer"]);
 
+// Token-budgeted compaction excerpt from the evidence archive.
+//
+// The live transcript is a clipped view. The archive holds the authorized
+// payloads compaction is about to drop, so the summary call should read those
+// rather than 400-character stubs. Budget is the control: later kinds yield
+// when earlier ones fill the window. Gap rows contribute metadata only.
 export const SUMMARY_EXCERPT_DEFAULT_BUDGET_CHARS = 80_000;
 
 const KIND_PRIORITY: readonly ArchiveKind[] = [
