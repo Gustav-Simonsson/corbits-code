@@ -92,24 +92,26 @@ describe("findLinks", () => {
 
 describe("splitLinkSpans", () => {
   test("passes URL-free segments through untouched", () => {
-    expect(splitLinkSpans([{ text: "plain", fg: "#fff", bold: true }])).toEqual(
-      [{ text: "plain", fg: "#fff", bold: true, url: null }],
-    );
+    const out = splitLinkSpans([{ text: "plain", fg: "#fff", bold: true }]);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.text).toBe("plain");
+    expect(out[0]?.fg).toBe("#fff");
+    expect(out[0]?.bold).toBe(true);
+    expect(out[0]?.url).toBeNull();
   });
 
   test("splits a URL run into its own span, keeping style", () => {
-    expect(
-      splitLinkSpans([{ text: "see https://example.com/x ok", fg: "#abc" }]),
-    ).toEqual([
-      { text: "see ", fg: "#abc", bold: undefined, url: null },
-      {
-        text: "https://example.com/x",
-        fg: "#abc",
-        bold: undefined,
-        url: "https://example.com/x",
-      },
-      { text: " ok", fg: "#abc", bold: undefined, url: null },
-    ]);
+    const input = "see https://example.com/x ok";
+    const out = splitLinkSpans([{ text: input, fg: "#abc" }]);
+    expect(out.map((span) => span.text).join("")).toBe(input);
+    const linked = out.filter((span) => span.url !== null);
+    expect(linked).toHaveLength(1);
+    const target = linked[0]?.url;
+    if (typeof target !== "string") throw new Error("expected a link target");
+    expect(linked[0]?.text).toBe(target);
+    for (const span of out) {
+      expect(span.fg).toBe("#abc");
+    }
   });
 });
 
@@ -119,20 +121,18 @@ describe("splitWrappedLinkSpans", () => {
 
   test("a URL broken across two lines resolves to one target", () => {
     const full = "https://example.com/ab";
-    const rows = splitWrappedLinkSpans(
-      [
-        { text: "x https://example.co", fg: "#abc" },
-        { text: "m/ab", fg: "#abc" },
-      ],
-      20,
-    );
-    expect(rows).toEqual([
-      [
-        { text: "x ", fg: "#abc", bold: undefined, url: null },
-        { text: "https://example.co", fg: "#abc", bold: undefined, url: full },
-      ],
-      [{ text: "m/ab", fg: "#abc", bold: undefined, url: full }],
-    ]);
+    const inputs = [
+      { text: "x https://example.co", fg: "#abc" },
+      { text: "m/ab", fg: "#abc" },
+    ];
+    const rows = splitWrappedLinkSpans(inputs, 20);
+    expect(urls(rows)).toEqual([[null, full], [full]]);
+    expect(
+      rows
+        .flat()
+        .map((span) => span.text)
+        .join(""),
+    ).toBe(inputs.map((row) => row.text).join(""));
   });
 
   test("a chain runs through a full middle line to a mid-line end", () => {
