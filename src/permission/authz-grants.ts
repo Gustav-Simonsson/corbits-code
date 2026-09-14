@@ -97,12 +97,14 @@ export interface EvaluateApprovalsInput {
   workspace: GrantWorkspace;
 }
 
-// Grant-store evaluation via @intx/authz. Filters provider-model and cwd via
-// grantScopeMatches, then asks evaluateGrants for the highest-specificity
-// allow among package-compatible grants. Exact-escaped grants are checked with
-// matchesPattern (equality after unescape) first so a stored exact command is
-// never lost.
-export async function evaluateApprovals(
+// Grant-evaluation owner for the live decide() path: the shell per-segment
+// checks and the path-arg check inside decide() resolve coverage through this
+// function. The queued-request reconciliation path (isRequestCoveredByApprovals
+// in gate.ts) matches inline against the same scope helper and pattern
+// matcher instead of calling here, so keep the two in sync when changing
+// matching semantics. Fail-closed throughout:
+// unknown tools, unknown runners, and empty grant lists all refuse.
+export async function approvalCoversSubject(
   input: EvaluateApprovalsInput,
 ): Promise<boolean> {
   const {
@@ -134,4 +136,15 @@ export async function evaluateApprovals(
 
   const decision = await evaluateGrants(grants, subject, tool);
   return decision.effect === "allow";
+}
+
+// Grant-store evaluation via @intx/authz. Filters provider-model and cwd via
+// grantScopeMatches, then asks evaluateGrants for the highest-specificity
+// allow among package-compatible grants. Exact-escaped grants are checked with
+// matchesPattern (equality after unescape) first so a stored exact command is
+// never lost.
+export async function evaluateApprovals(
+  input: EvaluateApprovalsInput,
+): Promise<boolean> {
+  return approvalCoversSubject(input);
 }

@@ -32,8 +32,8 @@ const shellCall = (command: string): ToolCall => ({
 //
 // The shell-authz hard-deny cases are not independently reachable through
 // reconciliation today — evaluate() already denies and returns before such a
-// request is ever queued (see the block-reason check ahead of the per-request
-// loop), so a queued entry has always already cleared this guard. They stay
+// request is ever queued (see the block-reason check at the top of the
+// verdict path), so a queued entry has always already cleared this guard. They stay
 // in preGrantGuardReason and this table anyway as drift-resistance: if a
 // future refactor ever let a hard-denied command reach the queue, this still
 // catches it.

@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import type { ToolCall } from "@intx/types/runtime";
 import type { Approval, PermissionRequest } from "./types.js";
 import {
+  approvalCoversSubject,
   evaluateApprovals,
   grantScopeMatches,
   cwdMatchesGrant,
@@ -11,14 +12,12 @@ import { createPermissionGate, isRequestCoveredByGrant } from "./gate.js";
 import { createPermissionRequestQueue } from "./queue.js";
 import { buildRequests } from "./classify.js";
 
-// evaluateApprovals and isRequestCoveredByGrant each decide, independently,
-// whether a grant's tool/providerModel/cwd scope covers a request. Both are
-// expected to delegate to the same shared predicate (grantScopeMatches)
-// rather than reimplementing the condition. This test drives the same
-// grant+request pairs through all three and asserts they agree — a
-// regression where one call site reimplements the check with subtly
-// different semantics would fail here even if each function still "looks
-// right" in isolation.
+// approvalCoversSubject is the single grant-evaluation owner; evaluateApprovals
+// delegates to it and isRequestCoveredByGrant must agree with it on scope.
+// This test drives the same grant+request pairs through all three and asserts
+// they agree — a regression where one call site reimplements the check with
+// subtly different semantics would fail here even if each function still
+// "looks right" in isolation.
 describe("grant tool/providerModel/cwd scoping agrees across call sites", () => {
   const workspace: GrantWorkspace = { resolvedCwd: "/proj", roots: ["/proj"] };
   const noopRestricted = () => false;
@@ -53,7 +52,7 @@ describe("grant tool/providerModel/cwd scoping agrees across call sites", () => 
           workspace,
         );
 
-        const viaEvaluateApprovals = await evaluateApprovals({
+        const viaApprovalCoversSubject = await approvalCoversSubject({
           tool: req.tool,
           subject: "npm test",
           approvals: [grant],
@@ -81,7 +80,7 @@ describe("grant tool/providerModel/cwd scoping agrees across call sites", () => 
         // subject, which is true for every case here ("npm test" grants an
         // exact "npm test" subject), so a scope mismatch is the only thing
         // that can make either disagree with the shared predicate.
-        expect(viaEvaluateApprovals).toBe(expected);
+        expect(viaApprovalCoversSubject).toBe(expected);
         expect(viaGate).toBe(expected);
       });
     }
@@ -330,7 +329,7 @@ describe("queue reconcile drains an identical chain after per-segment mint", () 
 // first, so a foreign grant stamped for /foreign replayed for any request with
 // that same cwd even under a gate whose workspace is /proj — a cross-project
 // replay. The predicate, the shared scoping predicate, and both live call
-// sites (evaluateApprovals, isRequestCoveredByGrant) must all reject the foreign
+// sites (approvalCoversSubject, isRequestCoveredByGrant) must all reject the foreign
 // case and agree.
 describe("foreign grant cwd matching request cwd under a different workspace is rejected (CL-6706)", () => {
   const workspace: GrantWorkspace = {

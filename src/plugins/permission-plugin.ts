@@ -59,10 +59,12 @@ export function gateAgentTools(
   });
 }
 
-// Gate consequential tool calls on operator approval. Runs after the
-// authorization plugin (which hard-denies catastrophic commands), so by the time
-// a call reaches here it is at worst "consequential but legitimate" — the gate
-// either finds it pre-approved, asks the operator, or denies it in headless runs.
+// Gate consequential tool calls on operator approval. Runs after secret-guard
+// in the middleware chain (which redacts credential-shaped content), so by the
+// time a call reaches here it is at worst "consequential but legitimate" — the
+// gate either finds it pre-approved, asks the operator, or denies it in
+// headless runs. Catastrophic shell commands never reach the prompt: the gate
+// hard-denies them at the top of its own verdict path first.
 export function permissionPlugin(gate: PermissionGate): ToolPlugin {
   return {
     middleware: (next) => (call, signal) =>

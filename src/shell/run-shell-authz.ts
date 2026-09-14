@@ -1,5 +1,5 @@
-// Shared run_shell authorization policy used by the authz plugin (hard deny at
-// execution) and the permission gate (do not auto-allow what authz would reject).
+// Shared run_shell authorization policy: the permission gate is the sole
+// enforcement owner (hard deny at the top of its verdict path).
 
 import { splitChainedCommand, tokenize } from "../permission/command.js";
 

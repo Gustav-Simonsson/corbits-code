@@ -91,13 +91,6 @@ await withMockedModule(
 );
 
 await withMockedModule(
-  import.meta.resolve("../../../src/plugins/authz-plugin.js"),
-  () => ({
-    authzPlugin: () => ({}),
-  }),
-);
-
-await withMockedModule(
   import.meta.resolve("../../../src/plugins/verify-plugin.js"),
   () => ({
     verifyPlugin: () => ({}),
