@@ -817,47 +817,6 @@ describe("Anthropic adapter — responseFormat boundary", () => {
   });
 });
 
-describe("Anthropic adapter — adaptive thinking request shape", () => {
-  const ThinkingBody = type({
-    thinking: {
-      type: "string",
-      "budget_tokens?": "number",
-    },
-    "output_config?": { effort: "string" },
-  });
-
-  function parseThinkingBody(body: string) {
-    const parsed = ThinkingBody(JSON.parse(body));
-    if (parsed instanceof type.errors) {
-      throw new Error(`unexpected request body shape: ${parsed.summary}`);
-    }
-    return parsed;
-  }
-
-  test("claude-fable-5-1 with thinking.enabled uses type adaptive and output_config.effort", () => {
-    const req = createAnthropicAdapter(TEST_SOURCE).buildRequest(
-      [],
-      "claude-fable-5-1",
-      { thinking: { enabled: true } },
-    );
-    const body = parseThinkingBody(req.body);
-    expect(body.thinking).toEqual({ type: "adaptive" });
-    expect(body.output_config?.effort).toBeDefined();
-  });
-
-  test("a non-adaptive model with thinking.enabled uses type enabled and budget_tokens", () => {
-    const req = createAnthropicAdapter(TEST_SOURCE).buildRequest(
-      [],
-      "claude-haiku-4-5",
-      { thinking: { enabled: true } },
-    );
-    const body = parseThinkingBody(req.body);
-    expect(body.thinking.type).toBe("enabled");
-    expect(body.thinking.budget_tokens).toBeDefined();
-    expect(body.output_config).toBeUndefined();
-  });
-});
-
 describe("Anthropic adapter — tool-name codec round-trip", () => {
   const PREFIXED = "@intx/tools-posix/sidecar-bundle:run_shell";
   const ToolsBody = type({ tools: type({ name: "string" }).array() });
@@ -909,7 +868,7 @@ const JSON_SOURCE: InferenceSource = {
   id: "anthropic:claude-test",
   provider: "anthropic",
   baseURL: "https://api.anthropic.com",
-  apiKey: "test",
+  credentialId: "test",
   model: "claude-test",
 };
 
@@ -948,6 +907,7 @@ async function driveTurn(
     source: JSON_SOURCE,
     nextSeq: () => ++seq,
     deps,
+    readMaterial: () => ({ secret: "test-secret" }),
   })) {
     events.push(ev);
   }
@@ -1258,122 +1218,5 @@ describe("createAnthropicAdapter — streaming vs non-streaming parity", () => {
         e.type === "inference.done",
     );
     expect(jdone?.data.usage).toEqual(sdone?.data.usage);
-  });
-});
-
-describe("CL-7783 truncated tool_use", () => {
-  // The exact incident wire sequence: a tool_use block opens, one partial
-  // input_json_delta arrives, then message_delta reports stop_reason
-  // max_tokens and the stream stops — no content_block_stop ever closes
-  // the tool block, so its arguments are unparseable by construction.
-  const TRUNCATED_STREAM = sse([
-    {
-      type: "content_block_start",
-      index: 0,
-      content_block: { type: "tool_use", id: "toolu_trunc", name: "Bash" },
-    },
-    {
-      type: "content_block_delta",
-      index: 0,
-      delta: {
-        type: "input_json_delta",
-        partial_json: '{"command":"rm -rf /tm',
-      },
-    },
-    {
-      type: "message_delta",
-      delta: { stop_reason: "max_tokens" },
-      usage: { output_tokens: 12 },
-    },
-    { type: "message_stop" },
-  ]);
-
-  function errorEvents(events: InferenceEvent[]) {
-    return events.filter(
-      (e): e is Extract<InferenceEvent, { type: "inference.error" }> =>
-        e.type === "inference.error",
-    );
-  }
-
-  function usageEvents(events: InferenceEvent[]) {
-    return events.filter(
-      (e): e is Extract<InferenceEvent, { type: "inference.usage" }> =>
-        e.type === "inference.usage",
-    );
-  }
-
-  test("message_delta stop_reason surfaces on the usage event", async () => {
-    const { events } = await driveTurn(TRUNCATED_STREAM, "text/event-stream");
-    const usage = usageEvents(events);
-    expect(usage.length).toBeGreaterThan(0);
-    expect(usage[usage.length - 1]?.data.stopReason).toBe("max_tokens");
-  });
-
-  test("truncated call fails the turn retryably; no tool_call is dispatched", async () => {
-    const { turn, events } = await driveTurn(
-      TRUNCATED_STREAM,
-      "text/event-stream",
-    );
-    expect(turn).toBeUndefined();
-    expect(events.some((e) => e.type === "inference.done")).toBe(false);
-    expect(
-      events.some((e) => e.type === "inference.tool_call.end"),
-    ).toBe(false);
-    const errors = errorEvents(events);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]?.data.error.category).toBe("retryable");
-    expect(errors[0]?.data.error.message).toContain("max_tokens");
-    expect(errors[0]?.data.error.message).toContain("Bash");
-    expect(errors[0]?.data.error.message).toContain("not executed");
-  });
-
-  test("unparseable args with a non-truncation stop reason still never dispatch", async () => {
-    const body = sse([
-      {
-        type: "content_block_start",
-        index: 0,
-        content_block: { type: "tool_use", id: "toolu_bad", name: "Bash" },
-      },
-      {
-        type: "content_block_delta",
-        index: 0,
-        delta: {
-          type: "input_json_delta",
-          partial_json: '{"command":',
-        },
-      },
-      {
-        type: "message_delta",
-        delta: { stop_reason: "end_turn" },
-        usage: { output_tokens: 12 },
-      },
-      { type: "message_stop" },
-    ]);
-    const { turn, events } = await driveTurn(body, "text/event-stream");
-    expect(turn).toBeUndefined();
-    expect(events.some((e) => e.type === "inference.done")).toBe(false);
-    expect(
-      events.some((e) => e.type === "inference.tool_call.end"),
-    ).toBe(false);
-    const errors = errorEvents(events);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]?.data.error.category).toBe("retryable");
-    expect(errors[0]?.data.error.message).toContain("not valid JSON");
-  });
-
-  test("non-streaming message surfaces top-level stop_reason on usage", async () => {
-    const body = JSON.stringify({
-      type: "message",
-      role: "assistant",
-      model: "claude-test",
-      content: [{ type: "text", text: "Done." }],
-      stop_reason: "end_turn",
-      usage: { input_tokens: 5, output_tokens: 3 },
-    });
-    const { events } = await driveTurn(body, "application/json");
-    expect(events.some((e) => e.type === "inference.error")).toBe(false);
-    const usage = usageEvents(events);
-    expect(usage).toHaveLength(1);
-    expect(usage[0]?.data.stopReason).toBe("end_turn");
   });
 });

@@ -42,6 +42,7 @@ import type {
 
 import { getLogger } from "@intx/log";
 import { ApprovalDecision, signalKindToGateType } from "@intx/types";
+import type { CredentialMaterialResolver } from "@intx/types";
 import { canonicalJsonStringify } from "@intx/types/wire-definition-hash";
 import { type } from "arktype";
 import { runInference } from "./harness";
@@ -94,19 +95,19 @@ function buildHarnessOpts(
   options: InferenceOptions | undefined,
   signal: AbortSignal,
   nextSeq: () => number,
+  readMaterial: CredentialMaterialResolver | undefined,
   deps: Dependencies,
 ): InferenceHarnessOptions {
-  if (options !== undefined) {
-    return {
-      turns,
-      source,
-      inferenceOptions: options,
-      signal,
-      nextSeq,
-      deps,
-    };
-  }
-  return { turns, source, signal, nextSeq, deps };
+  // exactOptionalPropertyTypes is on: only set the optional keys when defined.
+  return {
+    turns,
+    source,
+    ...(options !== undefined ? { inferenceOptions: options } : {}),
+    signal,
+    nextSeq,
+    ...(readMaterial !== undefined ? { readMaterial } : {}),
+    deps,
+  };
 }
 
 export type ReactorEmittedEvent =
@@ -129,6 +130,13 @@ export type ReactorConfig = {
   failOverToNextSource?: () => boolean;
   /** Reset `source` to the most-preferred source, in place. */
   resetToPreferredSource?: () => void;
+  /**
+   * Resolves the active source's credential secret by `credentialId` from the
+   * run's credential cell at send time. Read live per attempt, so a failover to
+   * a source with a different `credentialId` resolves that source's credential.
+   * Optional: the harness installs a fail-closed default when it is omitted.
+   */
+  readMaterial?: CredentialMaterialResolver;
   toolRunner: ToolRunner;
   contextStore: ContextStore;
   correlationValidator?: CorrelationValidator;
@@ -427,12 +435,13 @@ export function createReactor(config: ReactorConfig): Reactor {
   // contextStore.writeManifest at cycle boundaries.
   let manifestBuffer: TransformRecord[] = [];
 
+  // Compacted turns stay off reactor memory until the cycle commit publishes.
+  let pendingCompactOutput: ConversationTurn[] | null = null;
+
   // Tracks how the current cycle should be summarized in the commit message.
   let cycleInferred = false;
   let cycleToolCallsExecuted = 0;
   let cycleCompactorName: string | null = null;
-  // Compacted turns stay off reactor memory until the cycle commit publishes.
-  let pendingCompactOutput: ConversationTurn[] | null = null;
   // A suspension registers a gate and may persist a pending operation. That is
   // a durable state change even when the cycle ran no inference and completed
   // no tool call, so it must force the cycle commit.
@@ -569,40 +578,42 @@ export function createReactor(config: ReactorConfig): Reactor {
     if (pending === undefined) return false;
 
     correlatingIds.add(correlationId);
+
+    if (correlationValidator !== undefined) {
+      let valid: boolean;
+      try {
+        valid = await correlationValidator.validate(pending, message);
+      } catch (cause) {
+        logger.warn`Correlation validator threw for ${correlationId}: ${cause}`;
+        correlatingIds.delete(correlationId);
+        return false;
+      }
+      if (!valid) {
+        correlatingIds.delete(correlationId);
+        return false;
+      }
+    }
+
+    // Capture the operation before removal so the resume dispatch can read its
+    // kind and suspended call. Removal happens only after the dispatch is
+    // decided, all inside this correlatingIds-guarded critical section so a
+    // double-deliver early-returns rather than double-dispatching.
+    const op = pending;
+
     // A finally clears the in-flight marker on every exit — success included.
-    // The success path used to leave the id in the set forever, leaking one
-    // entry per correlated message for the life of the session.
+    // Without it the success path leaves the id in the set forever, leaking
+    // one entry per correlated message for the life of the session.
     //
     // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-correlating-ids-leak
     try {
-      if (correlationValidator !== undefined) {
-        let valid: boolean;
-        try {
-          valid = await correlationValidator.validate(pending, message);
-        } catch (cause) {
-          logger.warn`Correlation validator threw for ${correlationId}: ${cause}`;
-          return false;
-        }
-        if (!valid) {
-          return false;
-        }
-      }
-
-      // Capture the operation before removal so the resume dispatch can read
-      // its kind and suspended call. Removal happens only after the dispatch
-      // is decided, all inside this correlatingIds-guarded critical section
-      // so a double-deliver early-returns rather than double-dispatching.
-      const op = pending;
-
       const dispatch = resumePendingOperation(op, message);
 
       const gate = gates.findByCorrelationId(correlationId);
       switch (dispatch.mode) {
         case "redispatch": {
-          // Clear the gate WITHOUT enqueuing gate.cleared: the re-dispatched
-          // call is the resumption, so a gate.cleared-driven re-infer would
-          // double the continuation. The re-dispatch's own tool.done drives
-          // the re-infer.
+          // Clear the gate WITHOUT enqueuing gate.cleared: the re-dispatched call
+          // is the resumption, so a gate.cleared-driven re-infer would double the
+          // continuation. The re-dispatch's own tool.done drives the re-infer.
           if (gate !== undefined) {
             gates.clearSilently(gate.gateId);
             if (stateManager !== null) {
@@ -614,19 +625,18 @@ export function createReactor(config: ReactorConfig): Reactor {
             stateManager.removePendingOperation(correlationId);
           }
           // The grant is already recorded (synchronously, in
-          // resumePendingOperation) with no await since; enqueue the
-          // re-dispatch so it runs on the loop with normal event ordering.
-          // The director seeds its outstanding-result count off this event
-          // before the call's tool.done arrives.
+          // resumePendingOperation) with no await since; enqueue the re-dispatch
+          // so it runs on the loop with normal event ordering. The director seeds
+          // its outstanding-result count off this event before the call's
+          // tool.done arrives.
           enqueue({ type: "resume.execute_tools", calls: dispatch.calls });
           break;
         }
         case "error_result": {
           // The approver denied the call. Clear the gate SILENTLY (like the
-          // approved redispatch) so it cannot also trip onGateCleared and
-          // enqueue a second continuation. The synthetic error result
-          // answers the parked call; the director appends it and re-infers
-          // once.
+          // approved redispatch) so it cannot also trip onGateCleared and enqueue
+          // a second continuation. The synthetic error result answers the parked
+          // call; the director appends it and re-infers once.
           if (gate !== undefined) {
             gates.clearSilently(gate.gateId);
             if (stateManager !== null) {
@@ -642,8 +652,8 @@ export function createReactor(config: ReactorConfig): Reactor {
         }
         case "gate-cleared": {
           // Async-tool resumption: clear the gate normally so the director
-          // re-infers, and append the correlated response to history so the
-          // model sees the content it was waiting on.
+          // re-infers, and append the correlated response to history so the model
+          // sees the content it was waiting on.
           if (gate !== undefined) {
             gates.clear(gate.gateId);
           }
@@ -658,17 +668,17 @@ export function createReactor(config: ReactorConfig): Reactor {
           break;
         }
       }
-
-      emit({
-        type: "message.correlated",
-        seq: nextSeq(),
-        data: { message, correlationId },
-      });
-
-      return true;
     } finally {
       correlatingIds.delete(correlationId);
     }
+
+    emit({
+      type: "message.correlated",
+      seq: nextSeq(),
+      data: { message, correlationId },
+    });
+
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -761,6 +771,7 @@ export function createReactor(config: ReactorConfig): Reactor {
           options,
           signal,
           nextSeq,
+          config.readMaterial,
           deps,
         );
 
@@ -855,7 +866,7 @@ export function createReactor(config: ReactorConfig): Reactor {
       }
     })();
 
-    track(p);
+    void track(p);
     await p;
   }
 
@@ -959,13 +970,13 @@ export function createReactor(config: ReactorConfig): Reactor {
     let outcomes: (ToolResult | typeof SUSPENDED)[];
     if (parallel) {
       const p = Promise.all(calls.map((c) => runOne(c)));
-      track(p);
+      void track(p);
       outcomes = await p;
     } else {
       outcomes = [];
       for (const call of calls) {
         const p = runOne(call);
-        track(p);
+        void track(p);
         outcomes.push(await p);
       }
     }

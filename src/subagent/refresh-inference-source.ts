@@ -3,6 +3,7 @@ import type { InferenceSource } from "@intx/types/runtime";
 import { getValidCodexToken } from "../auth/codex/session.js";
 import { getValidXaiToken } from "../auth/xai/session.js";
 import type { ProviderCatalogEntry } from "../config/index.js";
+import { registerSourceCredential } from "../config/source-credentials.js";
 import { codexProfileFromProviderName } from "../config/codex-providers.js";
 import { xaiProfileFromProviderName } from "../config/xai-providers.js";
 
@@ -18,12 +19,14 @@ export async function ensureFreshInferenceSource(
     entry?.codexProfile ?? codexProfileFromProviderName(source.id);
   if (codexProfile !== undefined) {
     const { access } = await getValidCodexToken(codexProfile);
-    return { ...source, apiKey: access };
+    registerSourceCredential(source.credentialId, access);
+    return source;
   }
   const xaiProfile = entry?.xaiProfile ?? xaiProfileFromProviderName(source.id);
   if (xaiProfile !== undefined) {
     const { access } = await getValidXaiToken(xaiProfile);
-    return { ...source, apiKey: access };
+    registerSourceCredential(source.credentialId, access);
+    return source;
   }
   return source;
 }

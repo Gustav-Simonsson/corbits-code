@@ -8,13 +8,14 @@ import {
   DEFAULT_SUMMARIZER_TIMEOUT_MS,
 } from "../../src/session/summarizer.js";
 import type { Telemetry, TelemetryEvent } from "../../src/telemetry/index.js";
+import { registerSourceCredential } from "../../src/config/source-credentials.js";
 
 const source: InferenceSource = {
   id: "test",
   provider: "openai",
   model: "test-model",
   baseURL: "http://localhost:1",
-  apiKey: "k",
+  credentialId: "test",
 };
 
 function turns(): ConversationTurn[] {
@@ -195,13 +196,14 @@ test("summarizer timeout is honoured independently of the director total timeout
   try {
     // The stream parks forever; only the summarizer's own timer can end the call.
     harness.scenario.stall();
+    registerSourceCredential("anthropic", "k");
     const summarize = createModelSummarizer({
       getSource: () => ({
         id: "anthropic",
         provider: "anthropic",
         model: "claude-test",
         baseURL: "https://api.anthropic.com",
-        apiKey: "k",
+        credentialId: "anthropic",
       }),
       deps: harness.deps,
       timeoutMs: 30_000,

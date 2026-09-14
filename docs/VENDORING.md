@@ -22,42 +22,43 @@ points straight at `./src/*.ts` files rather than a `dist/` build.
 
 ## What's vendored
 
-| Package                                            | Vendor path                           | License       | Synced from upstream commit                | Retrieved  | Local patches                                     |
-| -------------------------------------------------- | ------------------------------------- | ------------- | ------------------------------------------ | ---------- | ------------------------------------------------- |
-| `@intx/inference`                                  | `vendor/intx-inference/`              | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | Yes — see `vendor/intx-inference/PATCHES.md`      |
-| `@intx/types`                                      | `vendor/intx-types/`                  | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | Yes — see `vendor/intx-types/PATCHES.md`          |
-| `@intx/storage-isogit`                             | `vendor/intx-storage-isogit/`         | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | Yes — see `vendor/intx-storage-isogit/PATCHES.md` |
-| `@intx/agent`                                      | `vendor/intx-agent/`                  | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | Yes — see `vendor/intx-agent/PATCHES.md`          |
-| `@intx/authz`                                      | `vendor/intx-authz/`                  | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | None — verbatim                                   |
-| `@intx/log`                                        | `vendor/intx-log/`                    | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | None — verbatim                                   |
-| `@intx/tools-posix`                                | `vendor/intx-tools-posix/`            | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | None — verbatim                                   |
-| `@intx/mailbox`                                    | `vendor/intx-mailbox/`                | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | None — verbatim                                   |
-| `@intx/harness`                                    | `vendor/intx-harness/`                | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | None — verbatim                                   |
-| `@intx/mime`                                       | `vendor/intx-mime/`                   | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | None — verbatim                                   |
-| `@intx/workflow-host` (partial — `adapters/` only) | `vendor/intx-workflow-host/adapters/` | LGPL-2.1-only | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | 2026-09-07 | None — verbatim                                   |
+| Package                                                                         | Vendor path                                                     | License       | Synced from upstream commit                | Retrieved  | Local patches                                     |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------- | ------------------------------------------ | ---------- | ------------------------------------------------- |
+| `@intx/inference`                                                               | `vendor/intx-inference/`                                        | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | Yes — see `vendor/intx-inference/PATCHES.md`      |
+| `@intx/types`                                                                   | `vendor/intx-types/`                                            | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | Yes — see `vendor/intx-types/PATCHES.md`          |
+| `@intx/storage-isogit`                                                          | `vendor/intx-storage-isogit/`                                   | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | Yes — see `vendor/intx-storage-isogit/PATCHES.md` |
+| `@intx/agent`                                                                   | `vendor/intx-agent/`                                            | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | Yes — see `vendor/intx-agent/PATCHES.md`          |
+| `@intx/authz`                                                                   | `vendor/intx-authz/`                                            | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | None — verbatim                                   |
+| `@intx/log`                                                                     | `vendor/intx-log/`                                              | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | None — verbatim                                   |
+| `@intx/tools-posix`                                                             | `vendor/intx-tools-posix/`                                      | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | None — verbatim                                   |
+| `@intx/mailbox`                                                                 | `vendor/intx-mailbox/`                                          | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | None — verbatim                                   |
+| `@intx/harness`                                                                 | `vendor/intx-harness/`                                          | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | None — verbatim                                   |
+| `@intx/mime`                                                                    | `vendor/intx-mime/`                                             | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | None — verbatim                                   |
+| `@intx/workflow-host` (partial — `adapters/` + `workflow-definition-loader.ts`) | `vendor/intx-workflow-host/` (two paths, not the whole package) | LGPL-2.1-only | `1ad010463a6bce6034cded3e078b14db482882a8` | 2026-09-14 | None — verbatim                                   |
 
 ## Provenance, ownership, and kill dates
 
 Every vendored path with its upstream source, why the published npm package
 did not cover the need, its owner, and its kill date. A kill date is a
 proposal the operator ratifies on review; each ties an observable condition
-to a hard backstop date (2027-03-07, six months after this sync). When the
+to a hard backstop date (2027-03-14, six months after this sync). When the
 condition is met the vendored tree is dropped in favour of the published
 package; the date is the deadline even if it is not.
 
-| Vendor path                           | Upstream repo           | Upstream commit                            | Patched            | Why not the published package                                                                                                                                   | Owner   | Proposed kill date                                                                         |
-| ------------------------------------- | ----------------------- | ------------------------------------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------ |
-| `vendor/intx-inference/`              | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | Yes — `PATCHES.md` | Local fixes not yet upstream                                                                                                                                    | runtime | 2027-03-07 or when patches land upstream and publish                                       |
-| `vendor/intx-types/`                  | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | Yes — `PATCHES.md` | Cross-package coupling with `@intx/inference`                                                                                                                   | runtime | 2027-03-07 or when the coupled trio publishes past `0.3.0`                                 |
-| `vendor/intx-storage-isogit/`         | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | Yes — `PATCHES.md` | Cross-package coupling with `@intx/inference`                                                                                                                   | runtime | 2027-03-07 or when the coupled trio publishes past `0.3.0`                                 |
-| `vendor/intx-agent/`                  | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | Yes — `PATCHES.md` | Vendored at Interchange head ahead of npm                                                                                                                       | runtime | 2027-03-07 or when `@intx/agent@>=0.4.0` publishes                                         |
-| `vendor/intx-authz/`                  | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | No                 | Vendored at Interchange head ahead of npm                                                                                                                       | runtime | 2027-03-07 or when `@intx/authz@>=0.4.0` publishes                                         |
-| `vendor/intx-log/`                    | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | No                 | Vendored at Interchange head ahead of npm                                                                                                                       | runtime | 2027-03-07 or when `@intx/log@>=0.4.0` publishes                                           |
-| `vendor/intx-tools-posix/`            | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | No                 | Vendored at Interchange head ahead of npm                                                                                                                       | runtime | 2027-03-07 or when `@intx/tools-posix@>=0.4.0` publishes                                   |
-| `vendor/intx-mailbox/`                | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | No                 | Never published to npm (verified 2026-09-07: registry 404 for all versions)                                                                                     | step-1  | 2027-03-07 or when any `@intx/mailbox` version publishes to npm                            |
-| `vendor/intx-harness/`                | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | No                 | `driveConnectorReplies`/`AgentEventStream` (`src/reply-drain.ts`) is past npm `0.3.0` (verified 2026-09-07: absent from the published tarball)                  | step-1  | 2027-03-07 or when a published `@intx/harness` exports `driveConnectorReplies`             |
-| `vendor/intx-mime/`                   | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | No                 | `buildMessageHeaders` is past npm `0.3.0` (verified 2026-09-07: absent from the published tarball); `@intx/mailbox` re-exports it                               | step-1  | 2027-03-07 or when a published `@intx/mime` exports `buildMessageHeaders`                  |
-| `vendor/intx-workflow-host/adapters/` | `faremeter/interchange` | `0205b07b64d03f0fec2e4be3593c764070a9ba8a` | No                 | App-internal: `substrate-mailbox-store.ts` has never been published in any `@intx/workflow-host` release (verified 2026-09-07: absent from the `0.3.0` tarball) | step-1  | 2027-03-07 or when a published `@intx/workflow-host` exports `createSubstrateMailboxStore` |
+| Vendor path                                               | Upstream repo           | Upstream commit                            | Patched            | Why not the published package                                                                                                                                                                     | Owner   | Proposed kill date                                                                                     |
+| --------------------------------------------------------- | ----------------------- | ------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `vendor/intx-inference/`                                  | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | Yes — `PATCHES.md` | Local fixes not yet upstream                                                                                                                                                                      | runtime | 2027-03-14 or when patches land upstream and publish                                                   |
+| `vendor/intx-types/`                                      | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | Yes — `PATCHES.md` | Cross-package coupling with `@intx/inference`                                                                                                                                                     | runtime | 2027-03-14 or when the coupled trio publishes past `0.3.0`                                             |
+| `vendor/intx-storage-isogit/`                             | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | Yes — `PATCHES.md` | Cross-package coupling with `@intx/inference`                                                                                                                                                     | runtime | 2027-03-14 or when the coupled trio publishes past `0.3.0`                                             |
+| `vendor/intx-agent/`                                      | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | Yes — `PATCHES.md` | Vendored at Interchange head ahead of npm                                                                                                                                                         | runtime | 2027-03-14 or when `@intx/agent@>=0.4.0` publishes                                                     |
+| `vendor/intx-authz/`                                      | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | No                 | Vendored at Interchange head ahead of npm                                                                                                                                                         | runtime | 2027-03-14 or when `@intx/authz@>=0.4.0` publishes                                                     |
+| `vendor/intx-log/`                                        | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | No                 | Vendored at Interchange head ahead of npm                                                                                                                                                         | runtime | 2027-03-14 or when `@intx/log@>=0.4.0` publishes                                                       |
+| `vendor/intx-tools-posix/`                                | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | No                 | Vendored at Interchange head ahead of npm                                                                                                                                                         | runtime | 2027-03-14 or when `@intx/tools-posix@>=0.4.0` publishes                                               |
+| `vendor/intx-mailbox/`                                    | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | No                 | Never published to npm (verified 2026-09-07: registry 404 for all versions)                                                                                                                       | step-1  | 2027-03-14 or when any `@intx/mailbox` version publishes to npm                                        |
+| `vendor/intx-harness/`                                    | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | No                 | `driveConnectorReplies`/`AgentEventStream` (`src/reply-drain.ts`) is past npm `0.3.0` (verified 2026-09-07: absent from the published tarball)                                                    | step-1  | 2027-03-14 or when a published `@intx/harness` exports `driveConnectorReplies`                         |
+| `vendor/intx-mime/`                                       | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | No                 | `buildMessageHeaders` is past npm `0.3.0` (verified 2026-09-07: absent from the published tarball); `@intx/mailbox` re-exports it                                                                 | step-1  | 2027-03-14 or when a published `@intx/mime` exports `buildMessageHeaders`                              |
+| `vendor/intx-workflow-host/adapters/`                     | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | No                 | App-internal: `substrate-mailbox-store.ts` has never been published in any `@intx/workflow-host` release (verified 2026-09-07: absent from the `0.3.0` tarball)                                   | step-1  | 2027-03-14 or when a published `@intx/workflow-host` exports `createSubstrateMailboxStore`             |
+| `vendor/intx-workflow-host/workflow-definition-loader.ts` | `faremeter/interchange` | `1ad010463a6bce6034cded3e078b14db482882a8` | No                 | Director loading from a workflow closure (`loadWorkflowDirectorRegistryFromClosure`); never published in any `@intx/workflow-host` release (verified 2026-09-14: absent from the `0.3.0` tarball) | step-1  | 2027-03-14 or when a published `@intx/workflow-host` exports `loadWorkflowDirectorRegistryFromClosure` |
 
 ### The 2026-09-07 step-1 vendor pass
 
@@ -77,7 +78,7 @@ signingKey })` (local disk + keypair, no hub, no database) is present in
 opts.onEvent)` wiring). Root `dependencies` pins `0.3.0`.
 
 Everything vendored in this pass sits at the same upstream commit
-`0205b07b64d03f0fec2e4be3593c764070a9ba8a` as the existing trees; no
+`1ad010463a6bce6034cded3e078b14db482882a8` as the existing trees; no
 vendored tree mixes pins.
 
 `vendor/intx-workflow-host/adapters/` is a partial-package vendor: upstream
@@ -96,6 +97,39 @@ below assumes. An interim 2026-08-22 sync had moved only `@intx/types`
 and `@intx/storage-isogit`; the gap did not regress the coupling — the
 `PendingOperation` shape was byte-identical across it — but it was a
 staged exception, not the steady state.
+
+### The 2026-09-14 re-sync to `1ad0104`
+
+All eleven paths moved `0205b07b` → `1ad0104` (retrieved 2026-09-14) as a
+pristine-then-patches pair: the first commit overwrites every tree
+verbatim (including the two upstream deletions,
+`packages/types/src/sidecar-placement.ts` and
+`packages/inference/src/providers/google-genai.test.ts` — neither carried
+a ledger entry), and the second re-applies each `PATCHES.md` entry with an
+as-is / adapt / subsumed triage recorded in the ledgers. No entry was
+subsumed upstream. Upstream replaced inline provider `apiKey` plumbing
+with a `credentialId` + credential-cell model; no ledger entry touches
+auth so the vendored trees needed no migration, but first-party callers
+were migrated to the new model (each built source registers its secret
+in `src/config/source-credentials.ts`, handed to the vendored trees as
+their resolver).
+
+`vendor/intx-workflow-host/workflow-definition-loader.ts` is new in this
+sync: a second partial-tree path alongside `adapters/`, carrying
+`loadWorkflowDirectorRegistryFromClosure` verbatim (674 lines, no local
+patches). Like the adapter, it is deliberately **not** a workspace member
+and nothing in `src/` imports it — wiring callers is a later ticket's
+work, so no workspace/overrides wiring was added; its `@intx/workflow`
+and `@intx/hub-sessions/substrate` imports resolve once that wiring
+exists. Until then it is inert provenance, not dead weight.
+
+`@intx/tool-packaging` evaluated 2026-09: closure-wide collection
+(loader.ts:389) serves tool-package establishment; director-loader need
+fully covered by vendored workflow-definition-loader.ts + shared
+isAnnotatedDirectorFactory predicate from already-vendored @intx/agent.
+No first-party consumer imports tool-packaging; stays on transitive
+published 0.3.0. Revisit if a future ticket establishes tool packages
+from closures at runtime.
 
 The license column records what each package declares in its own
 `package.json`; the corresponding `LICENSE` file travels with every vendored

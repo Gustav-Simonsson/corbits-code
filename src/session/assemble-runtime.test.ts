@@ -219,7 +219,7 @@ function stubChatAgentWiring(
         id: "s",
         provider: "test",
         baseURL: "http://localhost",
-        apiKey: "k",
+        credentialId: "s",
         model: "m",
       },
     ],

@@ -8,6 +8,11 @@ proof of which lines are ours — run `bin/vendor-patch-diff` to produce it.
 The `Locally patched — see …#<anchor>` comments and the entries below are
 signposts that point into that diff; they do not define its extent.
 
+### 2026-09-14 re-sync (upstream `1ad0104`)
+
+Re-carried as-is with its three tests; upstream `store.ts` has no
+`loadErrors`. No adaptation needed.
+
 ## store-ts-load-errors
 
 `store.ts` — Implements `AuditStore.loadErrors` by reading

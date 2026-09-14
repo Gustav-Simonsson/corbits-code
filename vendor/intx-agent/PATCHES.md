@@ -8,6 +8,13 @@ which lines are ours — run `bin/vendor-patch-diff` to produce it. The
 `Locally patched — see …#<anchor>` comments and the entries below are
 signposts that point into that diff; they do not define its extent.
 
+### 2026-09-14 re-sync (upstream `1ad0104`)
+
+All three entries re-carried as-is; upstream has no `loadErrors`
+(`store.ts` grep is clean) and no error-seq resumption in `createAgent`.
+No adaptation needed — upstream did not touch these regions. Upstream's
+`credentialId` auth-model rewrite does not intersect these patches.
+
 ## agent-ts-resume-error-seq
 
 `agent.ts` — `createAgent` resumes `errorSeq` from `auditStore.loadErrors`

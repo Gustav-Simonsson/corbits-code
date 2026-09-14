@@ -40,6 +40,7 @@ import {
   type LocalSettings,
 } from "../config/settings.js";
 import type { SessionMode } from "../config/session-mode.js";
+import { readSourceCredentialMaterial } from "../config/source-credentials.js";
 import {
   advertisedTools,
   advertisedToolNamesForSessionMode,
@@ -580,6 +581,10 @@ export function assembleChatAgent(wiring: ChatAgentWiring): AssembledChatAgent {
       defaultSource: wiring.getDefaultSource(),
       storage: storageForAgent,
       workdir,
+      // Secrets resolve out of the first-party credential cell (see
+      // ../config/source-credentials.ts): sources name a credentialId and the
+      // vendored harness reads the secret through this resolver at send time.
+      readCurrentMaterial: readSourceCredentialMaterial,
       // contextTransforms ride deps: the published @intx/agent forwards deps
       // into reactor assembly verbatim, and the vendored assembly picks the
       // transforms up from there.

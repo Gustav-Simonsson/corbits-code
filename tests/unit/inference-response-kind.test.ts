@@ -24,6 +24,10 @@ import {
   withCodexContentTypeRepair,
 } from "../../src/provider/codex-responses.js";
 import { CODEX_RESPONSES_PATH } from "../../src/auth/codex/constants.js";
+import {
+  readSourceCredentialMaterial,
+  registerSourceCredential,
+} from "../../src/config/source-credentials.js";
 
 const CODEX_URL = `https://chatgpt.com/backend-api${CODEX_RESPONSES_PATH}`;
 
@@ -31,7 +35,7 @@ const CODEX_SOURCE: InferenceSource = {
   id: "codex/default",
   provider: CODEX_RESPONSES_PROVIDER,
   baseURL: "https://chatgpt.com/backend-api",
-  apiKey: "test-token",
+  credentialId: "codex/default",
   model: "gpt-5.6-sol",
 };
 
@@ -90,11 +94,13 @@ async function runCodexTurn(
     scheduler: createDefaultScheduler(),
   };
   let seq = 0;
+  registerSourceCredential(CODEX_SOURCE.credentialId, "test-token");
   return collect(
     runInference({
       turns: [userTurn("hi")],
       source: CODEX_SOURCE,
       nextSeq: () => ++seq,
+      readMaterial: readSourceCredentialMaterial,
       deps,
     }),
   );

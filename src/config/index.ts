@@ -29,6 +29,7 @@ import {
 import type { CodexProfile } from "../auth/codex/store.js";
 import type { XaiProfile } from "../auth/xai/store.js";
 import { listCodexProfiles, listXaiProfiles } from "./oauth-stores.js";
+import { registerSourceCredential } from "./source-credentials.js";
 import {
   codexProfilesToCatalogEntries,
   codexProvidersAsSettings,
@@ -105,11 +106,21 @@ import { resolveProfile } from "./profiles.js";
 // revert the ceiling.
 export const SOURCE_MAX_TOKENS = 16384;
 
-// Placeholder sent in the Authorization header for keyless local providers
-// (e.g. Ollama). The runtime's InferenceSource type requires a non-empty
-// apiKey string; the value is injected as `Bearer <key>` by the harness but
-// keyless servers ignore it entirely.
+// Placeholder resolved from the credential cell for keyless local providers
+// (e.g. Ollama). Sources that need no secret register this sentinel; the
+// harness still sends it as `Bearer <key>` but keyless servers ignore it.
 export const KEYLESS_API_KEY = "keyless";
+
+// Registers the secret behind a source id in the credential cell (see
+// ./source-credentials.ts), falling back to the keyless sentinel when no key
+// was configured. Every buildXSource below calls this so the vendored
+// credentialId auth model resolves the secret at send time.
+function registerSourceSecret(id: string, apiKey: string | undefined): void {
+  registerSourceCredential(
+    id,
+    apiKey !== undefined && apiKey.length > 0 ? apiKey : KEYLESS_API_KEY,
+  );
+}
 
 function applyPersistedOAuthDefaults(
   settings: Settings | null,
@@ -253,16 +264,14 @@ export function buildOpenAISource(fields: {
     fields.reasoningEffort !== undefined
       ? { providerOptions: { reasoning_effort: fields.reasoningEffort } }
       : {};
+  registerSourceSecret(fields.id, fields.apiKey);
   return {
     id: fields.id,
     provider: "openai-compatible",
     baseURL: isOllamaProviderId(fields.id)
       ? ollamaOpenAIBaseURL(fields.baseURL)
       : normalizeOpenAICompatibleBaseURL(fields.baseURL),
-    apiKey:
-      fields.apiKey !== undefined && fields.apiKey.length > 0
-        ? fields.apiKey
-        : KEYLESS_API_KEY,
+    credentialId: fields.id,
     model: fields.model,
     defaults: { maxTokens: SOURCE_MAX_TOKENS, ...overrides },
     ...(fields.quirks !== undefined ? { quirks: fields.quirks } : {}),
@@ -318,7 +327,8 @@ export type ProviderCatalogEntry = Omit<
 // "codex-responses" adapter (the Codex backend speaks the Responses API, not
 // Chat Completions) and carries the account id + a session id through
 // providerOptions, where the adapter lifts them into request headers. The
-// access token is the apiKey; the harness injects it as the bearer credential.
+// access token is registered in the credential cell under the source id; the
+// harness resolves it as the bearer credential at send time.
 export function buildCodexSource(fields: {
   id: string;
   apiKey: string;
@@ -334,11 +344,12 @@ export function buildCodexSource(fields: {
     providerOptions[CODEX_ACCOUNT_ID_OPTION] = fields.accountId;
   if (fields.reasoningEffort !== undefined)
     providerOptions["reasoning_effort"] = fields.reasoningEffort;
+  registerSourceSecret(fields.id, fields.apiKey);
   return {
     id: fields.id,
     provider: CODEX_RESPONSES_PROVIDER,
     baseURL: CODEX_BASE_URL,
-    apiKey: fields.apiKey,
+    credentialId: fields.id,
     model: fields.model,
     defaults: { maxTokens: SOURCE_MAX_TOKENS, providerOptions },
   };
@@ -346,7 +357,8 @@ export function buildCodexSource(fields: {
 
 // Build the InferenceSource for an xAI/Grok OAuth profile. Routes to the
 // "grok-responses" adapter (the grok-cli proxy speaks the Responses API, not
-// Chat Completions). The access token is the apiKey; the caller's user id is
+// Chat Completions). The access token is registered in the credential cell
+// under the source id; the caller's user id is
 // decoded from it and lifted into the x-grok-user-id header by the adapter.
 // The session id becomes the request's prompt_cache_key so every call in the
 // thread routes to the same cache shard (store:false has no other signal).
@@ -364,11 +376,12 @@ export function buildXaiSource(fields: {
   if (userId !== undefined) providerOptions[GROK_USER_ID_OPTION] = userId;
   if (fields.reasoningEffort !== undefined)
     providerOptions["reasoning_effort"] = fields.reasoningEffort;
+  registerSourceSecret(fields.id, fields.apiKey);
   return {
     id: fields.id,
     provider: GROK_RESPONSES_PROVIDER,
     baseURL: XAI_BASE_URL,
-    apiKey: fields.apiKey,
+    credentialId: fields.id,
     model: fields.model,
     defaults: { maxTokens: SOURCE_MAX_TOKENS, providerOptions },
   };
@@ -388,14 +401,12 @@ export function buildBifrostSource(fields: {
     fields.reasoningEffort !== undefined
       ? { providerOptions: { reasoning_effort: fields.reasoningEffort } }
       : {};
+  registerSourceSecret(fields.id, fields.apiKey);
   return {
     id: fields.id,
     provider: BIFROST_PROVIDER,
     baseURL: normalizeOpenAICompatibleBaseURL(fields.baseURL),
-    apiKey:
-      fields.apiKey !== undefined && fields.apiKey.length > 0
-        ? fields.apiKey
-        : KEYLESS_API_KEY,
+    credentialId: fields.id,
     model: fields.model,
     defaults: { maxTokens: SOURCE_MAX_TOKENS, ...overrides },
   };
@@ -408,14 +419,12 @@ export function buildAnthropicSource(fields: {
   apiKey?: string;
   model: string;
 }): InferenceSource {
+  registerSourceSecret(fields.id, fields.apiKey);
   return {
     id: fields.id,
     provider: "anthropic",
     baseURL: fields.baseURL.replace(/\/+$/, ""),
-    apiKey:
-      fields.apiKey !== undefined && fields.apiKey.length > 0
-        ? fields.apiKey
-        : KEYLESS_API_KEY,
+    credentialId: fields.id,
     model: fields.model,
     defaults: { maxTokens: SOURCE_MAX_TOKENS },
   };
@@ -431,16 +440,13 @@ export function buildGoSource(fields: {
   reasoningEffort?: ReasoningEffort;
 }): InferenceSource {
   const endpoint = resolveGoEndpoint(fields.model);
-  const apiKey =
-    fields.apiKey !== undefined && fields.apiKey.length > 0
-      ? fields.apiKey
-      : KEYLESS_API_KEY;
+  registerSourceSecret(fields.id, fields.apiKey);
   if (endpoint.adapter === "anthropic") {
     return {
       id: fields.id,
       provider: OPENCODE_GO_MESSAGES_PROVIDER,
       baseURL: endpoint.baseURL,
-      apiKey,
+      credentialId: fields.id,
       model: fields.model,
       defaults: {
         maxTokens: SOURCE_MAX_TOKENS,
@@ -455,7 +461,7 @@ export function buildGoSource(fields: {
       id: fields.id,
       provider: OPENAI_RESPONSES_PROVIDER,
       baseURL: endpoint.baseURL,
-      apiKey,
+      credentialId: fields.id,
       model: fields.model,
       defaults: {
         maxTokens: SOURCE_MAX_TOKENS,
@@ -471,7 +477,7 @@ export function buildGoSource(fields: {
     id: fields.id,
     baseURL:
       endpoint.baseURL.length > 0 ? endpoint.baseURL : OPENCODE_GO_BASE_URL,
-    apiKey,
+    ...(fields.apiKey !== undefined ? { apiKey: fields.apiKey } : {}),
     model: fields.model,
     ...(fields.reasoningEffort !== undefined
       ? { reasoningEffort: fields.reasoningEffort }
@@ -500,16 +506,13 @@ export function buildZenSource(fields: {
   reasoningEffort?: ReasoningEffort;
 }): InferenceSource {
   const endpoint = resolveZenEndpoint(fields.model);
-  const apiKey =
-    fields.apiKey !== undefined && fields.apiKey.length > 0
-      ? fields.apiKey
-      : KEYLESS_API_KEY;
+  registerSourceSecret(fields.id, fields.apiKey);
   if (endpoint.adapter === "anthropic") {
     return {
       id: fields.id,
       provider: ZEN_MESSAGES_PROVIDER,
       baseURL: endpoint.baseURL,
-      apiKey,
+      credentialId: fields.id,
       model: fields.model,
       defaults: {
         maxTokens: SOURCE_MAX_TOKENS,
@@ -524,7 +527,7 @@ export function buildZenSource(fields: {
       id: fields.id,
       provider: OPENAI_RESPONSES_PROVIDER,
       baseURL: endpoint.baseURL,
-      apiKey,
+      credentialId: fields.id,
       model: fields.model,
       defaults: {
         maxTokens: SOURCE_MAX_TOKENS,
@@ -540,7 +543,7 @@ export function buildZenSource(fields: {
     id: fields.id,
     baseURL:
       endpoint.baseURL.length > 0 ? endpoint.baseURL : ZEN_DEFAULT_BASE_URL,
-    apiKey,
+    ...(fields.apiKey !== undefined ? { apiKey: fields.apiKey } : {}),
     model: fields.model,
     ...(fields.reasoningEffort !== undefined
       ? { reasoningEffort: fields.reasoningEffort }

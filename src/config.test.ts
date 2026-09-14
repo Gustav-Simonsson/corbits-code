@@ -23,6 +23,10 @@ import {
   SOURCE_MAX_TOKENS,
 } from "./config/index.js";
 import { DIRECTOR_IDS } from "./agent/directors/types.js";
+import {
+  clearSourceCredentials,
+  peekSourceCredentialSecret,
+} from "./config/source-credentials.js";
 import type { Config, UnconfiguredConfig } from "./config/index.js";
 import {
   mergeProviderIntoSettings,
@@ -69,6 +73,7 @@ afterEach(() => {
   resetGoModelDiscoveryForTests();
   resetZenModelDiscoveryForTests();
   setProviderContextWindowOverrides(undefined);
+  clearSourceCredentials();
 });
 
 function assertConfigured(
@@ -1514,13 +1519,16 @@ describe("buildOpenAISource", () => {
     expect(source.baseURL).toBe("http://localhost:11434/v1");
   });
 
-  test("substitutes a placeholder apiKey when none is provided (keyless)", () => {
+  test("registers the keyless placeholder in the credential cell when none is provided", () => {
     const source = buildOpenAISource({
       id: "local",
       baseURL: "http://localhost:8080/v1",
       model: "local-model",
     });
-    expect(source.apiKey).toBe(KEYLESS_API_KEY);
+    expect(source.credentialId).toBe("local");
+    expect(peekSourceCredentialSecret(source.credentialId)).toBe(
+      KEYLESS_API_KEY,
+    );
   });
 });
 

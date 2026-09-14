@@ -45,6 +45,7 @@ import {
   buildInferenceSourceForRef,
   buildSubagentSources,
 } from "../config/inference-sources.js";
+import { readSourceCredentialMaterial } from "../config/source-credentials.js";
 import { assembleInferenceBase } from "../session/assemble-runtime.js";
 import { advertiseShellGuardTimeout } from "../plugins/shell-guard-plugin.js";
 import { advertiseEditFileLineRange } from "../plugins/edit-file-line-range.js";
@@ -1149,6 +1150,10 @@ async function runSubAgentInner(
       defaultSource: bundle.defaultSource,
       storage,
       workdir,
+      // Secrets resolve out of the first-party credential cell (see
+      // ../config/source-credentials.ts): sources name a credentialId and the
+      // vendored harness reads the secret through this resolver at send time.
+      readCurrentMaterial: readSourceCredentialMaterial,
       // contextTransforms ride deps: the published @intx/agent forwards deps
       // into reactor assembly verbatim, and the vendored assembly picks the
       // transforms up from there.

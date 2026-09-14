@@ -129,7 +129,7 @@ const liveSource: InferenceSource = {
   id: "codex/work",
   provider: "openai",
   baseURL: "https://example.test",
-  apiKey: "old-token",
+  credentialId: "codex/work",
   model: "m",
 };
 
