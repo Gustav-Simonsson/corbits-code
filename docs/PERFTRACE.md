@@ -46,7 +46,6 @@ error code `OTEL_CONFIG_INVALID` and does not half-enable export.
   "otel": {
     "enabled": true,
     "endpoint": "https://collector.example/v1",
-    "headers": { "Authorization": "Bearer …" },
     "serviceName": "corbits-code",
     "resourceAttributes": {
       "deployment.environment": "dev"
@@ -54,6 +53,9 @@ error code `OTEL_CONFIG_INVALID` and does not half-enable export.
   }
 }
 ```
+
+Do not put auth headers in settings; pass them via `OTEL_EXPORTER_OTLP_HEADERS`
+so secrets stay out of the settings file.
 
 Precedence:
 
@@ -65,6 +67,9 @@ Precedence:
   `resourceAttributes["service.name"]` is always set to the resolved name so
   the two never diverge.
 - **resourceAttributes:** settings merged with env; env wins on key conflict
+- **enabling export:** setting an endpoint (settings or env) enables export;
+  `otel.enabled` need not be set. Service name or resource attributes alone do
+  not enable export.
 - **`otel.enabled: false`:** disables export when only settings provide an
   endpoint; an explicit env endpoint still enables export
 
@@ -132,7 +137,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20<phc_…>"
 export OTEL_SERVICE_NAME="corbits-code"
 ```
 
-This does **not** expand the three PostHog product events in `docs/TELEMETRY.md`.
+This does **not** expand the PostHog product events in `docs/TELEMETRY.md`.
 Product analytics opt-out (`CORBITS_TELEMETRY`, `DO_NOT_TRACK`, settings) does
 not control OTEL export, and vice versa.
 
@@ -166,7 +171,7 @@ Then supply auth only via env when needed.
 
 | Pipe                          | Purpose                        | Default   | Content                     |
 | ----------------------------- | ------------------------------ | --------- | --------------------------- |
-| PostHog (`docs/TELEMETRY.md`) | Aggregate product usage        | Opt-out   | Three allowlisted events    |
+| PostHog (`docs/TELEMETRY.md`) | Aggregate product usage        | Opt-out   | Allowlisted product events  |
 | Local PerfTrace               | Operator/dev attribution       | Always on | Privacy-strict phase spans  |
 | OTEL export                   | Your APM / Phoenix / collector | Opt-in    | Full span tree when enabled |
 

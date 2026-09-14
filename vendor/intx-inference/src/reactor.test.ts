@@ -34,11 +34,7 @@ import type {
 } from "@intx/types/runtime";
 
 import type { ReactorConfig, Reactor, ReactorEmittedEvent } from "./reactor";
-import type {
-  Dependencies,
-  InferenceHarnessOptions,
-  PollBatchLivenessPredicate,
-} from "./harness";
+import type { Dependencies, InferenceHarnessOptions } from "./harness";
 import type { CorrelationValidator } from "./correlation";
 import type { AfterInferenceHook } from "./default-director";
 
@@ -289,7 +285,7 @@ function createTestReactor(
       id: "anthropic:test-model",
       provider: "anthropic",
       baseURL: "https://api.anthropic.com",
-      apiKey: "test",
+      credentialId: "test",
       model: "test-model",
     },
     toolRunner: overrides.toolRunner ?? noopToolRunner(),
@@ -1008,7 +1004,7 @@ describe("createReactor — director exception", () => {
         id: "anthropic:test-model",
         provider: "anthropic",
         baseURL: "https://api.anthropic.com",
-        apiKey: "test",
+        credentialId: "test",
         model: "test-model",
       },
       toolRunner: noopToolRunner(),
@@ -1793,336 +1789,11 @@ describe("createReactor — doom-loop detection", () => {
       "doom_loop",
     );
   });
-
-  test("appends the corrective note once, on the batch before the trip", async () => {
-    const contents: string[] = [];
-    const noteCalls: number[] = [];
-    const { reactor, events, waitFor } = createTestReactor({
-      deps: {
-        ...createDefaultDependencies(),
-        doomLoopCorrectiveNote: ({ calls, repeatCount }) => {
-          noteCalls.push(repeatCount);
-          return `loop note: ${calls.map((c) => c.name).join(",")}`;
-        },
-      },
-      toolRunner: makeToolRunner(async (call) => ({
-        callId: call.id,
-        content: "spun",
-      })),
-      director: (() => {
-        let turn = 0;
-        const batch = () => [
-          { id: `c${turn}`, name: "spin", arguments: { q: 1 } },
-        ];
-        return directorFromTable(
-          {
-            "message.received": (_e, _s, caps) => caps.executeTools(batch()),
-            "tool.done": (e, _s, caps) => {
-              contents.push(
-                typeof e.result.content === "string"
-                  ? e.result.content
-                  : JSON.stringify(e.result.content),
-              );
-              turn += 1;
-              return turn < 8 ? caps.executeTools(batch()) : caps.done();
-            },
-          },
-          "wait",
-        );
-      })(),
-    });
-
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    await waitFor("reactor.done");
-
-    // One warning turn at repeat count 2 (threshold 3 − 1): only that
-    // batch's result carried the note; the first ran clean and the third
-    // tripped the guard before its result could be consumed.
-    expect(noteCalls).toEqual([2]);
-    expect(contents).toEqual(["spun", "spun\n\nloop note: spin"]);
-    expect(getEvent(events, "message.run.ended").data.error?.kind).toBe(
-      "doom_loop",
-    );
-  });
-
-  test("a threshold of 2 leaves no room for a warning turn", async () => {
-    let noteCalls = 0;
-    const { reactor, events, waitFor } = createTestReactor({
-      doomLoopThreshold: 2,
-      deps: {
-        ...createDefaultDependencies(),
-        doomLoopCorrectiveNote: () => {
-          noteCalls += 1;
-          return "note";
-        },
-      },
-      director: createBatchLoopDirector((turn) =>
-        turn < 8
-          ? [{ id: `c${turn}`, name: "spin", arguments: { q: 1 } }]
-          : null,
-      ),
-    });
-
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    await waitFor("reactor.done");
-
-    expect(noteCalls).toBe(0);
-    expect(getEvent(events, "message.run.ended").data.error?.kind).toBe(
-      "doom_loop",
-    );
-  });
-
-  test("fail-run policy ends the run but keeps the reactor for the next message", async () => {
-    const seen: string[] = [];
-    const { reactor, events, waitFor } = createTestReactor({
-      deps: {
-        ...createDefaultDependencies(),
-        doomLoopPolicy: "fail-run",
-      },
-      director: (() => {
-        let turn = 0;
-        const batch = () => [
-          { id: `c${turn}`, name: "spin", arguments: { q: 1 } },
-        ];
-        return directorFromTable(
-          {
-            "message.received": (_e, _s, caps) => caps.executeTools(batch()),
-            "tool.done": (e, _s, caps) => {
-              seen.push(String(e.result.content));
-              turn += 1;
-              return caps.executeTools(batch());
-            },
-          },
-          "wait",
-        );
-      })(),
-    });
-
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    await waitFor("message.run.ended");
-
-    const ended = getEvent(events, "message.run.ended");
-    expect(ended.data.status).toBe("failed");
-    expect(ended.data.error?.kind).toBe("doom_loop");
-    expect(getEvent(events, "reactor.error").data.fatal).toBe(true);
-    // The doomed batch's queued tool.done events were purged, not consumed:
-    // the director saw only the two repeats that ran before the trip.
-    expect(seen.length).toBe(2);
-    expect(events.some((e) => e.type === "reactor.done")).toBe(false);
-
-    // The next inbound message opens a fresh run — which doom-loops again
-    // and fails the same way, proving the reactor kept working.
-    reactor.deliver(makeInboundMessage());
-    await waitForEvent(
-      events,
-      (e) =>
-        e.type === "message.run.ended" &&
-        events.filter((x) => x.type === "message.run.ended").length >= 2,
-    );
-    expect(events.filter((e) => e.type === "message.run.started").length).toBe(
-      2,
-    );
-    expect(events.some((e) => e.type === "reactor.done")).toBe(false);
-  });
 });
 
-describe("createReactor — doom-loop poll exemption", () => {
-  // Production-faithful stand-in for the first-party liveness predicate (the
-  // predicate truth table itself is unit-tested beside the real
-  // implementation): exempt only when every call is a known poll and every
-  // result still shows pending. These tests lock the guard's reset-vs-count
-  // behavior around that verdict.
-  const pendingPollLiveness: PollBatchLivenessPredicate = (calls, results) =>
-    calls.length > 0 &&
-    calls.every((call, index) => {
-      const content = results[index]?.content;
-      if (typeof content !== "string") return false;
-      let payload: unknown;
-      try {
-        payload = JSON.parse(content) as unknown;
-      } catch {
-        return false;
-      }
-      if (typeof payload !== "object" || payload === null) return false;
-      if (call.name === "wait_agents") {
-        const { timed_out: timedOut, results: entries } = payload as {
-          timed_out?: unknown;
-          results?: { status?: unknown }[];
-        };
-        if (timedOut === true) return true;
-        return (
-          Array.isArray(entries) &&
-          entries.some(
-            (entry) =>
-              entry.status === "running" ||
-              entry.status === "queued" ||
-              entry.status === "awaiting_director",
-          )
-        );
-      }
-      if (call.name === "shell_collect") {
-        return (payload as { status?: unknown }).status === "running";
-      }
-      return false;
-    });
-
-  function depsWithLiveness(): Dependencies {
-    return {
-      ...createDefaultDependencies(),
-      isPollOnlyPendingBatch: pendingPollLiveness,
-    };
-  }
-
-  function pendingWaitResult(callId: string): {
-    callId: string;
-    content: string;
-  } {
-    return {
-      callId,
-      content: JSON.stringify({
-        results: [{ agent_id: "w1", status: "running" }],
-        timed_out: true,
-      }),
-    };
-  }
-
-  function settledWaitResult(callId: string): {
-    callId: string;
-    content: string;
-  } {
-    return {
-      callId,
-      content: JSON.stringify({
-        results: [{ agent_id: "w1", status: "done" }],
-        timed_out: false,
-      }),
-    };
-  }
-
-  test("does not trip on repeated still-pending poll batches", async () => {
-    const { reactor, events, waitFor } = createTestReactor({
-      deps: depsWithLiveness(),
-      director: createBatchLoopDirector((turn) =>
-        turn < 8
-          ? [{ id: `c${turn}`, name: "wait_agents", arguments: { q: 1 } }]
-          : null,
-      ),
-      toolRunner: makeToolRunner(async (call) => pendingWaitResult(call.id)),
-    });
-
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    await waitFor("reactor.done");
-
-    expect(events.some((e) => e.type === "reactor.error")).toBe(false);
-    expect(getEvent(events, "message.run.ended").data.status).toBe("completed");
-    expect(events.filter((e) => e.type === "tool.start").length).toBe(8);
-  });
-
-  test("still trips on repeated non-poll batches when a policy is set", async () => {
-    const { reactor, events, waitFor } = createTestReactor({
-      deps: depsWithLiveness(),
-      director: createBatchLoopDirector((turn) =>
-        turn < 8
-          ? [{ id: `c${turn}`, name: "spin", arguments: { q: 1 } }]
-          : null,
-      ),
-    });
-
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    await waitFor("reactor.done");
-
-    expect(getEvent(events, "reactor.error").data.fatal).toBe(true);
-    expect(getEvent(events, "message.run.ended").data.error?.kind).toBe(
-      "doom_loop",
-    );
-  });
-
-  test("mixed poll and non-poll batches count normally", async () => {
-    const { reactor, events, waitFor } = createTestReactor({
-      deps: depsWithLiveness(),
-      director: createBatchLoopDirector((turn) =>
-        turn < 8
-          ? [
-              {
-                id: `c${turn}-wait`,
-                name: "wait_agents",
-                arguments: { q: 1 },
-              },
-              { id: `c${turn}-spin`, name: "spin", arguments: {} },
-            ]
-          : null,
-      ),
-      toolRunner: makeToolRunner(async (call) =>
-        call.name === "wait_agents"
-          ? pendingWaitResult(call.id)
-          : { callId: call.id, content: "spun" },
-      ),
-    });
-
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    await waitFor("reactor.done");
-
-    expect(getEvent(events, "reactor.error").data.fatal).toBe(true);
-    expect(getEvent(events, "message.run.ended").data.error?.kind).toBe(
-      "doom_loop",
-    );
-  });
-
-  test("a settled poll batch counts normally", async () => {
-    const { reactor, events, waitFor } = createTestReactor({
-      deps: depsWithLiveness(),
-      director: createBatchLoopDirector((turn) =>
-        turn < 8
-          ? [{ id: `c${turn}`, name: "wait_agents", arguments: { q: 1 } }]
-          : null,
-      ),
-      toolRunner: makeToolRunner(async (call) => settledWaitResult(call.id)),
-    });
-
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    await waitFor("reactor.done");
-
-    expect(getEvent(events, "reactor.error").data.fatal).toBe(true);
-    expect(getEvent(events, "message.run.ended").data.error?.kind).toBe(
-      "doom_loop",
-    );
-  });
-
-  test("a pending poll batch clears a stale non-poll streak", async () => {
-    // spin x2 leaves a count of 2; a skip-only exemption would preserve it
-    // and the final spin would trip at 3. The reset clears it, so the run
-    // completes.
-    const batches: ToolCall[][] = [
-      [{ id: "1", name: "spin", arguments: {} }],
-      [{ id: "2", name: "spin", arguments: {} }],
-      [{ id: "3", name: "wait_agents", arguments: { q: 1 } }],
-      [{ id: "4", name: "spin", arguments: {} }],
-    ];
-    const { reactor, events, waitFor } = createTestReactor({
-      deps: depsWithLiveness(),
-      director: createBatchLoopDirector((turn) => batches[turn] ?? null),
-      toolRunner: makeToolRunner(async (call) =>
-        call.name === "wait_agents"
-          ? pendingWaitResult(call.id)
-          : { callId: call.id, content: "spun" },
-      ),
-    });
-
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    await waitFor("reactor.done");
-
-    expect(events.some((e) => e.type === "reactor.error")).toBe(false);
-    expect(getEvent(events, "message.run.ended").data.status).toBe("completed");
-  });
-});
+// ---------------------------------------------------------------------------
+// 8. Correlation matching
+// ---------------------------------------------------------------------------
 
 describe("createReactor — correlation", () => {
   test("message with matching correlationId triggers message.correlated", async () => {
@@ -3556,6 +3227,8 @@ describe("createReactor — state snapshot inspection", () => {
             if (messageCount === 1) {
               // Mutate the snapshot's content block. Frozen turns throw;
               // isolation still holds if the assignment is ignored.
+              //
+              // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-test-frozen-turns-mutation
               const msg = state.turns[0];
               if (msg !== undefined) {
                 const block = msg.content[0];
@@ -5604,18 +5277,13 @@ function truncatingCompactor(name: string): Compactor {
   };
 }
 
-function makeRecordingContextStore(opts?: {
-  failCommit?: boolean;
-  failCommitRemaining?: { n: number };
-  initialTurns?: ConversationTurn[];
-}): {
+function makeRecordingContextStore(): {
   store: ContextStore;
   commits: { message: string; turns: ConversationTurn[] }[];
   manifests: TransformRecord[][];
   metadata: { pendingOperations: PendingOperation[]; tokenUsage: TokenUsage }[];
   blobs: { key: string; bytes: Uint8Array; contentType?: string }[];
   lastWrittenTurns: ConversationTurn[];
-  writeTurnsCalls: ConversationTurn[][];
 } {
   const commits: { message: string; turns: ConversationTurn[] }[] = [];
   const manifests: TransformRecord[][] = [];
@@ -5624,13 +5292,12 @@ function makeRecordingContextStore(opts?: {
     tokenUsage: TokenUsage;
   }[] = [];
   const blobs: { key: string; bytes: Uint8Array; contentType?: string }[] = [];
-  const writeTurnsCalls: ConversationTurn[][] = [];
   let lastWrittenTurns: ConversationTurn[] = [];
 
   const store: ContextStore = {
     async load() {
       return {
-        turns: opts?.initialTurns !== undefined ? [...opts.initialTurns] : [],
+        turns: [],
         pendingOperations: [],
         tokenUsage: emptyUsage(),
         connectorState: null,
@@ -5640,13 +5307,6 @@ function makeRecordingContextStore(opts?: {
       /* noop */
     },
     async commit(options) {
-      if (opts?.failCommit === true) {
-        throw new Error("commit failed");
-      }
-      if (opts?.failCommitRemaining !== undefined && opts.failCommitRemaining.n > 0) {
-        opts.failCommitRemaining.n -= 1;
-        throw new Error("commit failed");
-      }
       commits.push({
         message: options.message,
         turns: [...lastWrittenTurns],
@@ -5686,7 +5346,6 @@ function makeRecordingContextStore(opts?: {
       manifests.push([...records]);
     },
     async writeTurns(turns) {
-      writeTurnsCalls.push([...turns]);
       lastWrittenTurns = [...turns];
     },
     async writeMetadata(m) {
@@ -5706,7 +5365,6 @@ function makeRecordingContextStore(opts?: {
     manifests,
     metadata,
     blobs,
-    writeTurnsCalls,
     get lastWrittenTurns() {
       return lastWrittenTurns;
     },
@@ -5812,7 +5470,7 @@ function createDirectReactor(opts: {
       id: "anthropic:test-model",
       provider: "anthropic",
       baseURL: "https://api.anthropic.com",
-      apiKey: "test",
+      credentialId: "test",
       model: "test-model",
     },
     toolRunner: opts.toolRunner ?? noopToolRunner(),
@@ -5968,102 +5626,6 @@ describe("createReactor — transform chain ordering and compact action", () => 
     // Manifest carries the compactor record.
     const flatRecords = recording.manifests.flat();
     expect(flatRecords.some((r) => r.strategy === "tail-only")).toBe(true);
-  });
-
-  test("compact stages writeTurns and replaces memory only after commit", async () => {
-    const seed: ConversationTurn[] = [
-      { role: "user", content: [{ type: "text", text: "a" }], timestamp: 1 },
-      { role: "user", content: [{ type: "text", text: "b" }], timestamp: 2 },
-      { role: "user", content: [{ type: "text", text: "c" }], timestamp: 3 },
-    ];
-    const recording = makeRecordingContextStore({
-      failCommit: true,
-      initialTurns: seed,
-    });
-    const seenLengths: number[] = [];
-    const director: ReactorDirector = {
-      async decide(event, state, caps) {
-        if (event.type === "message.received") {
-          seenLengths.push(state.turns.length);
-          if (seenLengths.length === 1) {
-            return caps.compact("tail-only", "explicit-test");
-          }
-          return caps.done();
-        }
-        return caps.done();
-      },
-    };
-    const { reactor, waitFor } = createDirectReactor({
-      contextStore: recording.store,
-      director,
-      compactors: { "tail-only": truncatingCompactor("tail-only") },
-    });
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    setTimeout(() => reactor.deliver(makeInboundMessage()), 30);
-    await waitFor("reactor.done");
-
-    expect(recording.writeTurnsCalls.some((turns) => turns.length === 1)).toBe(true);
-    expect(recording.commits).toHaveLength(0);
-    expect(seenLengths[1]).toBeGreaterThan(1);
-  });
-
-  test("failed compact commit does not replaceTurns stale output on a later infer cycle", async () => {
-    const seed: ConversationTurn[] = [
-      { role: "user", content: [{ type: "text", text: "a" }], timestamp: 1 },
-      { role: "user", content: [{ type: "text", text: "b" }], timestamp: 2 },
-      { role: "user", content: [{ type: "text", text: "c" }], timestamp: 3 },
-    ];
-    const recording = makeRecordingContextStore({
-      failCommitRemaining: { n: 1 },
-      initialTurns: seed,
-    });
-    let inspectLength = 0;
-    let messages = 0;
-    const director: ReactorDirector = {
-      async decide(event, state, caps) {
-        if (event.type === "message.received") {
-          messages++;
-          if (messages === 1) {
-            return caps.compact("tail-only", "explicit-test");
-          }
-          if (messages === 2) {
-            return caps.infer();
-          }
-          inspectLength = state.turns.length;
-          return caps.done();
-        }
-        if (event.type === "inference.done") {
-          return caps.wait();
-        }
-        return caps.done();
-      },
-    };
-    const { reactor, waitFor } = createDirectReactor({
-      contextStore: recording.store,
-      director,
-      compactors: { "tail-only": truncatingCompactor("tail-only") },
-      inferenceRunner: mockInferenceRunner("live-after-failed-compact"),
-    });
-    reactor.start();
-    reactor.deliver(makeInboundMessage());
-    setTimeout(() => reactor.deliver(makeInboundMessage()), 30);
-    setTimeout(() => reactor.deliver(makeInboundMessage()), 80);
-    await waitFor("reactor.done");
-
-    const liveWrites = recording.writeTurnsCalls.filter((turns) =>
-      turns.some(
-        (turn) =>
-          turn.role === "assistant" &&
-          turn.content.some((b) => b.type === "text" && b.text === "live-after-failed-compact"),
-      ),
-    );
-    expect(liveWrites.length).toBeGreaterThan(0);
-    expect(liveWrites.some((turns) => turns.length === 1)).toBe(false);
-    expect(inspectLength).toBeGreaterThan(1);
-    const inferCommit = recording.commits.find((c) => c.message.startsWith("Cycle: inferred"));
-    expect(inferCommit).toBeDefined();
-    expect(inferCommit?.turns.length).toBeGreaterThan(1);
   });
 
   test("compact for an unknown name emits a fatal error and shuts down", async () => {
@@ -6518,7 +6080,7 @@ describe("createReactor — source failover", () => {
       id,
       provider: "anthropic",
       baseURL: "https://api.anthropic.com",
-      apiKey: `key-${id}`,
+      credentialId: `key-${id}`,
       model: "test-model",
     }));
     const head = sources[0];

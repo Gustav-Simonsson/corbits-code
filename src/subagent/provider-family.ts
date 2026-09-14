@@ -29,8 +29,16 @@ export function isKimiLeafProvider(input: {
   return false;
 }
 
+/** True when the provider/model is the OpenCode Go Muse Spark family. */
+export function isMuseSparkLeafProvider(input: {
+  providerName: string;
+  model?: string;
+}): boolean {
+  return input.model !== undefined && /^muse-spark/i.test(input.model.trim());
+}
+
 /** Model families the shared directors branch on via ModelFamilyPolicy. */
-export type ModelFamily = "grok" | "kimi" | "default";
+export type ModelFamily = "grok" | "kimi" | "muse" | "default";
 
 /**
  * Resolves a provider/model to a ModelFamily. Generalizes
@@ -44,6 +52,7 @@ export function detectModelFamily(input: {
 }): ModelFamily {
   if (isXaiGrokLeafProvider(input)) return "grok";
   if (isKimiLeafProvider(input)) return "kimi";
+  if (isMuseSparkLeafProvider(input)) return "muse";
   return "default";
 }
 

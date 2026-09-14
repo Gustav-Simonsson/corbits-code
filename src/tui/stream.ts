@@ -388,6 +388,25 @@ function userBubbleLines(text: string, width: number): string[] {
 }
 
 /**
+ * The painted width a plain row was wrapped at, for reassembling URLs split
+ * across continuation lines. Mirrors the three plain-row layouts: the bubble
+ * wraps its body inside the bar, while thinking and gutter-indented rows fill
+ * the full width. Keep in sync with userBubbleLines/thinkingLines/indentBody.
+ */
+export function plainRowWrapWidth(row: StreamRow, layout: RowLayout): number {
+  if (row.role !== "user") return layout.width;
+  const barWidth = stringWidth(`${BUBBLE_BAR} `);
+  const body = Math.max(
+    1,
+    Math.min(
+      layout.width - barWidth,
+      Math.ceil(layout.width * BUBBLE_MAX_SHARE),
+    ),
+  );
+  return body + barWidth;
+}
+
+/**
  * Columns a reasoning block is inset by. The inset plus the faintest text in
  * the palette is the whole of reasoning's chrome — it carries no marker of its
  * own, because a rail is a line of noise attached to the quietest thing on the
@@ -953,9 +972,9 @@ const MARKDOWN_STYLES = {
   "markup.raw": { fg: UI.inFlight },
   "markup.list": { fg: UI.inFlightBright },
   "markup.quote": { fg: UI.textDim, italic: true },
-  "markup.link": { fg: UI.inFlightBright, underline: true },
+  "markup.link": { fg: UI.inFlightBright },
   "markup.link.label": { fg: UI.inFlightBright },
-  "markup.link.url": { fg: UI.inFlightBright, underline: true },
+  "markup.link.url": { fg: UI.inFlightBright },
   keyword: { fg: UI.inFlightBright },
   string: { fg: UI.done },
   number: { fg: UI.done },

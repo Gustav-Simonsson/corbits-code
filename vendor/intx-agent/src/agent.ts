@@ -47,6 +47,8 @@ import {
   type ReactorEmittedEvent,
 } from "@intx/inference";
 import { createDefaultDependencies } from "@intx/inference/providers";
+
+import { createUnconfiguredCredentialResolver } from "./credential-resolver";
 import { getLogger } from "@intx/log";
 import { createInboundMessage } from "@intx/mime";
 import type { ErrorRecord } from "@intx/types/audit";
@@ -537,13 +539,6 @@ export async function createAgent<EnvReq extends BaseEnv>(
       return `${record.sessionId}/${seq}-${category}`;
     }
 
-    function dropFromAccumulator(records: readonly ErrorRecord[]): void {
-      for (const record of records) {
-        const index = accumulatedErrors.indexOf(record);
-        if (index !== -1) accumulatedErrors.splice(index, 1);
-      }
-    }
-
     function flushErrors(): Promise<void> {
       if (flushInProgress !== undefined) {
         // If another caller already arranged a follow-up flush after
@@ -595,19 +590,20 @@ export async function createAgent<EnvReq extends BaseEnv>(
                 );
                 if (index === -1) {
                   logger.warn`duplicate error record already stored; dropping the colliding batch`;
-                  dropFromAccumulator(remaining);
+                  accumulatedErrors.splice(0, count);
                   return;
                 }
-                const [colliding] = remaining.splice(index, 1);
-                if (colliding !== undefined)
-                  dropFromAccumulator([colliding]);
+                remaining.splice(index, 1);
                 logger.warn`duplicate error record already stored; dropping the colliding record`;
-                if (remaining.length === 0) return;
+                if (remaining.length === 0) {
+                  accumulatedErrors.splice(0, count);
+                  return;
+                }
                 continue;
               }
               throw cause;
             }
-            dropFromAccumulator(remaining);
+            accumulatedErrors.splice(0, count);
             return;
           }
         } finally {
@@ -748,6 +744,8 @@ export async function createAgent<EnvReq extends BaseEnv>(
       source: sourceRegistry.active,
       failOverToNextSource: () => sourceRegistry.failOverToNextSource(),
       resetToPreferredSource: () => sourceRegistry.resetToPreferredSource(),
+      readMaterial:
+        env.readCurrentMaterial ?? createUnconfiguredCredentialResolver(),
       toolRunner: resolvedTools.runner,
       contextStore,
       onEvent: handleEvent,

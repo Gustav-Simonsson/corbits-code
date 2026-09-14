@@ -99,6 +99,9 @@ export function buildCorePosixToolPlugins(
   // rebuilding the plugin stack. Secret-guard and authz still hard-deny
   // regardless.
   const allowOutside = (): boolean => permissionGate.getSkipPermissions();
+  // One shared workspace-roots provider for every bound in this stack, so
+  // pathEscape and delete_file admit the same registered sibling worktrees.
+  const rootsProvider = createWorktreeRootsProvider(cwd);
   const truncationOptions =
     getBlobWriter !== undefined ||
     getContextDir !== undefined ||
@@ -112,9 +115,9 @@ export function buildCorePosixToolPlugins(
   return [
     resultTruncationPlugin(truncationOptions),
     toolResultSecretScrubPlugin(),
-    pathEscapePlugin(cwd, createWorktreeRootsProvider(cwd), { allowOutside }),
+    pathEscapePlugin(cwd, rootsProvider, { allowOutside }),
     evidenceArchivePathGuardPlugin(),
-    deleteFilePlugin(cwd, { allowOutside }),
+    deleteFilePlugin(cwd, { allowOutside, rootsProvider }),
     toolOutputUriPlugin(),
     secretGuardPlugin(),
     authzPlugin(),

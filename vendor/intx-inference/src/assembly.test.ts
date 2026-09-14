@@ -179,7 +179,7 @@ function source(): InferenceSource {
     id: "anthropic:test-model",
     provider: "anthropic",
     baseURL: "https://api.anthropic.com",
-    apiKey: "test",
+    credentialId: "test",
     model: "test-model",
   };
 }
@@ -197,9 +197,6 @@ function makeRecordingAuditStore(): AuditStore & {
     },
     async commitErrors() {
       /* noop */
-    },
-    async loadErrors() {
-      return [];
     },
     getCommitted() {
       return committed;

@@ -23,6 +23,10 @@ import {
   SOURCE_MAX_TOKENS,
 } from "./config/index.js";
 import { DIRECTOR_IDS } from "./agent/directors/types.js";
+import {
+  clearSourceCredentials,
+  peekSourceCredentialSecret,
+} from "./config/source-credentials.js";
 import type { Config, UnconfiguredConfig } from "./config/index.js";
 import {
   mergeProviderIntoSettings,
@@ -69,6 +73,7 @@ afterEach(() => {
   resetGoModelDiscoveryForTests();
   resetZenModelDiscoveryForTests();
   setProviderContextWindowOverrides(undefined);
+  clearSourceCredentials();
 });
 
 function assertConfigured(
@@ -1460,6 +1465,15 @@ describe("buildOpenAISource", () => {
     expect(source.baseURL).toBe("https://fp/v1");
   });
 
+  test("stays above the reasoning truncation floor", () => {
+    // Reasoning tokens consume max_output_tokens before any answer text is
+    // emitted. Measured on muse-spark-1.3-contributor, a 512-token cap at
+    // medium effort spent 397 tokens reasoning and returned 3 tokens of
+    // answer; 1024 was the lowest cap that answered on every rung. 4096 is
+    // the floor we will not drop below. See CL-7867.
+    expect(SOURCE_MAX_TOKENS).toBeGreaterThanOrEqual(4096);
+  });
+
   test("omits reasoning_effort when effort is absent", () => {
     const source = buildOpenAISource({
       id: "fp",
@@ -1505,13 +1519,16 @@ describe("buildOpenAISource", () => {
     expect(source.baseURL).toBe("http://localhost:11434/v1");
   });
 
-  test("substitutes a placeholder apiKey when none is provided (keyless)", () => {
+  test("registers the keyless placeholder in the credential cell when none is provided", () => {
     const source = buildOpenAISource({
       id: "local",
       baseURL: "http://localhost:8080/v1",
       model: "local-model",
     });
-    expect(source.apiKey).toBe(KEYLESS_API_KEY);
+    expect(source.credentialId).toBe("local");
+    expect(peekSourceCredentialSecret(source.credentialId)).toBe(
+      KEYLESS_API_KEY,
+    );
   });
 });
 

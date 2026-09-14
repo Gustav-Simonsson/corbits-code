@@ -32,6 +32,10 @@ import { type } from "arktype";
 
 import { createAgentWithLiveToolDispatch } from "../../src/agent/live-tool-dispatch.js";
 import { createChatDirector } from "../../src/agent/director.js";
+import {
+  readSourceCredentialMaterial,
+  registerSourceCredential,
+} from "../../src/config/source-credentials.js";
 import { createAgentToolset } from "../../src/agent/tools.js";
 import { ID_PREFIX } from "../../src/branding.js";
 import type { PermissionGate } from "../../src/permission/gate.js";
@@ -59,9 +63,13 @@ export const INTEGRATION_SOURCE: InferenceSource = {
   id: "anthropic:claude-integration",
   provider: "anthropic",
   baseURL: "https://api.anthropic.com",
-  apiKey: "sk-integration-test",
+  credentialId: "anthropic:claude-integration",
   model: "claude-integration",
 };
+
+// The mock inference stack still resolves the secret through the credential
+// cell, so the shared fixture registers its dummy key on session setup.
+const INTEGRATION_SECRET = "integration-test-key";
 
 export interface IntegrationSession {
   harness: Harness;
@@ -92,6 +100,7 @@ export async function openIntegrationSession(
   opts: OpenIntegrationSessionOpts,
 ): Promise<IntegrationSession> {
   const harness = setupHarness();
+  registerSourceCredential(INTEGRATION_SOURCE.id, INTEGRATION_SECRET);
   const cwd = mkdtempSync(join(tmpdir(), "corbits-integration-cwd-"));
   const workdir = join(cwd, ".agent-state", "integration-session");
   const evidenceArchiveHolder: { current: CompactionArchive | undefined } = {
@@ -207,6 +216,7 @@ export async function openIntegrationSession(
     defaultSource: INTEGRATION_SOURCE.id,
     storage: storageForAgent,
     workdir,
+    readCurrentMaterial: readSourceCredentialMaterial,
     deps: {
       ...harness.deps,
       ...(opts.contextTransforms !== undefined

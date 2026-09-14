@@ -345,7 +345,7 @@ describe("grant-mismatch asks carry the guard reason as a notice (CL-6824)", () 
     expect(verdict.allowed).toBe(false);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.notice).toBe(
-      "A standing grant matches this command, but it uses --force, so it still needs approval.",
+      "A standing grant matches this command, but it uses --force=true, so it still needs approval.",
     );
   });
 
@@ -357,7 +357,7 @@ describe("grant-mismatch asks carry the guard reason as a notice (CL-6824)", () 
     expect(verdict.allowed).toBe(false);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.notice).toBe(
-      "A standing grant matches this command, but it uses --force, so it still needs approval.",
+      "A standing grant matches this command, but it uses -f=true, so it still needs approval.",
     );
   });
 
@@ -369,7 +369,7 @@ describe("grant-mismatch asks carry the guard reason as a notice (CL-6824)", () 
     expect(verdict.allowed).toBe(false);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.notice).toBe(
-      "A standing grant matches this command, but it uses --force, so it still needs approval.",
+      "A standing grant matches this command, but it uses -ftrue, so it still needs approval.",
     );
   });
 
@@ -473,5 +473,40 @@ describe("grant-mismatch asks carry the guard reason as a notice (CL-6824)", () 
     );
     expect(verdict.allowed).toBe(true);
     expect(seen).toHaveLength(0);
+  });
+});
+
+// Spill URI sandbox (CL-6727): the permission gate denies a non-reader
+// virtual ref at authorize time, mirroring the execution-time middleware
+// deny, while the exempted reader is not denied.
+describe("spill URI sandbox at authorize time (CL-6727)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "gate-spill-uri-"));
+  const gate = createPermissionGate({
+    approvals: [],
+    interactive: false,
+    skipPermissions: false,
+    reactorGated: false,
+    cwd,
+  });
+
+  test("grep + tool-output:/// is denied at authorize", async () => {
+    const verdict = await gate.authorizeCall({
+      id: "spill-grep",
+      name: "grep",
+      arguments: { pattern: "foo", path: "tool-output:///abc123" },
+    });
+    expect(verdict.effect).toBe("deny");
+    expect(verdict.effect === "deny" ? verdict.reason : "").toMatch(
+      /tool-output/,
+    );
+  });
+
+  test("read_file + the same tool-output:/// URI is not denied", async () => {
+    const verdict = await gate.authorizeCall({
+      id: "spill-read",
+      name: "read_file",
+      arguments: { path: "tool-output:///abc123" },
+    });
+    expect(verdict.effect).not.toBe("deny");
   });
 });

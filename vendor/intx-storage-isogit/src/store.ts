@@ -789,7 +789,7 @@ export class IsogitStore
   }
 
   async commitErrors(
-    records: ErrorRecordType[],
+    records: ErrorRecord[],
     _signal?: AbortSignal,
   ): Promise<void> {
     if (records.length === 0) return;

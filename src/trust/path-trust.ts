@@ -175,7 +175,7 @@ export async function revokePathPlugin(
 
 /**
  * One-shot migration: seed the global store from `settings.pluginPaths` when
- * no valid store file exists yet. Every registered entry that resolves to a
+ * the store file is missing (first launch). Every registered entry that resolves to a
  * plugin on disk is granted — pluginPaths lives in the user's global settings,
  * so each entry was put there by the user (add-by-path or a hand edit) and
  * registration is taken as consent at the moment the store is created, even
@@ -189,6 +189,13 @@ export async function revokePathPlugin(
  * (expand marketplaces, drop missing paths). Callers supply expansion so this
  * module stays free of the plugin loader. `onMigrated` fires only on the run
  * that seeds grants, so callers can surface the one-time event to the user.
+ *
+ * A corrupt store (`invalid`: unreadable, zero-byte, or malformed) refuses to
+ * seed: re-granting from `pluginPaths` here would undo an explicit revoke the
+ * moment the file becomes unreadable. Migration leaves the file untouched and
+ * returns no grants, so path plugins load metadata-only until the user either
+ * repairs the file (deleting it restores first-launch seeding) or re-consents
+ * explicitly through add-by-path / enable.
  */
 export async function migratePathTrustFromPluginPaths(
   pluginPaths: string[],
@@ -199,6 +206,12 @@ export async function migratePathTrustFromPluginPaths(
   const existing = await readPathTrustStore(home);
   if (existing.state === "valid") {
     return existing.store;
+  }
+  if (existing.state === "invalid") {
+    if (pluginPaths.length > 0) {
+      logger.warn`refusing path-trust migration from a corrupt store at ${pathTrustPath(home)}: delete the file to re-seed from settings.pluginPaths or re-consent through add-by-path`;
+    }
+    return emptyStore();
   }
   if (pluginPaths.length === 0) {
     return emptyStore();

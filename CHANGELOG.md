@@ -32,6 +32,52 @@ by hand.
   (Critic on the diff plus at most one extra lens), loading `/review`
   for quality rules only.
 
+## [0.3.25] - 2026-09-14
+
+### What's Changed
+* Correct PRODUCT.md on tool-less turns by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/955
+* Reset the tool-less narration count on tool-using turns by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/956
+* Restore Critic verify-by-temporary-test workflow by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/957
+* Explain grant-mismatch asks with a prompt notice by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/960
+* Rotate the submit_result turn token on every steering followup by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/967
+* Ship keepstyle guideline split and dedupe worker report envelopes by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/968
+* Send parallel_tool_calls true on Codex Responses requests by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/969
+* Unify provider identity lists around the first-class registry by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/970
+* Strip scheduler restatements from the Skywalker prompt by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/974
+* Give empty overlays zero list rows and an explicit empty state by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/975
+* Add a Gauntlet director that mutation-checks tests can actually fail by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/977
+* Show connected state plainly in the model picker by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/973
+* Restore Draper full brand and design critique layer by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/953
+* Add measure-only prober leaf director by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/962
+* Document catalog credential-removal convergence as rebuild-only by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/972
+* Add Migrator director for reversible data migrations by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/963
+* Add Lexicon skill owning director prompt drift and size by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/961
+* Report first-party skill names on skill_used, bucket the rest as custom by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/959
+* Split deep review from pull request surface review by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/971
+* Add warden trust-review director for permission and plugin paths by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/966
+* Mark bundled plugin rows with a mountain in listings by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/976
+* Re-sign compiled macOS binaries so bun compile output launches on macOS 27 by @brianjfox in https://github.com/corbitsdev/corbits-code/pull/984
+* Deny OAuth token stores in the secret guard by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/983
+* Report lexicon by name on skill_used by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/990
+* Add bug report and feature request issue templates by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/988
+* Cut the README to a way in and let the docs carry the depth by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/987
+* Convert greybeard to a leaf director; only Skywalker may spawn by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/958
+* Generate release notes from merged pull requests by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/986
+* Adopt Conventional Commits and make the rules binding by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/985
+* Derive prompt size budgets from a checked-in baseline by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/992
+* fix(hooks): keep a hook's broken pipe from crashing the run by @brianjfox in https://github.com/corbitsdev/corbits-code/pull/994
+* Mount skill search and load tools on every worker by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/982
+* Compress Skywalker classification and anti-cascade sections by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/965
+* Offer home-relative completions for at-mention paths by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1001
+* Refresh stale skill-bake prose left by worker skill mounting by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1000
+* Scope credential sidecar denylist and bare row drop to avoid false positives by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1002
+* Describe worker skill mounting in ARCHITECTURE by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1003
+* Correct flagged-skill reporting split in TELEMETRY by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1004
+* Cover EPIPE, truncation, stdio, and enablement in HOOKS by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1012
+
+
+**Full Changelog**: https://github.com/corbitsdev/corbits-code/compare/v0.3.24...v0.3.25
+
 ## [0.3.24] - 2026-09-13
 
 ### Added

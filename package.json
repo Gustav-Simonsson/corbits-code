@@ -1,6 +1,6 @@
 {
   "name": "@corbits/code",
-  "version": "0.3.24",
+  "version": "0.3.25",
   "description": "Single-process coding agent CLI built on the Interchange runtime (Bun + TypeScript)",
   "private": true,
   "license": "SEE LICENSE IN LICENSE.md",
@@ -34,6 +34,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src ./tests ./evals ./scripts --randomize --seed 424242",
     "test:paths": "bun scripts/test-paths.ts",
+    "test:parallel": "bun scripts/test-parallel.ts",
     "lint": "oxfmt --check . && oxlint",
     "check:projects-dir-guard": "bun scripts/guard-real-projects-dir.ts",
     "check": "bun run lint && bun run typecheck && bun run build && bun run check:projects-dir-guard",
@@ -100,7 +101,7 @@
     "@intx/types": "workspace:*",
     "@intx/workflow-host": "0.3.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@opentui/core": "0.5.10",
+    "@opentui/core": "0.5.11",
     "arktype": "catalog:",
     "highlight.js": "^11.11.1",
     "isomorphic-git": "catalog:"
@@ -115,13 +116,13 @@
     "ws": "^8.21.0"
   },
   "optionalDependencies": {
-    "@opentui/core-darwin-arm64": "0.5.10",
-    "@opentui/core-darwin-x64": "0.5.10",
-    "@opentui/core-linux-arm64": "0.5.10",
-    "@opentui/core-linux-arm64-musl": "0.5.10",
-    "@opentui/core-linux-x64": "0.5.10",
-    "@opentui/core-linux-x64-musl": "0.5.10",
-    "@opentui/core-win32-arm64": "0.5.10",
-    "@opentui/core-win32-x64": "0.5.10"
+    "@opentui/core-darwin-arm64": "0.5.11",
+    "@opentui/core-darwin-x64": "0.5.11",
+    "@opentui/core-linux-arm64": "0.5.11",
+    "@opentui/core-linux-arm64-musl": "0.5.11",
+    "@opentui/core-linux-x64": "0.5.11",
+    "@opentui/core-linux-x64-musl": "0.5.11",
+    "@opentui/core-win32-arm64": "0.5.11",
+    "@opentui/core-win32-x64": "0.5.11"
   }
 }

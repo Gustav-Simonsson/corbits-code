@@ -13,6 +13,14 @@ import {
 import { stringWidth } from "../view/height.js";
 import { viewToTableContent, type McpStructuredView } from "../mcp-view.js";
 import {
+  armLinkLine,
+  buildLinkLine,
+  findLinks,
+  paintLinkLine,
+  splitLinkSpans,
+  splitWrappedLinkSpans,
+} from "../url-links.js";
+import {
   splitAtSettledHeading,
   withholdIncompleteHeading,
 } from "../markdown-parser.js";
@@ -26,6 +34,7 @@ import {
   isSentenceRow,
   MAIN_AGENT,
   paintStreamRow,
+  plainRowWrapWidth,
   rowGroupGap,
   streamRowGutter,
   toolRowLines,
@@ -198,7 +207,12 @@ function retextStreamRowBody(
     return false;
   if (node instanceof TextRenderable) {
     if (isMarkdownRow(row)) return false;
-    node.content = paintStreamRow(row, layout).content;
+    paintPlainRowNode(
+      node,
+      row,
+      paintStreamRow(row, layout),
+      plainRowWrapWidth(row, layout),
+    );
     return true;
   }
 
@@ -347,11 +361,12 @@ export function buildRowNode(
   }
 
   if (!isMarkdownRow(row)) {
-    const painted = paintStreamRow(row, layout);
-    return new TextRenderable(ctx, {
-      content: painted.content,
-      fg: painted.fg,
-    });
+    return buildPlainRowNode(
+      ctx,
+      row,
+      paintStreamRow(row, layout),
+      plainRowWrapWidth(row, layout),
+    );
   }
 
   const gutter = streamRowGutter(row, layout);
@@ -376,6 +391,64 @@ function markdownBodyOptions(gutter: PaintedStreamLine, width: number) {
 }
 
 /**
+ * A literal-text row's paint node: always a single text node, as before. Rows
+ * holding URLs paint styled text (URL spans carry OSC-8 metadata) and arm as
+ * Ctrl+click targets; URL-free rows paint the plain string they always have.
+ */
+function buildPlainRowNode(
+  ctx: CliRenderer,
+  row: StreamRow,
+  painted: PaintedStreamLine,
+  wrapWidth: number,
+): TextRenderable {
+  const node = new TextRenderable(ctx, {
+    content: painted.content,
+    fg: painted.fg,
+  });
+  paintPlainRowNode(node, row, painted, wrapWidth);
+  return node;
+}
+
+/**
+ * Links a plain row's pre-wrap text holds: wrapped fragments reassemble to
+ * one of these, which is what tells a real wrap across a short fragment line
+ * apart from a natural line break after the fact.
+ */
+function plainRowSourceUrls(row: StreamRow): string[] {
+  return findLinks(`${row.text}\n${row.summary ?? ""}`).map((hit) => hit.url);
+}
+
+/**
+ * Rewrite a plain row's text on its existing node. The node never changes
+ * shape, so a URL appearing or disappearing repaints in place instead of
+ * forcing a rebuild.
+ */
+function paintPlainRowNode(
+  node: TextRenderable,
+  row: StreamRow,
+  painted: PaintedStreamLine,
+  wrapWidth: number,
+): void {
+  const lines = painted.content.split("\n");
+  if (!lines.some((line) => findLinks(line).length > 0)) {
+    node.content = painted.content;
+    node.fg = painted.fg;
+    // Route through the armer so a retext that drops the last URL disarms
+    // the handlers a previous arming installed (armLinkLine clears them).
+    armLinkLine(node, []);
+    return;
+  }
+  paintLinkLine(
+    node,
+    splitWrappedLinkSpans(
+      lines.map((text) => ({ text: text.trimEnd(), fg: painted.fg })),
+      wrapWidth,
+      plainRowSourceUrls(row),
+    ),
+  );
+}
+
+/**
  * A markdown row's body. Most rows have no settled heading yet (no heading at
  * all, or the only one is still the open tail), and paint through a single
  * renderer, same as before this fix existed. Once a heading closes, the body
@@ -396,10 +469,10 @@ function createMarkdownBody(
   const content = markdownContent(row);
   const split = splitAtSettledHeading(content);
   if (split === null) {
+    // Native incremental block stability: only the trailing block is unstable.
     return new MarkdownRenderable(ctx, {
       ...markdownBodyOptions(gutter, width),
       content,
-      // Native incremental block stability: only the trailing block is unstable.
       streaming: row.streaming === true,
     });
   }
@@ -454,8 +527,9 @@ function createStyledLinesRowRenderable(
 
 /**
  * One painted body line. A line ending in an expand arrow is split so the
- * arrow is its own renderable and can answer a click; every other line is a
- * single text node, as before.
+ * arrow is its own renderable and can answer a click; a line holding URLs
+ * paints styled text and arms as a Ctrl+click target (see url-links.ts);
+ * every other line is a single text node, as before.
  */
 function bodyLineNode(
   ctx: CliRenderer,
@@ -464,17 +538,12 @@ function bodyLineNode(
 ): TextRenderable | BoxRenderable {
   const split = onToggle === undefined ? null : splitTrailingArrow(line);
   if (split === null || onToggle === undefined) {
-    return new TextRenderable(ctx, {
-      content: new StyledText(diffLineChunks(line)),
-    });
+    return buildLinkLine(ctx, splitLinkSpans(line));
   }
   const wrapper = new BoxRenderable(ctx, { flexDirection: "row", flexGrow: 1 });
-  wrapper.add(
-    new TextRenderable(ctx, {
-      content: new StyledText(diffLineChunks(split.body)),
-      flexShrink: 0,
-    }),
-  );
+  const body = buildLinkLine(ctx, splitLinkSpans(split.body));
+  body.flexShrink = 0;
+  wrapper.add(body);
   wrapper.add(
     new TextRenderable(ctx, {
       content: new StyledText(diffLineChunks([split.arrow])),

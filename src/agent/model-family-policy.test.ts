@@ -87,4 +87,19 @@ describe("resolveModelFamilyPolicy", () => {
       expect(policy.advertisedToolDeny).toEqual([]);
     }
   });
+
+  test("muse spark carries tool-discipline rules; other families do not", () => {
+    const muse = resolveModelFamilyPolicy({
+      providerName: "opencode-go/abklabs",
+      model: "muse-spark-1.3-contributor",
+    });
+    const base = resolveModelFamilyPolicy({
+      providerName: "anthropic",
+      model: "claude-sonnet-4",
+    });
+    expect(muse.family).toBe("muse");
+    expect(muse.toolDisciplineRules).toContain("Batch independent tool calls");
+    expect(muse.toolDisciplineRules).toContain("Never re-read a file");
+    expect(base.toolDisciplineRules).toBeUndefined();
+  });
 });

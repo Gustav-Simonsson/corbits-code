@@ -55,6 +55,48 @@ describe("primary fleet verb mount", () => {
     await toolset.dispose();
   });
 
+  test("createAgentToolset mounts tool_search by default", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "corbits-fleet-mount-"));
+    const { createAgentToolset } = await import("./tools.js");
+    const permissionGate = {
+      check: async () => ({ allowed: true }),
+      getSkipPermissions: () => false,
+    } as never;
+
+    const toolset = await createAgentToolset({ cwd, permissionGate });
+    try {
+      const names = toolset.dynamicRunner
+        .currentDefinitions()
+        .map((d) => d.name);
+      expect(names).toContain("tool_search");
+    } finally {
+      await toolset.dispose();
+    }
+  });
+
+  test("createAgentToolset omits tool_search when the allow list excludes it", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "corbits-fleet-mount-"));
+    const { createAgentToolset } = await import("./tools.js");
+    const permissionGate = {
+      check: async () => ({ allowed: true }),
+      getSkipPermissions: () => false,
+    } as never;
+
+    const toolset = await createAgentToolset({
+      cwd,
+      permissionGate,
+      toolSearchAllow: ["read_file"],
+    });
+    try {
+      const names = toolset.dynamicRunner
+        .currentDefinitions()
+        .map((d) => d.name);
+      expect(names).not.toContain("tool_search");
+    } finally {
+      await toolset.dispose();
+    }
+  });
+
   test("createAgentToolset mounts wait_agents when mountWaitAgents is true (exec primary)", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "corbits-fleet-mount-"));
     const { createAgentToolset } = await import("./tools.js");

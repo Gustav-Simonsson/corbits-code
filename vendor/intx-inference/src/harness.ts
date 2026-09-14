@@ -37,6 +37,8 @@ import type {
   ContentBlock,
 } from "@intx/types/runtime";
 
+import type { CredentialMaterialResolver } from "@intx/types";
+
 import { getLogger } from "@intx/log";
 
 import {
@@ -85,6 +87,8 @@ export const HarnessId: unique symbol = Symbol("HarnessId");
  * loop. First-party runtimes recognize still-pending polls (`wait_agents`
  * timeouts and live wait statuses, `running` shell collects); terminal polls,
  * non-poll calls, and mixed batches return false so real loops still trip.
+ *
+ * Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-doom-loop-poll-exemption
  */
 export type PollBatchLivenessPredicate = (
   calls: readonly ToolCall[],
@@ -226,7 +230,27 @@ export type InferenceHarnessOptions = {
   signal?: AbortSignal;
   // Sequence number allocator — called once per event to get the next seq.
   nextSeq: () => number;
+  // Resolves the source's credential secret by `source.credentialId` from the
+  // run's credential cell at send time, so the source config carries no inline
+  // secret. Read live per attempt, so a failover to a source with a different
+  // `credentialId` resolves that source's credential. Optional: a caller whose
+  // adapter emits no credential sentinel (a mock harness in a test) needs none;
+  // the harness installs a fail-closed default that throws only if a request
+  // actually reaches a credential sentinel without a resolver.
+  readMaterial?: CredentialMaterialResolver;
   deps: Dependencies;
+};
+
+// Fail-closed default resolver, installed when a caller supplies no
+// `readMaterial`. It throws only if a request actually reaches a credential
+// sentinel, so a sentinel-free mock harness runs without a resolver while a
+// real credentialed request surfaces the missing wiring loudly.
+const unconfiguredCredentialResolver: CredentialMaterialResolver = (
+  credentialId,
+) => {
+  throw new Error(
+    `no credential resolver supplied to the inference harness, but a request needs the secret for credential ${credentialId}`,
+  );
 };
 
 /**
@@ -242,7 +266,15 @@ export type InferenceHarnessOptions = {
 async function* runSingleAttempt(
   opts: InferenceHarnessOptions,
 ): AsyncIterable<InferenceEvent> {
-  const { turns, source, inferenceOptions, signal, nextSeq, deps } = opts;
+  const {
+    turns,
+    source,
+    inferenceOptions,
+    signal,
+    nextSeq,
+    readMaterial,
+    deps,
+  } = opts;
   // Per-call options override source-bound defaults. The merge happens
   // here, once, so the adapter and timeout-resolution paths below all
   // see the effective option set without having to remember the
@@ -376,7 +408,11 @@ async function* runSingleAttempt(
 
   // Resolve the full URL and inject credentials.
   const url = resolveURL(builtRequest.url, source.baseURL);
-  const headers = injectCredentials(builtRequest.headers, source);
+  const headers = injectCredentials(
+    builtRequest.headers,
+    source,
+    readMaterial ?? unconfiguredCredentialResolver,
+  );
 
   // Per-call timeouts. The inactivity timer fires when the harness
   // hasn't yielded an event for `inactivityTimeoutMs`; the total timer
@@ -1547,6 +1583,8 @@ export async function* runInference(
     // streams straight to the caller — so it stays bounded regardless
     // of output length, and a discarded pre-commit retry has nothing
     // visible to retract.
+    //
+    // Locally patched — see vendor/intx-inference/PATCHES.md#harness-ts-commitment-boundary-streaming
     const preCommit: InferenceEvent[] = [];
     let committed = false;
     let failure: { event: InferenceEvent; error: InferenceError } | undefined;

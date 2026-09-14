@@ -55,12 +55,19 @@ function withHostReasoningEffort(adapter: ProviderAdapter): ProviderAdapter {
 // (HTTP 200 on POST /codex/responses, echoed true in response.created). The
 // packaged adapter still pins false, so the host rewrites the field on the
 // wire; the reactor already fans out a multi-call batch concurrently.
-function withParallelToolCalls(adapter: ProviderAdapter): ProviderAdapter {
+export function withParallelToolCalls(
+  adapter: ProviderAdapter,
+): ProviderAdapter {
   return {
     ...adapter,
     buildRequest: (messages, model, options) => {
       const request = adapter.buildRequest(messages, model, options);
-      const body = JSON.parse(request.body) as Record<string, unknown>;
+      let body: Record<string, unknown>;
+      try {
+        body = JSON.parse(request.body) as Record<string, unknown>;
+      } catch {
+        return request;
+      }
       body["parallel_tool_calls"] = true;
       return { ...request, body: JSON.stringify(body) };
     },

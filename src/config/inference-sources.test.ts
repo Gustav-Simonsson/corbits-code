@@ -13,6 +13,7 @@ import {
 } from "../provider/context-window.js";
 import { createOpenAICompatibleAdapter } from "../provider/openai-compatible-adapter.js";
 import { createInferenceDependencies } from "../provider/inference-dependencies.js";
+import { clearSourceCredentials } from "./source-credentials.js";
 import { OPENAI_RESPONSES_PROVIDER } from "../provider/openai-responses.js";
 import { ZEN_MESSAGES_PROVIDER } from "../provider/zen-anthropic-adapter.js";
 import { firstClassProviderById } from "../../packages/first-class-providers/src/index.js";
@@ -81,6 +82,7 @@ function settingsWithWindow(): Settings {
 afterEach(() => {
   setProviderContextWindowOverrides(undefined);
   globalThis.fetch = originalFetch;
+  clearSourceCredentials();
 });
 
 describe("contextWindow / maxTokens split (CL-7784)", () => {

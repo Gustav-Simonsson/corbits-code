@@ -17,6 +17,7 @@ import {
   toolWatchdogFromSettings,
 } from "../../config/settings.js";
 import { isCodexProviderName } from "../../config/codex-providers.js";
+import { peekSourceCredentialSecret } from "../../config/source-credentials.js";
 import {
   createGlobalSettingsWriter,
   createLocalSettingsWriter,
@@ -495,6 +496,8 @@ export async function assembleTUISession(
   // Reload, interrupt, compaction continuation, and proxy deliver share one queue
   // so a rebuild never races an in-flight deliver.
   const sessionOps = createSessionOperationQueue();
+  // No resolveParkedCallId: the vendored reactor exposes no
+  // correlationId-to-call lookup, so the history heuristic is the path.
   const approvalResume = createApprovalResume({
     getAgent: () => state.currentAgent,
     captureGeneration: deliveryGeneration.capture,
@@ -570,12 +573,13 @@ export async function assembleTUISession(
     // process; re-read it so the retry runs on the fresh token, and keep the
     // live source in step so the summarizer picks it up.
     refreshAuth: async () => {
+      const before = peekSourceCredentialSecret(state.liveSource.credentialId);
       const fresh = await ensureFreshInferenceSource(
         state.liveSource,
         state.config.providers,
       );
-      if (fresh.apiKey === state.liveSource.apiKey) return;
       state.liveSource = fresh;
+      if (peekSourceCredentialSecret(fresh.credentialId) === before) return;
       if (state.currentAgent !== undefined)
         setAgentSourceUnlessClosed(state.currentAgent, fresh);
     },

@@ -14,9 +14,13 @@ import {
   isCodexProviderName,
 } from "../config/codex-providers.js";
 import { xaiProfileFromProviderName } from "../config/xai-providers.js";
+import {
+  peekSourceCredentialSecret,
+  registerSourceCredential,
+} from "../config/source-credentials.js";
 import { formatDirectorSystemPrompt } from "../agent/directors/identity.js";
 import { DIRECTOR_REGISTRY } from "../agent/directors/registry.js";
-import type { DirectorId } from "../agent/directors/types.js";
+import type { DirectorId, DirectorPackage } from "../agent/directors/types.js";
 import { submitOutputDefinition } from "../agent/director.js";
 import {
   shellDefinition,
@@ -265,19 +269,58 @@ export function resolveExecDirectorOverlay(
   if (director === undefined || director === "skywalker") {
     return { mountFleet: true };
   }
-  const pkg = DIRECTOR_REGISTRY[director];
+  return resolveExecDirectorOverlayForPackage(DIRECTOR_REGISTRY[director]);
+}
+
+/**
+ * Single enforcement point for the exec allowlist. Everything the overlay
+ * permits — tool_search results, promoter activation, the call gate — flows
+ * through here, so a tool outside the allow can never become callable.
+ */
+export function isExecOverlayToolAllowed(
+  overlay: ExecDirectorOverlay,
+  name: string,
+): boolean {
+  return (
+    overlay.advertisedAllow === undefined ||
+    overlay.advertisedAllow.includes(name)
+  );
+}
+
+export function resolveExecDirectorOverlayForPackage(
+  pkg: DirectorPackage,
+): ExecDirectorOverlay {
   const allow = pkg.tools?.allow;
-  const advertisedAllow =
+  const deny = pkg.tools?.deny ?? [];
+  if ((allow === undefined || allow.length === 0) && deny.length > 0) {
+    throw new Error(
+      `Director package "${pkg.id}" sets tools.deny without tools.allow — ` +
+        "exec overlays enforce a closed allow list, so a deny-only package " +
+        "has no list to subtract from. Add tools.allow.",
+    );
+  }
+  const allowed =
     allow !== undefined && allow.length > 0
+      ? allow.filter((name) => !deny.includes(name))
+      : undefined;
+  if (allowed !== undefined && allowed.length === 0) {
+    throw new Error(
+      `Director package "${pkg.id}" tools.allow minus tools.deny is empty — ` +
+        "exec overlays enforce a closed allow list, so no tool would be " +
+        "advertised. Keep an allow entry outside tools.deny.",
+    );
+  }
+  const advertisedAllow =
+    allowed !== undefined
       ? pkg.spawn.maySpawn
         ? [
-            ...allow,
+            ...allowed,
             // Exec mounts wait_agents beside the fleet verbs (mountWaitAgents),
             // so it stays advertised here even though the package allow omits
             // it for TUI/nested mailbox-mail collection.
-            ...(!allow.includes("wait_agents") ? ["wait_agents"] : []),
+            ...(!allowed.includes("wait_agents") ? ["wait_agents"] : []),
           ]
-        : allow.filter(
+        : allowed.filter(
             (name) =>
               ![
                 "search_agents",
@@ -359,13 +402,14 @@ export function createExecToolCallGate(
 
 export function createExecToolPromoter(args: {
   activate: (names: readonly string[]) => boolean;
+  isAllowed: (name: string) => boolean;
   currentDefinitions: () => readonly ToolDefinition[];
   computeAdvertised: (all: readonly ToolDefinition[]) => ToolDefinition[];
   updateDirectorTools: (defs: ToolDefinition[]) => void;
   persist?: () => void;
 }): (names: string[]) => void {
   return (names) => {
-    if (!args.activate(names)) return;
+    if (!args.activate(names.filter((name) => args.isAllowed(name)))) return;
     args.updateDirectorTools(args.computeAdvertised(args.currentDefinitions()));
     args.persist?.();
   };
@@ -649,6 +693,11 @@ export async function runExec(config: Config): Promise<ExecResult> {
         : {}),
       sessionMode,
       toolAvailability,
+      // Closed director overlays unmount tool_search (unless allowed) and
+      // filter its index, so search cannot surface outside-allow tools.
+      ...(overlay.advertisedAllow !== undefined
+        ? { toolSearchAllow: overlay.advertisedAllow }
+        : {}),
       // Exec-primary keeps wait_agents mounted (with an advertised allow):
       // headless runs have no mailbox-mail flush, so wait_agents stays the
       // collection path here. TUI primary and nested orchestrators omit it.
@@ -727,7 +776,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
       const { access } = await refreshSelectedProviderCredential(() =>
         getValidCodexToken(initialCodexProfile),
       );
-      liveSource = { ...liveSource, apiKey: access };
+      registerSourceCredential(liveSource.credentialId, access);
       liveSubAgentProvider.current = {
         ...liveSubAgentProvider.current,
         apiKey: access,
@@ -737,7 +786,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
       const { access } = await refreshSelectedProviderCredential(() =>
         getValidXaiToken(initialXaiProfile),
       );
-      liveSource = { ...liveSource, apiKey: access };
+      registerSourceCredential(liveSource.credentialId, access);
       liveSubAgentProvider.current = {
         ...liveSubAgentProvider.current,
         apiKey: access,
@@ -753,12 +802,13 @@ export async function runExec(config: Config): Promise<ExecResult> {
       // A 401 here usually means the shared OAuth file rotated under another
       // process; re-read it so the retry runs on the fresh token.
       refreshAuth: async () => {
+        const before = peekSourceCredentialSecret(liveSource.credentialId);
         const fresh = await ensureFreshInferenceSource(
           liveSource,
           config.providers,
         );
-        if (fresh.apiKey === liveSource.apiKey) return;
         liveSource = fresh;
+        if (peekSourceCredentialSecret(fresh.credentialId) === before) return;
         if (currentAgent !== null)
           setAgentSourceUnlessClosed(currentAgent, fresh);
       },
@@ -814,10 +864,10 @@ export async function runExec(config: Config): Promise<ExecResult> {
       inferenceDeps,
       getSources: () => {
         const sources = liveSources.length > 0 ? liveSources : [liveSource];
-        // Prefer liveSource credentials on the active id when OAuth was refreshed.
-        return sources.map((s) =>
-          s.id === liveSource.id ? { ...s, apiKey: liveSource.apiKey } : s,
-        );
+        // OAuth refreshes land in the shared credential cell (keyed by source
+        // id), so every source already resolves the live secret — no per-send
+        // credential copy is needed.
+        return sources;
       },
       getDefaultSource: () =>
         liveDefaultSource.length > 0 ? liveDefaultSource : liveSource.id,
@@ -839,10 +889,12 @@ export async function runExec(config: Config): Promise<ExecResult> {
 
     // tool_search starts as a no-op promoter; without this, the call gate
     // refuses MCP/present/plugin names the result just told the model to
-    // invoke.
+    // invoke. Under a closed overlay the promoter only activates allowed
+    // names, so outside-allow tools can never become advertised or callable.
     agentToolset.setToolPromoter(
       createExecToolPromoter({
         activate: (names) => activatedToolNames.activate(names),
+        isAllowed: (name) => isExecOverlayToolAllowed(overlay, name),
         currentDefinitions: () =>
           agentToolset.dynamicRunner.currentDefinitions(),
         computeAdvertised,
@@ -958,15 +1010,15 @@ export async function runExec(config: Config): Promise<ExecResult> {
       // Final OAuth refresh immediately before send (token may have aged during MCP).
       if (initialCodexProfile !== undefined) {
         const { access } = await getValidCodexToken(initialCodexProfile);
-        if (access !== liveSource.apiKey) {
-          liveSource = { ...liveSource, apiKey: access };
+        if (access !== peekSourceCredentialSecret(liveSource.credentialId)) {
+          registerSourceCredential(liveSource.credentialId, access);
           setAgentSourceUnlessClosed(activeAgent, liveSource);
         }
       }
       if (initialXaiProfile !== undefined) {
         const { access } = await getValidXaiToken(initialXaiProfile);
-        if (access !== liveSource.apiKey) {
-          liveSource = { ...liveSource, apiKey: access };
+        if (access !== peekSourceCredentialSecret(liveSource.credentialId)) {
+          registerSourceCredential(liveSource.credentialId, access);
           setAgentSourceUnlessClosed(activeAgent, liveSource);
         }
       }
@@ -976,6 +1028,8 @@ export async function runExec(config: Config): Promise<ExecResult> {
       const sendResult = await activeAgent.send(operatorTaskMessage(task));
       // A suspension must not park silently in exec: the approval resume owns
       // the terminal prompt flow and delivers the decision to the reactor.
+      // No resolveParkedCallId: the vendored reactor exposes no
+      // correlationId-to-call lookup, so the history heuristic is the path.
       await createApprovalResume({
         getAgent: () => activeAgent,
         gate: permissionGate,

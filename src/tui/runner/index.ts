@@ -21,6 +21,7 @@ import {
   providerChoices,
 } from "../provider/choices.js";
 import { listCommands } from "../commands/registry.js";
+import { yoloModeLabel } from "../components/prompt-action-bar-label.js";
 import { mountRunnerHost } from "./host.js";
 import { assembleTUISession } from "./session.js";
 import { createRunLifecycle, finalizeTUIRun } from "./exit.js";
@@ -145,6 +146,7 @@ export async function runTUI(initialConfig: Config): Promise<number> {
           profile: state.config.providerName,
           model: state.config.model,
           ...(effort !== undefined ? { effort } : {}),
+          mode: yoloModeLabel(services.permissionGate.getSkipPermissions()),
         };
       },
       activeModel: () => ({

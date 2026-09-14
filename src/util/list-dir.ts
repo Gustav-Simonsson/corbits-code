@@ -1,9 +1,11 @@
 import { type } from "arktype";
 import { readdir, realpath } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { stringTool } from "@intx/agent";
 import type { AgentTool } from "@intx/agent";
 import type { ToolDefinition } from "@intx/types/runtime";
+import { resolveWorkspacePath } from "../permission/path-restriction.js";
+import type { RootsProvider } from "../permission/worktree-roots.js";
 
 const ListDirArgs = type({ "path?": "string" });
 
@@ -31,6 +33,9 @@ export interface ListDirectoryOptions {
   // workspace. A getter is resolved per call so `/yolo` mid-session takes
   // effect without rebuilding the tool.
   allowOutside?: boolean | (() => boolean);
+  // Workspace roots beyond cwd (the session's registered git worktrees).
+  // Defaults to cwd alone.
+  rootsProvider?: RootsProvider;
 }
 
 function resolveAllowOutside(
@@ -47,29 +52,26 @@ export async function listDirectory(
 ): Promise<string> {
   const allowOutside = resolveAllowOutside(options.allowOutside);
   const rel = path.length > 0 ? path : ".";
-  const abs = resolve(cwd, rel);
-  if (!allowOutside && abs !== cwd && !abs.startsWith(cwd + sep)) {
-    return `Error: ${rel} is outside the workspace.`;
-  }
+  const rootsProvider = options.rootsProvider ?? (() => []);
 
-  // A symlink inside the workspace can resolve to a target outside it; the
-  // string prefix check above only sees the lexical path. Resolve the real path
-  // of both the target and the root before comparing so symlink escapes are
-  // refused (unless allowOutside, which is the yolo-mode escape hatch).
+  // Containment is delegated to the shared workspace resolver: it realpaths
+  // the session root before comparing (so an aliased cwd such as macOS
+  // /tmp -> /private/tmp never false-denies) and admits registered sibling
+  // worktree roots. The canonical path feeds readdir directly, so a symlink
+  // retargeted after the check cannot redirect the read.
   let realAbs: string;
-  let realCwd: string;
-  try {
-    realAbs = await realpath(abs);
-    realCwd = await realpath(cwd);
-  } catch (err) {
-    return `Error: cannot list ${rel}: ${err instanceof Error ? err.message : String(err)}`;
-  }
-  if (
-    !allowOutside &&
-    realAbs !== realCwd &&
-    !realAbs.startsWith(realCwd + sep)
-  ) {
-    return `Error: ${rel} is outside the workspace.`;
+  if (allowOutside) {
+    try {
+      realAbs = await realpath(resolve(cwd, rel));
+    } catch (err) {
+      return `Error: cannot list ${rel}: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  } else {
+    const resolved = resolveWorkspacePath(cwd, rel, rootsProvider);
+    if (resolved === undefined) {
+      return `Error: ${rel} is outside the workspace.`;
+    }
+    realAbs = resolved;
   }
 
   let entries;

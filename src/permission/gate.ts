@@ -22,7 +22,7 @@ import {
 } from "./auto-shell-policy.js";
 import { commandReferencesSensitivePath } from "../plugins/secret-guard-plugin.js";
 import {
-  looksLikePath,
+  normalizePathArguments,
   pathEscapeBlockReason,
 } from "../plugins/path-escape-plugin.js";
 import { runShellAuthzBlockReason } from "../shell/run-shell-authz.js";
@@ -38,10 +38,7 @@ import {
   tokenize,
   stripCommentLines,
 } from "./command.js";
-import {
-  createPathRestriction,
-  resolveWorkspacePath,
-} from "./path-restriction.js";
+import { createPathRestriction } from "./path-restriction.js";
 import {
   createWorktreeRootsProvider,
   type RootsProvider,
@@ -151,16 +148,22 @@ function segmentGuard(
 // notice can name the operative reason: a force flag, or a destination the
 // containment authority did not approve. Returns undefined for anything else.
 // Display-only refinement — the guard decision itself is unchanged.
-function worktreeMismatchKind(
-  segment: string,
-): "force" | "destination" | "worktree" | undefined {
+type WorktreeMismatch =
+  | { kind: "force"; flag: string }
+  | { kind: "destination" }
+  | { kind: "worktree" };
+
+function worktreeMismatchKind(segment: string): WorktreeMismatch | undefined {
   const tokens = tokenize(segment);
   if (tokens[0] !== "git" || tokens[1] !== "worktree") return undefined;
   if (tokens[2] !== "add" && tokens[2] !== "remove") return undefined;
-  if (tokens.slice(3).some(isWorktreeForceFlag)) return "force";
+  const flag = tokens.slice(3).find(isWorktreeForceFlag);
+  if (flag !== undefined) return { kind: "force", flag };
   // `add` takes a destination for the new worktree; `remove` names an
   // existing worktree, so only `add` gets the destination noun.
-  return tokens[2] === "remove" ? "worktree" : "destination";
+  return tokens[2] === "remove"
+    ? { kind: "worktree" }
+    : { kind: "destination" };
 }
 
 // Explains a grant mismatch: a standing grant covers the segment, but the
@@ -174,13 +177,13 @@ function grantMismatchNotice(
     return "A standing grant matches this command, but it references a sensitive path, so it still needs approval.";
   }
   const worktreeKind = worktreeMismatchKind(segment);
-  if (worktreeKind === "force") {
-    return "A standing grant matches this command, but it uses --force, so it still needs approval.";
+  if (worktreeKind?.kind === "force") {
+    return `A standing grant matches this command, but it uses ${worktreeKind.flag}, so it still needs approval.`;
   }
-  if (worktreeKind === "destination") {
+  if (worktreeKind?.kind === "destination") {
     return "A standing grant matches this command, but the worktree destination is outside the approved locations, so it still needs approval.";
   }
-  if (worktreeKind === "worktree") {
+  if (worktreeKind?.kind === "worktree") {
     return "A standing grant matches this command, but the worktree is outside the approved locations, so it still needs approval.";
   }
   return "A standing grant matches this command, but it targets a path outside the workspace, so it still needs approval.";
@@ -475,23 +478,15 @@ function canSafelyMintPerSegment(pattern: string): boolean {
 }
 
 // posix pathEscapePlugin rewrites path-like args to resolveWorkspacePath before
-// gateToolCall. Cache identity must use that same resolution so an authorizeCall
-// allow is not treated as a different call (and re-decided) at execution.
+// gateToolCall. Cache identity must use that same resolution — deep, like the
+// plugin's escapeValue walk — so an authorizeCall allow is not treated as a
+// different call (and re-decided) at execution.
 function identityArguments(
   args: ToolCall["arguments"],
   cwd: string,
   rootsProvider: RootsProvider,
 ): string {
-  const normalized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === "string" && looksLikePath(key)) {
-      normalized[key] =
-        resolveWorkspacePath(cwd, value, rootsProvider) ?? value;
-    } else {
-      normalized[key] = value;
-    }
-  }
-  return JSON.stringify(normalized);
+  return JSON.stringify(normalizePathArguments(args, cwd, rootsProvider));
 }
 
 export function createPermissionGate(
@@ -671,6 +666,7 @@ export function createPermissionGate(
       call.arguments,
       effectiveCwd,
       escapeRoots,
+      call.name,
     );
     if (escapeReason !== undefined) {
       return { kind: "deny", reason: escapeReason };

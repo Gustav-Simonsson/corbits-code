@@ -11,7 +11,7 @@ export const OPENAI_SESSION_ID_OPTION = "openaiSessionId";
 
 // Baked at the host so OpenCode Go Responses does not read source.quirks
 // (package createOpenAIResponsesAdapter would, and that is not the current Go wire).
-const hostQuirks: ResponsesQuirks = {
+export const hostQuirks: ResponsesQuirks = {
   path: "/responses",
   sessionIdOption: OPENAI_SESSION_ID_OPTION,
   headers: {

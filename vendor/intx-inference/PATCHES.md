@@ -49,6 +49,41 @@ the carried patches. No entry's disposition changed. Every entry below
 carries a **Re-carry:** note recording the merge cost and the survivability
 risk going into the next sync.
 
+### 2026-09-14 re-sync (upstream `1ad0104`)
+
+Every entry below was re-carried against the new pin; none was dropped as
+upstream-absorbed (verified by grepping the new upstream tree for each
+patch's concept — `isStreamTerminal`, `isPollOnlyPendingBatch`,
+`doomLoopPolicy`/`fail-run`, `ephemeralTurns`, `pendingCompactOutput`,
+`lastWrittenTurnsRevision`, `deepFreeze`, `MAX_LINE_LENGTH`,
+`loadErrors`, `stopReason` — all absent upstream). Adaptations where the
+new upstream moved under the patch:
+
+- `assembly.ts` now carries a direct `contextTransforms` field; the
+  deps-riding patch now resolves direct-wins-over-deps
+  (`resolvedContextTransforms`, `resolvedIsPollOnlyPendingBatch`). Kill
+  condition still open: upstream `@intx/agent` 0.3.0 forwards no
+  `contextTransforms`, so the `deps` channel remains the only path.
+- `harness.ts` usage emission is now object-literal style; the
+  stop-reason spreads were rewritten to match. The four
+  `classifyAbortError()` sites are unchanged upstream, so the
+  `signal?.reason` adaptation re-applied as-is.
+- `reactor.ts` `tryCorrelate` region was restructured upstream; the
+  correlating-ids `try/finally` was re-wrapped around the larger block.
+  The fail-run queue purge composes with upstream's `CYCLE_EVENT_TYPES`
+  set. `ExtendedInferenceOptions` is defined in `reactor.ts` with its
+  marker and re-exported from `index.ts` alongside
+  `PollBatchLivenessPredicate`.
+- Upstream deleted `packages/types/src/sidecar-placement.ts` and
+  `packages/inference/src/providers/google-genai.test.ts`; no ledger
+  entry lived in either file, so nothing was triaged out with them.
+- Upstream replaced inline `apiKey` with a `credentialId` + credential-cell
+  auth model. No entry touches auth, so the vendored trees needed no
+  migration; first-party callers were migrated to the new model instead
+  (each built source registers its secret in
+  `src/config/source-credentials.ts`, handed to the vendored trees as
+  their resolver).
+
 ## adapter-ts-stream-terminal-detector
 
 `adapter.ts` — Adds `StreamTerminalDetector`/`ProviderAdapter.isStreamTerminal`.
@@ -393,6 +428,24 @@ O(n) structuredClone on every event for directors that don't inspect turns.
 with revision tracking.
 **Re-carry:** clean three-way at `0205b07b`, zero conflicts. Low risk —
 `state.ts` sees little upstream churn.
+
+## reactor-test-frozen-turns-mutation
+
+`reactor.test.ts` — the "director cannot corrupt reactor state" test wraps
+its snapshot-mutation probe in try/catch: upstream's `snapshot()` returns
+mutable clones so the assignment succeeds silently, but with
+`state-ts-deep-freeze-turns-revision` carried the same assignment throws on
+the frozen turn, which the reactor treats as a fatal director exception and
+which would fail the test before it reaches its isolation assertion.
+Isolation still holds when the throw is ignored.
+
+**Disposition:** Re-carryable — sits inside the one test that probes snapshot
+mutability and must track the deep-freeze patch.
+**Removal path:** Upstream PR freezing snapshots (or upstream test tolerating
+the throw) subsumes it.
+**Re-carry:** previously unledgered at `0205b07b` (local-only test hunk, found
+by diffing the base tree); now ledgered with a marker. Re-applied by hand at
+the new pin — upstream's probe is still the bare assignment.
 
 ## google-genai-files-ts-body-init-cast
 

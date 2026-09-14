@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BEARER_CREDENTIAL_SENTINEL } from "@intx/inference";
+import type { ProviderAdapter } from "@intx/inference";
 import type { ConversationTurn, LastCycleSource } from "@intx/types/runtime";
 import { ENVIRONMENT_TAG_NAME, PRODUCT_NAME } from "../branding.js";
 import {
@@ -7,6 +8,7 @@ import {
   CODEX_RESPONSES_PROVIDER,
   CODEX_SESSION_ID_OPTION,
   createCodexResponsesAdapter,
+  withParallelToolCalls,
 } from "./codex-responses.js";
 
 const source: LastCycleSource = {
@@ -72,6 +74,22 @@ describe("createCodexResponsesAdapter", () => {
       parallel_tool_calls?: unknown;
     };
     expect(body.parallel_tool_calls).toBe(true);
+  });
+
+  test("passes a non-JSON body through unrewritten (CL-7927)", () => {
+    const stub = {
+      buildRequest: () => ({
+        url: "/codex/responses",
+        headers: {},
+        body: "not-json",
+      }),
+    } as unknown as ProviderAdapter;
+    const request = withParallelToolCalls(stub).buildRequest(
+      [userTurn("hello")],
+      "gpt-5.1-codex",
+      {},
+    );
+    expect(request.body).toBe("not-json");
   });
 
   test("wraps the system prompt with host product identity as a developer item", () => {

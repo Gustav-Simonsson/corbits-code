@@ -227,6 +227,12 @@ describe("createToolIndex", () => {
   test("returns nothing for an empty query", () => {
     expect(index.search("   ")).toEqual([]);
   });
+
+  test("with an allow list, never returns tools outside the allow list", () => {
+    const allowed = createToolIndex(() => defs, [], ["present"]);
+    expect(allowed.search("pages")).toContain("present");
+    expect(allowed.search("linear")).not.toContain("mcp__linear__create_issue");
+  });
 });
 
 function call(
@@ -285,6 +291,81 @@ describe("createToolSearchTool", () => {
     });
     expect(await call(tool, { query: "nonsense" })).toContain(
       "No tools matched",
+    );
+  });
+
+  test("mid-handshake search waits for a connecting server instead of reporting no match", async () => {
+    const live: ToolDefinition[] = [];
+    let resolveConnect!: () => void;
+    const connected = new Promise<void>((resolve) => {
+      resolveConnect = resolve;
+    });
+    const tool = createToolSearchTool({
+      search: (query) => createToolIndex(() => live).search(query),
+      lookup: (name) => live.find((def) => def.name === name),
+      promote: () => undefined,
+      awaitPendingConnections: async (timeoutMs?: number) => {
+        await Promise.race([
+          connected,
+          new Promise((resolve) => setTimeout(resolve, timeoutMs ?? 50)),
+        ]);
+        return live.length === 0 ? 1 : 0;
+      },
+    });
+    const pending = call(tool, { query: "linear tracker" });
+    live.push({
+      name: "mcp__linear__create_issue",
+      description: "Create an issue in the tracker",
+      inputSchema: { type: "object", properties: {}, required: [] },
+    });
+    resolveConnect();
+    const out = await pending;
+    expect(out).toContain("mcp__linear__create_issue");
+    expect(out).not.toContain("No tools matched");
+  });
+
+  test("a hung connection never hangs the search — bounded wait, then a retry signal", async () => {
+    const tool = createToolSearchTool({
+      search: () => [],
+      lookup: () => undefined,
+      promote: () => undefined,
+      awaitPendingConnections: () =>
+        new Promise<number>(() => {
+          // Never settles: simulates a hung authorization handshake.
+        }),
+    });
+    const out = await call(tool, { query: "linear" });
+    expect(out).toContain("No tools matched");
+    expect(out).toMatch(/starting up|still connecting/);
+    expect(out).toMatch(/retry.*shortly/i);
+    expect(out).not.toContain("different keywords");
+  });
+
+  test("two pending connectors report the plural connecting copy", async () => {
+    const tool = createToolSearchTool({
+      search: () => [],
+      lookup: () => undefined,
+      promote: () => undefined,
+      awaitPendingConnections: async () => 2,
+    });
+    const out = await call(tool, { query: "linear" });
+    expect(out).toContain("2 connectors are still connecting");
+    expect(out).toMatch(/retry.*shortly/i);
+    expect(out).not.toContain("different keywords");
+  });
+
+  test("a genuine miss keeps the keyword advice and omits the retry caveat", async () => {
+    const tool = createToolSearchTool({
+      search: () => [],
+      lookup: () => undefined,
+      promote: () => undefined,
+      awaitPendingConnections: async () => 0,
+    });
+    const out = await call(tool, { query: "nonsense" });
+    expect(out).toContain("No tools matched");
+    expect(out).toContain("different keywords");
+    expect(out).not.toMatch(
+      /still connecting|still starting up|retry shortly/i,
     );
   });
 });

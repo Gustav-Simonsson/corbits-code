@@ -40,7 +40,7 @@ const UNREACHABLE_SOURCE: InferenceSource = {
   id: "anthropic:test-error",
   provider: "anthropic",
   baseURL: "http://localhost:1",
-  apiKey: "test-key",
+  credentialId: "test-key",
   model: "claude-test",
 };
 
@@ -104,6 +104,9 @@ function makeFailFirstAuditStore(): FailingAuditStore {
   };
 }
 
+// Audit store that always throws `Duplicate error record` for the
+// leading batch record, simulating a rebuilt assembly flushing an
+// already-durable seq.
 function makeDuplicateErrorAuditStore(): FailingAuditStore {
   return {
     async commitAudit(_records: AuditRecord[]): Promise<void> {
@@ -191,6 +194,7 @@ async function buildAgentEnv(opts: {
   return {
     sources: [UNREACHABLE_SOURCE],
     defaultSource: UNREACHABLE_SOURCE.id,
+    readCurrentMaterial: (credentialId) => ({ secret: credentialId }),
     storage,
     workdir: opts.workdir,
     audit: opts.audit,
@@ -277,6 +281,7 @@ async function runForbiddenCycle(opts: {
   const env: BaseEnv = {
     sources: [UNREACHABLE_SOURCE],
     defaultSource: UNREACHABLE_SOURCE.id,
+    readCurrentMaterial: (credentialId) => ({ secret: credentialId }),
     storage: store,
     workdir: opts.workdir,
     audit: store,
@@ -625,6 +630,7 @@ describe("agent error flushing", () => {
     const env: BaseEnv = {
       sources: [UNREACHABLE_SOURCE],
       defaultSource: UNREACHABLE_SOURCE.id,
+      readCurrentMaterial: (credentialId) => ({ secret: credentialId }),
       storage: store,
       workdir: workDir,
       audit: store,

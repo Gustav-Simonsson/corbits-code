@@ -19,6 +19,7 @@ import { advertiseEditFileLineRange } from "../plugins/edit-file-line-range.js";
 import { advertiseArchiveSurface } from "../plugins/evidence-archive-search-plugin.js";
 import type { Telemetry } from "../telemetry/index.js";
 import type { PermissionGate } from "../permission/gate.js";
+import { createWorktreeRootsProvider } from "../permission/worktree-roots.js";
 import { buildCorePosixToolPlugins } from "./posix-tool-plugins.js";
 import { createLazyBlobReader } from "./lazy-blob-reader.js";
 import type { BlobReader } from "@intx/types/runtime";
@@ -103,7 +104,12 @@ import {
 } from "../tools/web-search.js";
 import { createUseSkillTool } from "./use-skill.js";
 import { createSkillSearchTool } from "./skill-search.js";
-import { createToolIndex, createToolSearchTool } from "./tool-search.js";
+import {
+  createToolIndex,
+  createToolSearchTool,
+  TOOL_SEARCH_PENDING_WAIT_MS,
+  toolSearchDefinition,
+} from "./tool-search.js";
 import { createSearchAgentsTool } from "./agent-search.js";
 import { createReadAgentTraceTool } from "../subagent/trace-tool.js";
 import {
@@ -261,6 +267,13 @@ export interface AgentToolsetArgs {
    * and collect worker reports from mailbox mail instead.
    */
   mountWaitAgents?: boolean;
+  /**
+   * Closed allow list (exec director overlays). tool_search is mounted only
+   * when the allow includes it, and the search index only surfaces allowed
+   * tools so search cannot promote outside the allow. Omit for the product
+   * default (tool_search mounted, index over the live registry).
+   */
+  toolSearchAllow?: readonly string[];
 }
 
 // Per-server connection state surfaced to the TUI.
@@ -319,6 +332,10 @@ export interface AgentToolset {
   // second add of an active name; failed rows retry through connectMCPServer
   // without a second persist. Still true while disable is in progress.
   hasMCPServer: (name: string) => boolean;
+  // Bounded wait for in-flight MCP handshakes; resolves to the remaining
+  // count. Capped by `timeoutMs` so a hung authorization never hangs the
+  // caller — the tool_search bound passes briefly by default.
+  awaitPendingMcpConnections: (timeoutMs?: number) => Promise<number>;
   // Catalog unshadow can change local → global/none without rebuilding the
   // toolset; connectOne reads this on every late connect.
   setMcpServersSource: (source: "local" | "global" | "none") => void;
@@ -583,6 +600,7 @@ export async function createAgentToolset(
     }),
     createListDirTool(cwd, {
       allowOutside: () => permissionGate.getSkipPermissions(),
+      rootsProvider: createWorktreeRootsProvider(cwd),
     }),
     createUseSkillTool(cwd, skillDirs, args.telemetry),
     createSkillSearchTool({ skills }),
@@ -712,15 +730,32 @@ export async function createAgentToolset(
   const toolIndex = createToolIndex(
     () => runnerHolder.current?.currentDefinitions() ?? [],
     advertisedBuiltIns,
+    args.toolSearchAllow,
   );
-  baseTools.push(
-    createToolSearchTool({
-      search: (query) => toolIndex.search(query),
-      lookup: (name) =>
-        runnerHolder.current?.currentDefinitions().find((d) => d.name === name),
-      promote: (names) => promoter.promote(names),
-    }),
-  );
+  // Closed exec allow lists omit tool_search itself (leaf posture); when the
+  // allow excludes it the tool is never mounted, so there is nothing to
+  // search with and nothing the promoter can activate.
+  if (
+    args.toolSearchAllow === undefined ||
+    args.toolSearchAllow.includes(toolSearchDefinition.name)
+  ) {
+    baseTools.push(
+      createToolSearchTool({
+        search: (query) => toolIndex.search(query),
+        lookup: (name) =>
+          runnerHolder.current
+            ?.currentDefinitions()
+            .find((d) => d.name === name),
+        promote: (names) => promoter.promote(names),
+        // Misses wait briefly for in-flight MCP handshakes (bounded, so hung
+        // OAuth cannot hang the call) and re-search before answering. Reads the
+        // connection map live — declared below, populated by the time any
+        // search runs.
+        awaitPendingConnections: (timeoutMs = TOOL_SEARCH_PENDING_WAIT_MS) =>
+          awaitPendingMcpConnections(timeoutMs),
+      }),
+    );
+  }
 
   // Codex apply_patch mounts when isCodex; primary strips it so Corbits DIY
   // stays on write_file/edit_file/delete_file. Leaves keep it via BUILD/DOCS allowlists.
@@ -744,6 +779,26 @@ export async function createAgentToolset(
   const connectedClients = new Map<string, MCPClient>();
   const inFlightConnections = new Map<string, Promise<void>>();
   const inFlightEpochs = new Map<string, number>();
+  // Bounded wait for in-flight handshakes; resolves to the remaining count.
+  // Capped by `timeoutMs` so a hung authorization never hangs the caller.
+  const awaitPendingMcpConnections = async (
+    timeoutMs = TOOL_SEARCH_PENDING_WAIT_MS,
+  ): Promise<number> => {
+    if (inFlightConnections.size === 0) return 0;
+    const pending = [...inFlightConnections.values()];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled(pending),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    return inFlightConnections.size;
+  };
   const disabledNames = new Set<string>();
   const serverAborts = new Map<string, AbortController>();
   const serverEpochs = new Map<string, number>();
@@ -1218,6 +1273,7 @@ export async function createAgentToolset(
     disconnectMCPServer: publicDisconnectMCPServer,
     hasMCPServer: (name) =>
       connectedClients.has(name) || inFlightConnections.has(name),
+    awaitPendingMcpConnections,
     setMcpServersSource: (source) => {
       mcpServersSource = source;
     },
