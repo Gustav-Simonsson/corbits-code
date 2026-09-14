@@ -99,7 +99,7 @@ jobs:
           - name: src-b
             paths: ./src/agent ./src/subagent
           - name: src-c
-            paths: ./src/auth ./src/changelog ./src/config ./src/cost ./src/crash ./src/logging ./src/mcp ./src/perf ./src/permission ./src/plugins ./src/provider ./src/session ./src/shell ./src/telemetry ./src/tools ./src/trust ./src/upgrade ./src/util ./src/web ./src/config.test.ts ./src/context-compactor.test.ts ./src/director.test.ts ./src/inference-abort.test.ts ./src/inference-error-message.test.ts ./src/inference-gateway-error.test.ts ./src/list-dir.test.ts ./src/pricing-fetcher.test.ts ./src/pricing-metadata.test.ts ./src/profiles.test.ts ./src/prompts.test.ts ./src/renderer.test.ts ./src/settings.test.ts ./src/state.test.ts
+            paths: ./src/auth ./src/changelog ./src/config ./src/cost ./src/crash ./src/exec ./src/logging ./src/mcp ./src/perf ./src/permission ./src/plugins ./src/provider ./src/session ./src/shell ./src/telemetry ./src/tools ./src/trust ./src/upgrade ./src/util ./src/web ./src/config.test.ts ./src/context-compactor.test.ts ./src/director.test.ts ./src/inference-abort.test.ts ./src/inference-error-message.test.ts ./src/inference-gateway-error.test.ts ./src/list-dir.test.ts ./src/pricing-fetcher.test.ts ./src/pricing-metadata.test.ts ./src/profiles.test.ts ./src/prompts.test.ts ./src/renderer.test.ts ./src/settings.test.ts ./src/state.test.ts
           - name: tests-evals-and-scripts
             paths: ./tests ./evals ./scripts
     name: test (${{ matrix.shard.name }})
