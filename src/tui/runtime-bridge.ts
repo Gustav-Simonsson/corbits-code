@@ -71,8 +71,8 @@ import {
 import {
   deliveryResultNotice,
   type AgentDeliveryResult,
-  type DeliverySettle,
-} from "./queued-delivery.js";
+} from "./deliver-agent-message.js";
+import type { DeliverySettle } from "./queued-delivery.js";
 import { toolCallRow } from "./diff.js";
 import { toolResultRow } from "./mcp-view.js";
 import {

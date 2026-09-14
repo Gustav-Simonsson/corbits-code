@@ -94,7 +94,7 @@ import {
   deliverAgentMessage,
   deliveryResultNotice,
   type AgentDeliveryResult,
-} from "../queued-delivery.js";
+} from "../deliver-agent-message.js";
 import { createProviderFailureAttemptTracker } from "../provider/failure-attempt.js";
 import { getTelemetry, liveTelemetry } from "../../telemetry/singleton.js";
 import {
