@@ -7,8 +7,8 @@ import type {
   LastCycleSource,
 } from "@intx/types/runtime";
 import { withAnthropicCacheBreakpoint } from "./anthropic-cache-breakpoint.js";
-import { createOpenCodeGoAnthropicAdapter } from "./opencode-go-anthropic-adapter.js";
-import { createZenAnthropicAdapter } from "./zen-anthropic-adapter.js";
+import { createOpenCodeGoAnthropicAdapter } from "./anthropic-session-adapter.js";
+import { createZenAnthropicAdapter } from "./anthropic-session-adapter.js";
 
 function sourceFor(provider: string): LastCycleSource {
   return { sourceId: `test-${provider}`, provider, model: "test-model" };

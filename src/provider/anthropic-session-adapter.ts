@@ -6,10 +6,11 @@ import {
 } from "./opencode-session.js";
 
 export const ZEN_MESSAGES_PROVIDER = "zen-messages";
+export const OPENCODE_GO_MESSAGES_PROVIDER = "opencode-go-messages";
 
 type AdapterSource = Parameters<typeof createAnthropicAdapter>[0];
 
-export function createZenAnthropicAdapter(
+export function createSessionHeaderAnthropicAdapter(
   source: AdapterSource,
   quirks?: unknown,
 ): ProviderAdapter {
@@ -29,4 +30,18 @@ export function createZenAnthropicAdapter(
     return { ...built, headers };
   };
   return { ...base, buildRequest };
+}
+
+export function createZenAnthropicAdapter(
+  source: AdapterSource,
+  quirks?: unknown,
+): ProviderAdapter {
+  return createSessionHeaderAnthropicAdapter(source, quirks);
+}
+
+export function createOpenCodeGoAnthropicAdapter(
+  source: AdapterSource,
+  quirks?: unknown,
+): ProviderAdapter {
+  return createSessionHeaderAnthropicAdapter(source, quirks);
 }
