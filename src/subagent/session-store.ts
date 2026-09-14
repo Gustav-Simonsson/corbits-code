@@ -1012,7 +1012,11 @@ export function createSubAgentSessionStore(
           content: capText(reply, maxEntryChars),
         });
       });
-      onReply?.(reply);
+      try {
+        onReply?.(reply);
+      } catch {
+        // A throwing onReply must not break the handoff to the next steer.
+      }
       launchNextStashedFollowup(id);
       return;
     }
@@ -1027,7 +1031,11 @@ export function createSubAgentSessionStore(
       });
     });
     runInFlight.delete(id);
-    onReply?.(reply);
+    try {
+      onReply?.(reply);
+    } catch {
+      // A throwing onReply must not break session settlement.
+    }
     pruneRetained();
   };
   const settleFollowupFailure = (
@@ -1043,7 +1051,11 @@ export function createSubAgentSessionStore(
       !(err instanceof AgentClosedError) &&
       (stashedFollowups.get(id)?.length ?? 0) > 0
     ) {
-      onFail?.(err);
+      try {
+        onFail?.(err);
+      } catch {
+        // A throwing onFail must not break the handoff to the next steer.
+      }
       log.error("followup turn failed for {id}: {error}", {
         id,
         error: err instanceof Error ? err.message : String(err),
@@ -1052,7 +1064,11 @@ export function createSubAgentSessionStore(
       return;
     }
     runInFlight.delete(id);
-    onFail?.(err);
+    try {
+      onFail?.(err);
+    } catch {
+      // A throwing onFail must not break session settlement.
+    }
     // CL-7344: the agent closed between queueing and invocation, so the
     // follow-up can never run. Move session and fleet records to the
     // same terminal state with an actionable error instead of silently
@@ -1091,7 +1107,11 @@ export function createSubAgentSessionStore(
     const takesSlot = queue !== undefined && !queue.occupied(id);
     const start = (): void => {
       beginFollowupTurn(id);
-      opts?.onStart?.();
+      try {
+        opts?.onStart?.();
+      } catch {
+        // A throwing onStart must not break the follow-up turn.
+      }
       void followup(message)
         .then((reply) => {
           settleFollowupReply(id, reply, opts?.onReply);
@@ -1159,7 +1179,11 @@ export function createSubAgentSessionStore(
       runInFlight.delete(id);
       return false;
     }
-    next.onStart?.();
+    try {
+      next.onStart?.();
+    } catch {
+      // A throwing onStart must not strand the lane on a phantom turn.
+    }
     const pending = followup(next.message);
     void Promise.resolve().then(() => {
       void pending.then(
@@ -1451,6 +1475,13 @@ export function createSubAgentSessionStore(
       // spawn_agent path ever has a salvage to report, and it
       // always passes this flag explicitly (see its call site).
       const agentRetained = opts?.agentRetained ?? true;
+      // CL-7989: when the original run wins the race against a stashed steer
+      // and the session stays open and resumable, deliver the queue as a
+      // fresh follow-up instead of dropping it. The lane flips to running
+      // inside this same mutation so observers never see a completed session
+      // with a pending steer; the hand-off below reuses the stash launcher
+      // so the rest of the queue chains in FIFO order.
+      let deliverStash = false;
       mutate(id, (session) => {
         // Cancel and interrupt_agent win races: a late complete must not
         // resurrect the session as done. Interrupted is still strip-live
@@ -1479,14 +1510,33 @@ export function createSubAgentSessionStore(
         // release it now rather than leaving a stale reference around.
         cancelHandles.delete(id);
         if (!agentRetained) closeHandles.delete(id);
-        runInFlight.delete(id);
+        const pending = stashedFollowups.get(id);
+        if (
+          pending !== undefined &&
+          pending.length > 0 &&
+          session.retained === true &&
+          followupHandles.has(id)
+        ) {
+          deliverStash = true;
+          session.lifecycle = { state: "running" };
+          delete session.finishedAt;
+          runInFlight.add(id);
+        } else {
+          runInFlight.delete(id);
+        }
         pruneCompleted();
         pruneRetained();
       });
       // CL-7988: a completed turn supersedes any steer still queued for this
       // session — surface it. Runs after the mutate so the completion lands
-      // first even when the queue is non-empty.
-      dropStashedFollowups(id, "session completed");
+      // first even when the queue is non-empty. CL-7989: when the run won the
+      // race but the session stays open and resumable, the queue launches as
+      // a fresh follow-up above instead of being dropped here.
+      if (deliverStash && sessions.has(id)) {
+        launchNextStashedFollowup(id);
+      } else {
+        dropStashedFollowups(id, "session completed");
+      }
     },
 
     fail(id: string, error: string): void {
