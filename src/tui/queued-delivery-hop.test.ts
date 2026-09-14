@@ -14,7 +14,7 @@ import {
 } from "./queued-delivery.js";
 import { createSessionOperationQueue } from "./session-operation-queue.js";
 import { badgeCount, type QueueItem } from "./session-queue";
-import type { AgentDeliveryResult } from "./deliver-agent-message.js";
+import type { AgentDeliveryResult } from "./queued-delivery.js";
 
 function lastHopPort(bridgeRef: { current: SessionBridge | undefined }) {
   const sends: string[] = [];

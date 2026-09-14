@@ -3,7 +3,7 @@ import { AgentClosedError } from "@intx/agent";
 import {
   deliverAgentMessage,
   deliveryResultNotice,
-} from "./deliver-agent-message.js";
+} from "./queued-delivery.js";
 
 describe("deliverAgentMessage", () => {
   test("reports session-unavailable without calling deliver when rebuild failed", async () => {
