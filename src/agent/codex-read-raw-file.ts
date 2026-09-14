@@ -3,7 +3,7 @@
  *
  * `applyOp` calls this directly from outside the posixTools middleware chain
  * — no ToolPlugin ever sees `op.path` here, unlike the write leg which still
- * goes through the full pathEscapePlugin / secretGuardPlugin / authzPlugin /
+ * goes through the full pathEscapePlugin / secretGuardPlugin /
  * permissionPlugin stack (see buildCorePosixToolPlugins in
  * posix-tool-plugins.ts). `requireRelativePath` in codex-apply-patch.ts only
  * rejects absolute paths — it does nothing about `../` traversal — so this

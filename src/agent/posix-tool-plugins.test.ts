@@ -7,6 +7,7 @@ import { createPosixTools, composeMiddleware } from "@intx/tools-posix";
 import type { ToolPlugin } from "@intx/tools-posix";
 import type { ToolCall, ToolResult } from "@intx/types/runtime";
 import { createPermissionGate } from "../permission/gate.js";
+import { BLOCKED_BY_POLICY_PREFIX } from "../permission/decline-markers.js";
 import { buildCorePosixToolPlugins } from "./posix-tool-plugins.js";
 import {
   createCompositeBlobReader,
@@ -687,5 +688,53 @@ describe("buildCorePosixToolPlugins", () => {
     const content = String(result.content);
     expect(content).not.toContain(straddlingSecret);
     expect(content).not.toMatch(/AKIA[0-9A-Z]*/);
+  });
+
+  test("catastrophic shell stays denied with secret-guard ahead of the gate in skipPermissions mode (CL-7950)", async () => {
+    // The pass-through hard-deny plugin folded into the gate verdict path:
+    // with no separate enforcement plugin left in the chain, the gate itself
+    // must deny catastrophic shell even when skipPermissions auto-allows
+    // everything else, and secret-guard must still sit ahead of it.
+    const cwd = await mkdtemp(join(tmpdir(), "cl7950-fold-"));
+    try {
+      const gate = createPermissionGate({
+        approvals: [],
+        interactive: false,
+        skipPermissions: true,
+        reactorGated: false,
+        cwd,
+      });
+      const plugins = buildCorePosixToolPlugins({ cwd, permissionGate: gate });
+      const secretGuardIndex = findMiddlewareIndex(
+        plugins,
+        "Access to sensitive file blocked by policy",
+      );
+      const permissionIndex = findMiddlewareIndex(plugins, "gateToolCall");
+      expect(secretGuardIndex).toBeGreaterThanOrEqual(0);
+      expect(permissionIndex).toBeGreaterThanOrEqual(0);
+      expect(secretGuardIndex).toBeLessThan(permissionIndex);
+
+      const composed = composeMiddleware(
+        plugins
+          .map((plugin) => plugin.middleware)
+          .filter((mw): mw is NonNullable<typeof mw> => mw !== undefined),
+        async (call) => ({ callId: call.id, content: "reached terminal" }),
+      );
+      const signal = new AbortController().signal;
+      const blocked = await composed(
+        { id: "c1", name: "run_shell", arguments: { command: "sudo reboot" } },
+        signal,
+      );
+      expect(blocked.isError).toBe(true);
+      expect(String(blocked.content)).toContain(BLOCKED_BY_POLICY_PREFIX);
+      const allowed = await composed(
+        { id: "c2", name: "run_shell", arguments: { command: "echo hi" } },
+        signal,
+      );
+      expect(allowed.isError).not.toBe(true);
+      expect(String(allowed.content)).toContain("hi");
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });

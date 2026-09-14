@@ -97,12 +97,11 @@ export interface EvaluateApprovalsInput {
   workspace: GrantWorkspace;
 }
 
-// Grant-store evaluation via @intx/authz. Filters provider-model and cwd via
-// grantScopeMatches, then asks evaluateGrants for the highest-specificity
-// allow among package-compatible grants. Exact-escaped grants are checked with
-// matchesPattern (equality after unescape) first so a stored exact command is
-// never lost.
-export async function evaluateApprovals(
+// Single grant-evaluation owner: both the queued-request path
+// (isRequestCoveredByGrant) and the shell per-segment path decide coverage
+// through this function, so the two never drift. Fail-closed throughout:
+// unknown tools, unknown runners, and empty grant lists all refuse.
+export async function approvalCoversSubject(
   input: EvaluateApprovalsInput,
 ): Promise<boolean> {
   const {
@@ -134,4 +133,15 @@ export async function evaluateApprovals(
 
   const decision = await evaluateGrants(grants, subject, tool);
   return decision.effect === "allow";
+}
+
+// Grant-store evaluation via @intx/authz. Filters provider-model and cwd via
+// grantScopeMatches, then asks evaluateGrants for the highest-specificity
+// allow among package-compatible grants. Exact-escaped grants are checked with
+// matchesPattern (equality after unescape) first so a stored exact command is
+// never lost.
+export async function evaluateApprovals(
+  input: EvaluateApprovalsInput,
+): Promise<boolean> {
+  return approvalCoversSubject(input);
 }

@@ -979,11 +979,11 @@ describe("gate denies compound commands with an authz-hard-blocked segment", () 
   });
 
   // rg downstream of a single pipe reads only the bounded stdin the upstream
-  // stage produced, not a filesystem walk — the authz plugin exempts it at
-  // execution time (see CMD_HEAD in run-shell-authz.ts). Judging the "rg"
+  // stage produced, not a filesystem walk — run-shell-authz exempts it (see
+  // CMD_HEAD in run-shell-authz.ts). Judging the "rg"
   // segment in isolation loses that pipe context and denies it with no
-  // operator override possible, even though the full command the authz
-  // plugin actually enforces at execution time would allow it.
+  // operator override possible, even though the full command the gate
+  // actually enforces would allow it.
   test("does not deny rg reading bounded stdin downstream of a single pipe", async () => {
     const gate = createPermissionGate({
       approvals: [],
@@ -1592,7 +1592,7 @@ describe("createPermissionGate", () => {
     expect(asked).toBe(2);
   });
 
-  test("auto mode allows shell commands without prompting (authz plugin blocks dangerous ones upstream)", async () => {
+  test("auto mode allows shell commands without prompting (gate hard-denies dangerous ones first)", async () => {
     let asked = 0;
     const gate = createPermissionGate({
       approvals: [],
@@ -2241,7 +2241,10 @@ describe("createPermissionGate", () => {
   // SECURITY: skipPermissions must short-circuit BEFORE the approval callback is
   // ever invoked. If the callback fires it means skipPermissions is being used as
   // a post-classification hint rather than a gate bypass, which could leave the
-  // callback in control of the allow/deny outcome.
+  // callback in control of the allow/deny outcome. Uses a non-catastrophic
+  // ask-tier call: catastrophic shell has its own hard-deny above the
+  // skipPermissions shortcut (CL-7950 ordering regression), so `rm -rf /`
+  // would deny here regardless of the callback.
   test("skipPermissions never invokes the approval callback", async () => {
     let asked = 0;
     const gate = createPermissionGate({
@@ -2254,7 +2257,11 @@ describe("createPermissionGate", () => {
       skipPermissions: true,
       reactorGated: false,
     });
-    const verdict = await gate.evaluate(shellCall("rm -rf /"));
+    const verdict = await gate.evaluate({
+      id: "c",
+      name: "write_file",
+      arguments: { path: "/proj/file.txt", content: "x" },
+    });
     expect(verdict.allowed).toBe(true);
     expect(asked).toBe(0);
   });

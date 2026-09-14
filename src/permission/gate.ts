@@ -28,7 +28,7 @@ import {
 import { runShellAuthzBlockReason } from "../shell/run-shell-authz.js";
 import { matchesPattern, escapeGlobLiteral } from "./matcher.js";
 import {
-  evaluateApprovals,
+  approvalCoversSubject,
   grantScopeMatches,
   type GrantWorkspace,
 } from "./authz-grants.js";
@@ -645,6 +645,24 @@ export function createPermissionGate(
       };
 
   const decide = async (call: ToolCall): Promise<GateDecision> => {
+    // Catastrophic shell commands are hard-denied here, at the top of the
+    // single verdict path every entry (evaluate, authorizeCall,
+    // executionVerdict) flows through — this is the owning enforcement point
+    // for the run-shell-authz classification. The verdict is invariant across
+    // modes: auto, headless, and skipPermissions never allow these commands.
+    // Judged against the full command string, not per split segment, so a
+    // stage that only reads bounded, already-piped data (e.g.
+    // `git show sha:path | rg -n foo`) is not denied in isolation when the
+    // full pipeline is exempt. This runs before every grant shortcut — a
+    // stored grant must never admit a hard-denied command (see
+    // preGrantGuardReason).
+    if (call.name === "run_shell") {
+      const command = String(call.arguments.command ?? "");
+      const blockReason = runShellAuthzBlockReason(command);
+      if (blockReason !== undefined) {
+        return { kind: "deny", reason: blockReason };
+      }
+    }
     if (skipPermissions) return { kind: "allow" };
     // Sub-agent tool calls run under ALS identity (identity-context.ts). The
     // process cwd is the worktree (or session when no identity is set); every
@@ -751,20 +769,8 @@ export function createPermissionGate(
         );
         if (segments.length === 0) continue;
 
-        // A command authz would hard-deny at execution is stricter than "ask":
-        // the gate must deny the call outright rather than show an Accept
-        // button for a command that can never actually run. Judged against the
-        // full command string with the same predicate authz enforces at
-        // execution time — not per split segment — so a stage that only reads
-        // bounded, already-piped data (e.g. `git show sha:path | rg -n foo`)
-        // is not denied in isolation when the full pipeline is exempt. This
-        // must run before the exact-full-command grant shortcut below — a
-        // stored grant must never let a hard-denied command skip straight
-        // past the check that would otherwise deny it (see preGrantGuardReason).
-        const blockReason = runShellAuthzBlockReason(fullCommand);
-        if (blockReason !== undefined) {
-          return { kind: "deny", reason: blockReason };
-        }
+        // Catastrophic commands were already hard-denied at the top of the
+        // verdict path before any grant shortcut could admit them.
 
         let needsOperator = false;
         let anySecret = false;
@@ -790,7 +796,7 @@ export function createPermissionGate(
             // so. Matching semantics are untouched; this only annotates the ask.
             if (
               mismatchNotice === undefined &&
-              (await evaluateApprovals({
+              (await approvalCoversSubject({
                 tool: request.tool,
                 subject: segment,
                 approvals,
@@ -804,7 +810,7 @@ export function createPermissionGate(
             continue;
           }
           if (
-            await evaluateApprovals({
+            await approvalCoversSubject({
               tool: request.tool,
               subject: segment,
               approvals,
@@ -865,7 +871,7 @@ export function createPermissionGate(
 
       // Path-arg tools already drop to ask via callTargetsRestricted; grants
       // match on the path subject the same as before.
-      const alreadyApproved = await evaluateApprovals({
+      const alreadyApproved = await approvalCoversSubject({
         tool: request.tool,
         subject: request.subject,
         approvals,

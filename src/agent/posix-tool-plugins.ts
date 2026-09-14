@@ -5,7 +5,6 @@ import { evidenceArchivePathGuardPlugin } from "../plugins/evidence-archive-path
 import { evidenceArchiveSearchPlugin } from "../plugins/evidence-archive-search-plugin.js";
 import { deleteFilePlugin } from "../plugins/delete-file-plugin.js";
 import { secretGuardPlugin } from "../plugins/secret-guard-plugin.js";
-import { authzPlugin } from "../plugins/authz-plugin.js";
 import { permissionPlugin } from "../plugins/permission-plugin.js";
 import { verifyPlugin } from "../plugins/verify-plugin.js";
 import { editFileDiagnosticsPlugin } from "../plugins/edit-file-diagnostics-plugin.js";
@@ -96,8 +95,8 @@ export function buildCorePosixToolPlugins(
   // Pre-gate sandboxes honor yolo mode so outside-workspace path tools and shell
   // cwd are not hard-denied after the gate already auto-allows. Pass a live
   // getter so `/yolo` mid-session unlocks (or re-enforces) bounds without
-  // rebuilding the plugin stack. Secret-guard and authz still hard-deny
-  // regardless.
+  // rebuilding the plugin stack. Secret-guard and the gate's
+  // catastrophic-shell check still hard-deny regardless.
   const allowOutside = (): boolean => permissionGate.getSkipPermissions();
   // One shared workspace-roots provider for every bound in this stack, so
   // pathEscape and delete_file admit the same registered sibling worktrees.
@@ -120,7 +119,6 @@ export function buildCorePosixToolPlugins(
     deleteFilePlugin(cwd, { allowOutside, rootsProvider }),
     toolOutputUriPlugin(),
     secretGuardPlugin(),
-    authzPlugin(),
     permissionPlugin(permissionGate),
     shellGuardPlugin(cwd, shellTimeout, shellEnv, {
       allowOutsideCwd: allowOutside,

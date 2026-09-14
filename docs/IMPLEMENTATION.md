@@ -121,10 +121,9 @@ src/
     evidence-archive-path-guard.ts     Block dump-path reads of the archive sidecar
     tool-output-uri-plugin.ts  Normalize read_file tool-output URIs
     secret-guard-plugin.ts     Hard-deny path-keyed secret files
-    authz-plugin.ts            Catastrophic command blocking (thin wrapper)
-    permission-plugin.ts       Tiered operator approval
+    permission-plugin.ts       Tiered operator approval (owns catastrophic shell deny)
   shell/
-    run-shell-authz.ts         Shared run_shell deny policy (authz + permission)
+    run-shell-authz.ts         Shared run_shell deny policy (gate-enforced)
     background-shell.ts        Background run_shell registry (start/collect/cancel/disposeAll)
     verify-plugin.ts           Write/edit verification (per-path lock)
     file-mutation-lock.ts      Serialize mutations per file for verify
