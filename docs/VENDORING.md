@@ -82,8 +82,9 @@ vendored tree mixes pins.
 
 `vendor/intx-workflow-host/adapters/` is a partial-package vendor: upstream
 `packages/workflow-host` has a `package.json`, but this tree carries only
-the never-published `substrate-mailbox-store` adapter (source + its test,
-563 lines, documented on-disk layout, O(delta) flushes). It is
+the never-published `substrate-mailbox-store` adapter (the source file alone
+is 563 lines, plus its 586-line test, documented on-disk layout, O(delta)
+flushes). It is
 deliberately **not** a workspace member and nothing in `src/` imports it —
 Step 1 decides whether to wire it as a package when it consumes it. Its
 `@intx/hub-sessions/substrate` and `@intx/mailbox` imports resolve once
@@ -117,17 +118,20 @@ exist in the newer `@intx/types`.
 The 2026-09-07 sync also vendored the remaining four consumed packages
 (`@intx/agent`, `@intx/authz`, `@intx/log`, `@intx/tools-posix`) at the
 same upstream commit, completing the set: every `@intx/*` package this
-repo imports now resolves to vendored source. None of the four carried
+repo imports now resolves to vendored source, except `@intx/crypto` and
+`@intx/tools-lsp`, which remain direct published-npm imports at `0.3.0`.
+None of the four carried
 local patches at vendoring time. `@intx/agent` later gained the error-seq
 patches ledgered in `vendor/intx-agent/PATCHES.md`; the other three remain
 verbatim upstream copies. `@intx/tools-lsp` remains on published npm
 (`0.3.0`) — it is a thin adapter whose transitive `@intx/*` dependencies
 resolve to the
 vendored workspaces via root `overrides`, so it tracks the vendored set
-without being vendored itself. Published transitive dependencies that
-stay on npm (`@intx/crypto`, `@intx/inference-discovery`,
-`@intx/inference-testing`) are pinned to the root's published versions so
-the lockfile never nests duplicate copies of them either.
+without being vendored itself. `@intx/crypto` (root `dependencies`) and
+`@intx/inference-testing` (root `devDependencies`) are pinned at `0.3.0`;
+`@intx/inference-discovery` resolves transitively at `0.3.0` via `bun.lock`
+with no direct root pin, so the lockfile never nests duplicate copies of
+them either.
 
 A `version` field of `"0.2.2"` in a vendored package's `package.json` is a
 carried-over convention from the original `@intx/inference` vendoring, not a
@@ -141,7 +145,7 @@ one.
 
 Root `package.json`:
 
-- `workspaces` lists each `vendor/intx-*` directory as a workspace member.
+- `workspaces` lists each whole-package `vendor/intx-*` directory as a workspace member; the partial `vendor/intx-workflow-host/adapters/` tree is deliberately not a member.
 - `overrides` pins the package name to `workspace:*`, so every transitive
   consumer (including other published `@intx/*` packages that declare a
   dependency on it) resolves to the vendored copy instead of installing
