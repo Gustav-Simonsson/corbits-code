@@ -171,4 +171,70 @@ describe("background shell registry", () => {
       registry.disposeAll("test done");
     }
   });
+
+  test("two concurrent collects on the same shell both resolve", async () => {
+    const registry = createBackgroundShellRegistry();
+    const started = registry.start({
+      command: "sleep 1; echo done",
+      cwd: tmpCwd,
+    });
+    if ("error" in started) throw new Error(started.error);
+    try {
+      const [first, second] = await Promise.all([
+        registry.collect(started.id, 5_000),
+        registry.collect(started.id, 5_000),
+      ]);
+      expect(first.state).toBe("completed");
+      expect(second.state).toBe("completed");
+      if (first.state !== "completed" || second.state !== "completed") return;
+      expect(first.exit.output).toContain("done");
+      expect(second.exit.output).toContain("done");
+    } finally {
+      registry.disposeAll("test done");
+    }
+  });
+
+  test("one-sided timeout does not starve the other waiter", async () => {
+    const registry = createBackgroundShellRegistry();
+    const started = registry.start({
+      command: "sleep 1; echo done",
+      cwd: tmpCwd,
+    });
+    if ("error" in started) throw new Error(started.error);
+    try {
+      const [impatient, patient] = await Promise.all([
+        registry.collect(started.id, 100),
+        registry.collect(started.id, 5_000),
+      ]);
+      expect(impatient.state).toBe("running");
+      expect(patient.state).toBe("completed");
+      if (patient.state !== "completed") return;
+      expect(patient.exit.output).toContain("done");
+    } finally {
+      registry.disposeAll("test done");
+    }
+  });
+
+  test("one-sided abort does not starve the other waiter", async () => {
+    const registry = createBackgroundShellRegistry();
+    const started = registry.start({
+      command: "sleep 1; echo done",
+      cwd: tmpCwd,
+    });
+    if ("error" in started) throw new Error(started.error);
+    try {
+      const aborted = new AbortController();
+      setTimeout(() => aborted.abort(new Error("stop waiting")), 100);
+      const [cancelled, patient] = await Promise.all([
+        registry.collect(started.id, 5_000, aborted.signal),
+        registry.collect(started.id, 5_000),
+      ]);
+      expect(cancelled.state).toBe("running");
+      expect(patient.state).toBe("completed");
+      if (patient.state !== "completed") return;
+      expect(patient.exit.output).toContain("done");
+    } finally {
+      registry.disposeAll("test done");
+    }
+  });
 });

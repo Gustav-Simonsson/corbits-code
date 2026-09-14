@@ -513,11 +513,15 @@ export function createSubAgentSessionStore(
   const deliverHandles = new Map<string, (message: string) => void>();
   // CL-7344: a send_input interrupt that lands while the original run is still
   // in flight must not start its follow-up against a run that is about to
-  // settle. The message is stashed here and launched atomically from
-  // attachReport (same mutation/notify as the salvage handoff) when the run's
-  // report arrives; a completing run drops it. Any terminal transition —
-  // interrupt, close, cancel, fail, eviction — drops it too, so a queued
-  // follow-up can never run against a closed agent.
+  // settle. The message is stashed here and launched atomically from the
+  // attachReport handoff (same mutation/notify as the salvage handoff) when
+  // the run's report arrives. complete() is a second launcher: when the run
+  // wins the race but the session stays open and resumable, the deliverStash
+  // launch delivers the queue as a fresh follow-up (FIFO chaining via
+  // launchNextStashedFollowup). Any other terminal transition — interrupt,
+  // close, cancel, fail, eviction, or a non-retained completion — drops the
+  // queue loudly via dropStashedFollowups, so a queued follow-up can never
+  // run against a closed agent.
   interface StashedFollowup {
     message: string;
     failLifecycle: "completed" | "interrupted";
@@ -527,7 +531,9 @@ export function createSubAgentSessionStore(
   }
   // CL-7988: overlapping interrupt-steers queue FIFO per session instead of
   // overwriting each other. The head launches when the live run settles via
-  // attachReport; each settled follow-up turn launches the next in order.
+  // the attachReport handoff, or via complete()'s deliverStash launch when
+  // the run wins the race on an open, resumable session; each settled
+  // follow-up turn launches the next in order (FIFO chaining).
   const stashedFollowups = new Map<string, StashedFollowup[]>();
 
   const steerPreview = (message: string): string => {
@@ -1520,6 +1526,7 @@ export function createSubAgentSessionStore(
           deliverStash = true;
           session.lifecycle = { state: "running" };
           delete session.finishedAt;
+          delete session.stopReason;
           runInFlight.add(id);
         } else {
           runInFlight.delete(id);

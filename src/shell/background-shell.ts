@@ -81,7 +81,7 @@ export function createBackgroundShellRegistry(
   const { onExit } = options;
   const running = new Map<string, ChildProcess>();
   const completed = new Map<string, BackgroundShellExit>();
-  const exitWaiters = new Map<string, () => void>();
+  const exitWaiters = new Map<string, Set<() => void>>();
 
   const record =
     (id: string, command: string, collector: BoundedShellOutput) =>
@@ -104,8 +104,11 @@ export function createBackgroundShellRegistry(
         if (oldest === undefined) break;
         completed.delete(oldest);
       }
-      exitWaiters.get(id)?.();
-      exitWaiters.delete(id);
+      const waiters = exitWaiters.get(id);
+      if (waiters !== undefined) {
+        exitWaiters.delete(id);
+        for (const wake of waiters) wake();
+      }
       onExit?.(exit);
     };
 
@@ -166,24 +169,44 @@ export function createBackgroundShellRegistry(
       // interrupt must not park the session on a live descendant, and must
       // not kill it either — the child belongs to the still-alive session.
       if (signal?.aborted === true) return { state: "running" };
+      // Concurrent collects on the same shell each park their own waiter so
+      // they resolve independently: a waiter removes only itself on
+      // timeout/abort/settle, never a sibling's registration.
+      let wake: (() => void) | undefined;
+      const forget = (): void => {
+        const waiters = exitWaiters.get(id);
+        if (wake !== undefined) waiters?.delete(wake);
+        if (waiters !== undefined && waiters.size === 0) exitWaiters.delete(id);
+      };
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
-          exitWaiters.delete(id);
+          forget();
           signal?.removeEventListener("abort", onAbort);
           resolve();
         }, waitMs);
         const onAbort = (): void => {
           clearTimeout(timer);
-          exitWaiters.delete(id);
+          forget();
           resolve();
         };
-        signal?.addEventListener("abort", onAbort, { once: true });
-        exitWaiters.set(id, () => {
+        wake = (): void => {
           clearTimeout(timer);
           signal?.removeEventListener("abort", onAbort);
           resolve();
-        });
-      }).finally(() => exitWaiters.delete(id));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        let waiters = exitWaiters.get(id);
+        if (waiters === undefined) {
+          waiters = new Set();
+          exitWaiters.set(id, waiters);
+        }
+        waiters.add(wake);
+      }).finally(() => {
+        // Belt-and-braces: record() already dropped the whole entry when it
+        // woke us, and timeout/abort self-removed above — this only trims a
+        // waiter whose settle path raced out.
+        forget();
+      });
       const finished = completed.get(id);
       if (finished !== undefined) return { state: "completed", exit: finished };
     }
@@ -204,7 +227,9 @@ export function createBackgroundShellRegistry(
    * wakes waiters and then kills the trees.
    */
   const releaseWaiters = (): void => {
-    for (const wake of exitWaiters.values()) wake();
+    for (const waiters of exitWaiters.values()) {
+      for (const wake of waiters) wake();
+    }
     exitWaiters.clear();
   };
 
