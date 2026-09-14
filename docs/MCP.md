@@ -72,7 +72,11 @@ disabled or overridden by a custom `exa` MCP server. Other Exa MCP tools, such a
 **Project trust:** When `mcpServers` comes from **local** `.corbits/settings.json`,
 Corbits Code does **not** spawn or connect until each server is trusted for this
 project. Trust is stored as a fingerprint of `{ name, type, command, args, url }`
-in `~/.corbits/trust/<cwd-hash>.json` (outside the repo). The TUI prompts on
+plus the sorted `env` key names — never values, so adding a new injected
+variable invalidates a prior grant. `type` defaults to `http` when `url` is set,
+else `stdio`. The store lives in `~/.corbits/trust/<repo-hash>.json` (outside the
+repo), where `<repo-hash>` is the first 32 hex characters of the SHA-256 of the
+realpath-canonicalized project root. The TUI prompts on
 first connect (trust-on-first-use). Headless runs without a trust callback
 **fail closed** — untrusted local servers are not connected.
 
@@ -186,11 +190,11 @@ Because only `url` is set, `type` defaults to `http`.
 ### Authorization on first run
 
 The first time Corbits Code connects to an http server that requires auth, the TUI
-shows an authorization prompt listing the server and its authorize URL:
-
-- The URL is rendered as a clickable hyperlink (`open in browser`) in terminals
-  that support OSC 8.
-- Press **Alt+C** to copy the URL for pasting into a browser instead.
+marks the prompt box `mcp !` and lists the server as needing auth in `/mcp`.
+Focus the server in `/mcp` and press **Enter** to authorize: the authorize URL
+opens in the browser and the link is copied to the clipboard automatically (the
+copy covers SSH sessions, where the browser taking the redirect is often not
+this machine).
 
 Complete the consent flow in the browser. A loopback callback server catches the
 redirect and exchanges the authorization code for tokens automatically — the
@@ -209,8 +213,7 @@ Credentials are scoped to the exact server name and endpoint URL, not the displa
 name alone. Corbits Code parses and normalizes the URL, removes its fragment, and
 hashes the unambiguous `[serverName, normalizedURL]` tuple. The full path and query
 remain part of the identity, so credentials cannot cross origins, paths, or query
-variants. The bounded slug prefix is derived from the server name for readability;
-the raw URL never appears in the filename.
+variants. The bounded slug prefix is derived from the server name for readability: characters outside `[A-Za-z0-9_-]` are replaced with `_` (case preserved; an empty result becomes `server`), truncated to 48 characters; the raw URL never appears in the filename.
 
 Tokens never appear in `settings.json`. The settings file holds only the URL;
 secret material stays in the endpoint-scoped auth file. Legacy name-only files
