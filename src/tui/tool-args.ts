@@ -14,7 +14,9 @@
 import { isMcpToolName } from "../mcp/tool-name.js";
 import type { SemanticRole } from "./semantic-theme.js";
 import { summarizeToolArgs } from "./tool-formatter.js";
-import { validateView, viewToLines, type ViewNode } from "./view/index.js";
+import { validateView } from "./view/validate.js";
+import { viewToLines } from "./view/lines.js";
+import type { ViewNode } from "./view/spec.js";
 import type { StyledBodyLine } from "./stream.js";
 import { UI } from "./theme.js";
 

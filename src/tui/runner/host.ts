@@ -58,7 +58,7 @@ import { toolCallRow } from "../diff.js";
 import { toolResultRow } from "../mcp-view.js";
 import { pushToolCall, pushToolResult } from "../tool-rows.js";
 import type { StreamRow } from "../stream.js";
-import type { QueueKind } from "../session-queue.js";
+import type { QueueKind } from "../delivery-queue.js";
 import type { ShellOutputFeed } from "../../session/shell-output-feed.js";
 
 export interface RunnerHostDeps {

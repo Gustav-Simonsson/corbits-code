@@ -1,7 +1,7 @@
 // Pure geometry resolver: terminal size + zone visibility + overlay mode → rects.
 // Caller passes { columns, rows }; this module never reads process.stdout.
 
-import { resolveContentWidth, resolveSideMargin } from "./margins.js";
+import { resolveContentWidth, resolveSideMargin } from "./zones.js";
 import {
   COLLAPSE_ORDER,
   FLEET_BOARD_CAP_FRACTION,

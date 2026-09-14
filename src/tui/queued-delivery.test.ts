@@ -5,10 +5,10 @@ import {
   createDeliveryGeneration,
   createLeftoverSend,
   createLiveSteerDeliver,
+  createSessionOperationQueue,
   routeQueuedDelivery,
   SESSION_IDENTITY_ABORT_REASON,
-} from "./queued-delivery.js";
-import { createSessionOperationQueue } from "./session-operation-queue.js";
+} from "./delivery-queue.js";
 import type { AgentDeliveryResult } from "./deliver-agent-message.js";
 
 const image: PendingImageAttachment = {

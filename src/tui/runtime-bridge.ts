@@ -16,7 +16,8 @@ import {
   setRunState,
   type QueueItem,
   type QueueKind,
-} from "./session-queue.js";
+  type DeliverySettle,
+} from "./delivery-queue.js";
 import {
   appendStreamRow,
   paintChrome,
@@ -72,7 +73,6 @@ import {
   deliveryResultNotice,
   type AgentDeliveryResult,
 } from "./deliver-agent-message.js";
-import type { DeliverySettle } from "./queued-delivery.js";
 import { toolCallRow } from "./diff.js";
 import { toolResultRow } from "./mcp-view.js";
 import {

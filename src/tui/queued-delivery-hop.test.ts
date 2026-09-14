@@ -8,12 +8,13 @@ import { createLiveSessionPort } from "./live-session-port";
 import { createAppShell } from "./shell/index";
 import { withTestRenderer } from "./harness";
 import {
+  badgeCount,
   createLiveSteerDeliver,
+  createSessionOperationQueue,
   routeQueuedDelivery,
   type DeliverySettle,
-} from "./queued-delivery.js";
-import { createSessionOperationQueue } from "./session-operation-queue.js";
-import { badgeCount, type QueueItem } from "./session-queue";
+  type QueueItem,
+} from "./delivery-queue.js";
 import type { AgentDeliveryResult } from "./deliver-agent-message.js";
 
 function lastHopPort(bridgeRef: { current: SessionBridge | undefined }) {

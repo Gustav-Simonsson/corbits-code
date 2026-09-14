@@ -6,7 +6,7 @@ import {
   pendingWindowStart,
 } from "./pending-column";
 import { PENDING_MAX_VISIBLE } from "./geometry/zones";
-import type { QueueItem } from "./session-queue";
+import type { QueueItem } from "./delivery-queue";
 
 let seq = 0;
 function item(text: string, kind: QueueItem["kind"] = "queue"): QueueItem {

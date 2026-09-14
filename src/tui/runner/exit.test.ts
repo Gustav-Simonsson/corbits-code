@@ -7,8 +7,10 @@ import type { InferenceSource } from "@intx/types/runtime";
 import * as codexSession from "../../auth/codex/session.js";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
 import { defined } from "../../../tests/helpers/defined.js";
-import { createDeliveryGeneration } from "../queued-delivery.js";
-import { createSessionOperationQueue } from "../session-operation-queue.js";
+import {
+  createDeliveryGeneration,
+  createSessionOperationQueue,
+} from "../delivery-queue.js";
 import {
   createRunLifecycle,
   finalizeTUIRun,

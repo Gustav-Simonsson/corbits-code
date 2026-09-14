@@ -19,7 +19,7 @@ import {
   type InferenceErrorLike,
 } from "../inference-gateway-error.js";
 import { isProviderFailurePresentationSuppressed } from "./provider/failure-attempt.js";
-import type { RunState } from "./session-queue.js";
+import type { RunState } from "./delivery-queue.js";
 import type { PendingAskWake } from "../subagent/fleet-report.js";
 
 /** Canonical inbound events the bridge understands (fixtures + mapped reactor). */

@@ -3,7 +3,7 @@
  * the screen, and that a right-aligned turn stops at the shared gutter.
  */
 import { describe, expect, test } from "bun:test";
-import { resolveSideMargin } from "./geometry/margins";
+import { resolveSideMargin } from "./geometry/zones";
 import { withTestRenderer } from "./harness";
 import { appendStreamRow } from "./shell/chrome";
 import { createAppShell } from "./shell/index";

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { viewToLines } from "../../../src/tui/view/index.js";
+import { viewToLines } from "../../../src/tui/view/lines.js";
 import type { ViewNode } from "../../../src/tui/view/spec.js";
 
 const textLines = (node: ViewNode, columns = 80): string[] =>

@@ -7,7 +7,7 @@ import {
   type KeyEvent,
   type MouseEvent,
 } from "@opentui/core";
-import { badgeCount } from "../session-queue.js";
+import { badgeCount } from "../delivery-queue.js";
 
 import {
   type AppShell,

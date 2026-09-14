@@ -17,7 +17,7 @@ import { getShellBridgeHooks } from "./shell/internals";
 import { streamRowCount } from "./shell/transcript";
 import { STEER_WAIT_NOTICE_MS } from "./notice-line";
 import { withTestRenderer } from "./harness";
-import { badgeCount } from "./session-queue";
+import { badgeCount } from "./delivery-queue";
 import { LIVE_ACTIVITY_WORDS } from "./session-chrome";
 
 describe("mapReactorLike", () => {

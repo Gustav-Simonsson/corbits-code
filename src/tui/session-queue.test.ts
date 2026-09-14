@@ -14,9 +14,9 @@ import {
   queueCount,
   setRunState,
   steerCount,
-} from "./session-queue";
+} from "./delivery-queue";
 
-describe("session-queue", () => {
+describe("delivery-queue", () => {
   test("empty enqueue is no-op", () => {
     const s0 = createSessionQueue("busy");
     expect(enqueue(s0, "   ")).toBe(s0);

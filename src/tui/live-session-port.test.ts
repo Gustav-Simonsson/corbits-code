@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createLiveSessionPort } from "./live-session-port";
 import type { PendingImageAttachment } from "./image-attachments.js";
-import type { QueueItem, QueueKind } from "./session-queue";
+import type { QueueItem, QueueKind } from "./delivery-queue";
 
 type Call =
   | { op: "send"; text: string }

@@ -8,9 +8,9 @@ import { classifySubmission, createSubmitHandler } from "./runner/submit.js";
 import {
   createDeliveryGeneration,
   createLeftoverSend,
+  createSessionOperationQueue,
   routeQueuedDelivery,
-} from "./queued-delivery.js";
-import { createSessionOperationQueue } from "./session-operation-queue.js";
+} from "./delivery-queue.js";
 import { ingestOperatorPrompt } from "./prompt-attachments.js";
 import {
   armFeedbackCapture,

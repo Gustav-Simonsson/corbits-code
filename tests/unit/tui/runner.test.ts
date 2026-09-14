@@ -14,7 +14,7 @@ import {
 import { loadLocalSettingsWriteBase } from "../../../src/tui/runner/settings.js";
 import { tuiSendFailureMessage } from "../../../src/tui/runner/send-failure-message.js";
 import { defined } from "../../helpers/defined.js";
-import { createSessionOperationQueue } from "../../../src/tui/session-operation-queue.js";
+import { createSessionOperationQueue } from "../../../src/tui/delivery-queue.js";
 import { createRunSink } from "../../../src/session/run-sink.js";
 
 test("createTUIEventEmitter returns an EventEmitter", () => {
@@ -247,14 +247,14 @@ test("a failed close followed by a lock error never surfaces as a raw AgentConte
 // standing up the full TUI runner — provider config, plugin discovery, MCP
 // wiring, and a real OpenTUI host. That is out of scope for this fix; it
 // would be its own extraction. What can be driven directly, and is exactly
-// the failure this bug reports, is the real `session-operation-queue.ts`
+// the failure this bug reports, is the real `delivery-queue.ts`
 // queue exercised the same way every rebuild site uses it: `void
 // enqueueOp(async () => { try { ... } catch (err) { fatalBuildError = ... } })`.
 // `enqueue` is `tail = tail.then(op, op); return tail;` — if `op` rejects and
 // nothing internally catches it, that returned promise is the only thing
 // that ever observes the rejection, and `void` discards it, which is
 // precisely how the unhandled rejection in the ticket escaped.
-test("a rejecting reload op through the real session-operation-queue never triggers an unhandled rejection", async () => {
+test("a rejecting reload op through the real delivery-queue never triggers an unhandled rejection", async () => {
   const { enqueue, awaitTail } = createSessionOperationQueue();
   const agent = stubAgent(() =>
     Promise.reject(new AgentContextLockError("/tmp/workdir")),
