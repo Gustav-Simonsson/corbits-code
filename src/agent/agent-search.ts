@@ -3,11 +3,12 @@ import type { AgentTool } from "@intx/agent";
 import type { ToolDefinition } from "@intx/types/runtime";
 import { type } from "arktype";
 import { scrubSecretShapedContent } from "../plugins/tool-result-secret-scrub.js";
+import {
+  lexicalFields,
+  scoreLexical,
+  tokenizeLexical,
+} from "./lexical-rank.js";
 import type { AgentProfile } from "./profiles.js";
-
-function tokenize(text: string): string[] {
-  return text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-}
 
 function profileSearchText(profile: AgentProfile): string {
   const parts = [
@@ -30,27 +31,17 @@ export function createAgentIndex(
     profile: AgentProfile,
     queryTokens: string[],
     rawQuery: string,
-  ): number => {
-    const idTokens = tokenize(profile.id);
-    const blob = profileSearchText(profile).toLowerCase();
-    const blobTokens = new Set(tokenize(blob));
-    let total = 0;
-    for (const token of queryTokens) {
-      if (idTokens.includes(token)) total += 3;
-      else if (blobTokens.has(token)) total += 1;
-      else if (profile.id.toLowerCase().includes(token)) total += 0.75;
-      else if (blob.includes(token)) total += 0.25;
-    }
-    if (profile.id.toLowerCase().includes(rawQuery)) total += 1;
-    if ((profile.description ?? "").toLowerCase().includes(rawQuery))
-      total += 0.5;
-    return total;
-  };
+  ): number =>
+    scoreLexical(
+      lexicalFields(profile.id, profileSearchText(profile)),
+      queryTokens,
+      rawQuery,
+    ) + ((profile.description ?? "").toLowerCase().includes(rawQuery) ? 0.5 : 0);
 
   return {
     search(query: string, limit = 12): AgentProfile[] {
       const rawQuery = query.toLowerCase().trim();
-      const queryTokens = tokenize(query);
+      const queryTokens = tokenizeLexical(query);
       const profiles = getProfiles();
       if (queryTokens.length === 0) return profiles.slice(0, limit);
       return profiles

@@ -9,7 +9,7 @@ import {
   submitOutputDefinition,
 } from "../agent/director.js";
 import { manageTasksDefinition } from "./tasks.js";
-import { validateView } from "../tui/view/index.js";
+import { validateView } from "../tui/view/validate.js";
 import { SETTINGS_DIR_NAME } from "../branding.js";
 import {
   advertiseShellGuardTimeout,

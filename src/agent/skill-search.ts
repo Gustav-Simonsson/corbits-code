@@ -4,6 +4,11 @@ import type { ToolDefinition } from "@intx/types/runtime";
 import { type } from "arktype";
 
 import type { SkillSummary } from "../extensions/skills.js";
+import {
+  lexicalFields,
+  scoreLexical,
+  tokenizeLexical,
+} from "./lexical-rank.js";
 
 // Catalog lookup for skills. Names live in the system prompt; this tool returns
 // matching name + description so the model can choose. Bodies load via use_skill.
@@ -33,10 +38,6 @@ export interface CreateSkillSearchToolArgs {
   allowedNames?: readonly string[];
 }
 
-function tokenize(text: string): string[] {
-  return text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-}
-
 function visibleSkills(
   skills: readonly SkillSummary[],
   allowedNames: readonly string[] | undefined,
@@ -51,17 +52,11 @@ function scoreSkill(
   queryTokens: string[],
   rawQuery: string,
 ): number {
-  const nameTokens = tokenize(skill.name);
-  const descTokens = new Set(tokenize(skill.description));
-  let total = 0;
-  for (const token of queryTokens) {
-    if (nameTokens.includes(token)) total += 3;
-    else if (descTokens.has(token)) total += 1;
-    else if (skill.name.toLowerCase().includes(token)) total += 0.75;
-    else if (skill.description.toLowerCase().includes(token)) total += 0.25;
-  }
-  if (skill.name.toLowerCase().includes(rawQuery)) total += 1;
-  return total;
+  return scoreLexical(
+    lexicalFields(skill.name, skill.description),
+    queryTokens,
+    rawQuery,
+  );
 }
 
 const SkillSearchArgs = type({ query: "string" });
@@ -83,7 +78,7 @@ export function createSkillSearchTool(
       if (query.length === 0)
         return "Error: skill_search requires a non-empty query.";
       const rawQuery = query.toLowerCase();
-      const queryTokens = tokenize(query);
+      const queryTokens = tokenizeLexical(query);
       if (queryTokens.length === 0) {
         return `No skills matched "${query}". Try different keywords describing the capability.`;
       }

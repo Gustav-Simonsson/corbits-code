@@ -3,6 +3,11 @@ import type { AgentTool } from "@intx/agent";
 import type { ToolDefinition } from "@intx/types/runtime";
 import { type } from "arktype";
 
+import {
+  lexicalFields,
+  scoreLexical,
+  tokenizeLexical,
+} from "./lexical-rank.js";
 import type { SessionMode } from "../config/session-mode.js";
 import { sessionModeEnablesSubAgents } from "../config/session-mode.js";
 
@@ -229,10 +234,6 @@ export interface ToolIndex {
   search(query: string, limit?: number): string[];
 }
 
-function tokenize(text: string): string[] {
-  return text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-}
-
 // A dependency-free lexical ranker over each tool's name + description. Exact name
 // token hits weigh most, then description token hits, then raw-substring matches
 // (so "linear" finds mcp__linear__* even though it is not a whole token there).
@@ -247,25 +248,17 @@ export function createToolIndex(
     def: ToolDefinition,
     queryTokens: string[],
     rawQuery: string,
-  ): number => {
-    const nameTokens = tokenize(def.name);
-    const descTokens = new Set(tokenize(def.description ?? ""));
-    let total = 0;
-    for (const token of queryTokens) {
-      if (nameTokens.includes(token)) total += 3;
-      else if (descTokens.has(token)) total += 1;
-      else if (def.name.toLowerCase().includes(token)) total += 0.75;
-      else if ((def.description ?? "").toLowerCase().includes(token))
-        total += 0.25;
-    }
-    if (def.name.toLowerCase().includes(rawQuery)) total += 1;
-    return total;
-  };
+  ): number =>
+    scoreLexical(
+      lexicalFields(def.name, def.description ?? ""),
+      queryTokens,
+      rawQuery,
+    );
 
   return {
     search(query: string, limit = 8): string[] {
       const rawQuery = query.toLowerCase().trim();
-      const queryTokens = tokenize(query);
+      const queryTokens = tokenizeLexical(query);
       if (queryTokens.length === 0) return [];
       return getDefs()
         .filter((def) => !advertisedNames.includes(def.name))
