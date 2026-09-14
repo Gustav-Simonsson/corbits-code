@@ -3225,12 +3225,19 @@ describe("createReactor — state snapshot inspection", () => {
           if (event.type === "message.received") {
             messageCount++;
             if (messageCount === 1) {
-              // Mutate the snapshot's content block.
+              // Mutate the snapshot's content block. Frozen turns throw;
+              // isolation still holds if the assignment is ignored.
+              //
+              // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-test-frozen-turns-mutation
               const msg = state.turns[0];
               if (msg !== undefined) {
                 const block = msg.content[0];
                 if (block !== undefined && block.type === "text") {
-                  (block as { text: string }).text = "CORRUPTED";
+                  try {
+                    (block as { text: string }).text = "CORRUPTED";
+                  } catch {
+                    /* deepFreeze */
+                  }
                 }
               }
               return caps.wait();

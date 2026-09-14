@@ -14,6 +14,10 @@ import {
   isCodexProviderName,
 } from "../config/codex-providers.js";
 import { xaiProfileFromProviderName } from "../config/xai-providers.js";
+import {
+  peekSourceCredentialSecret,
+  registerSourceCredential,
+} from "../config/source-credentials.js";
 import { formatDirectorSystemPrompt } from "../agent/directors/identity.js";
 import { DIRECTOR_REGISTRY } from "../agent/directors/registry.js";
 import type { DirectorId, DirectorPackage } from "../agent/directors/types.js";
@@ -772,7 +776,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
       const { access } = await refreshSelectedProviderCredential(() =>
         getValidCodexToken(initialCodexProfile),
       );
-      liveSource = { ...liveSource, apiKey: access };
+      registerSourceCredential(liveSource.credentialId, access);
       liveSubAgentProvider.current = {
         ...liveSubAgentProvider.current,
         apiKey: access,
@@ -782,7 +786,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
       const { access } = await refreshSelectedProviderCredential(() =>
         getValidXaiToken(initialXaiProfile),
       );
-      liveSource = { ...liveSource, apiKey: access };
+      registerSourceCredential(liveSource.credentialId, access);
       liveSubAgentProvider.current = {
         ...liveSubAgentProvider.current,
         apiKey: access,
@@ -798,12 +802,13 @@ export async function runExec(config: Config): Promise<ExecResult> {
       // A 401 here usually means the shared OAuth file rotated under another
       // process; re-read it so the retry runs on the fresh token.
       refreshAuth: async () => {
+        const before = peekSourceCredentialSecret(liveSource.credentialId);
         const fresh = await ensureFreshInferenceSource(
           liveSource,
           config.providers,
         );
-        if (fresh.apiKey === liveSource.apiKey) return;
         liveSource = fresh;
+        if (peekSourceCredentialSecret(fresh.credentialId) === before) return;
         if (currentAgent !== null)
           setAgentSourceUnlessClosed(currentAgent, fresh);
       },
@@ -859,10 +864,10 @@ export async function runExec(config: Config): Promise<ExecResult> {
       inferenceDeps,
       getSources: () => {
         const sources = liveSources.length > 0 ? liveSources : [liveSource];
-        // Prefer liveSource credentials on the active id when OAuth was refreshed.
-        return sources.map((s) =>
-          s.id === liveSource.id ? { ...s, apiKey: liveSource.apiKey } : s,
-        );
+        // OAuth refreshes land in the shared credential cell (keyed by source
+        // id), so every source already resolves the live secret — no per-send
+        // credential copy is needed.
+        return sources;
       },
       getDefaultSource: () =>
         liveDefaultSource.length > 0 ? liveDefaultSource : liveSource.id,
@@ -1005,15 +1010,15 @@ export async function runExec(config: Config): Promise<ExecResult> {
       // Final OAuth refresh immediately before send (token may have aged during MCP).
       if (initialCodexProfile !== undefined) {
         const { access } = await getValidCodexToken(initialCodexProfile);
-        if (access !== liveSource.apiKey) {
-          liveSource = { ...liveSource, apiKey: access };
+        if (access !== peekSourceCredentialSecret(liveSource.credentialId)) {
+          registerSourceCredential(liveSource.credentialId, access);
           setAgentSourceUnlessClosed(activeAgent, liveSource);
         }
       }
       if (initialXaiProfile !== undefined) {
         const { access } = await getValidXaiToken(initialXaiProfile);
-        if (access !== liveSource.apiKey) {
-          liveSource = { ...liveSource, apiKey: access };
+        if (access !== peekSourceCredentialSecret(liveSource.credentialId)) {
+          registerSourceCredential(liveSource.credentialId, access);
           setAgentSourceUnlessClosed(activeAgent, liveSource);
         }
       }

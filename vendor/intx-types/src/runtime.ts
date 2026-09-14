@@ -1445,7 +1445,8 @@ export const InferenceEvent = type.or(
   {
     type: "'inference.usage'",
     seq: "number",
-    data: { usage: TokenUsage, source: LastCycleSource },
+    // Locally patched — see vendor/intx-types/PATCHES.md#types-ts-usage-stop-reason
+    data: { usage: TokenUsage, source: LastCycleSource, "stopReason?": "string" },
   },
   {
     type: "'inference.done'",
@@ -1710,7 +1711,8 @@ export type InferenceEvent =
   | {
       type: "inference.usage";
       seq: number;
-      data: { usage: TokenUsage; source: LastCycleSource };
+      // Locally patched — see vendor/intx-types/PATCHES.md#types-ts-usage-stop-reason
+      data: { usage: TokenUsage; source: LastCycleSource; stopReason?: string };
     }
   | {
       type: "inference.done";
@@ -2908,6 +2910,14 @@ export interface AuditStore {
    * and shutdown with all error records accumulated since the last flush.
    */
   commitErrors(records: ErrorRecord[], signal?: AbortSignal): Promise<void>;
+
+  /**
+   * Load error records for a session. Returns all records matching
+   * the given sessionId, ordered by seq.
+   *
+   * Locally patched — see vendor/intx-types/PATCHES.md#runtime-ts-audit-store-load-errors
+   */
+  loadErrors(sessionId: string, signal?: AbortSignal): Promise<ErrorRecord[]>;
 }
 
 // ---------------------------------------------------------------------------

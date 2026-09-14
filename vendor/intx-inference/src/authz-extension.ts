@@ -25,6 +25,7 @@ import type {
   ApprovalSnapshot,
   BeforeToolExtension,
   PendingOperation,
+  ToolCall,
   ToolDefinition,
 } from "@intx/types/runtime";
 import type { Effect } from "@intx/types/authz";
@@ -48,6 +49,8 @@ export type AuthzCallResult = {
   effect: Effect | null;
   matchingGrants: AuthzMatchedGrant[];
   resolvedBy: AuthzMatchedGrant | null;
+  // Locally patched — see vendor/intx-inference/PATCHES.md#authz-ts-deny-reason
+  reason?: string;
 };
 
 export type AuthzDecision = {
@@ -92,10 +95,13 @@ function formatBlockReason(
   effect: BlockEffect,
   resource: string,
   action: string,
+  detail?: string,
 ): string {
   switch (effect) {
     case "deny":
-      return `Denied by policy: ${resource}/${action}`;
+      return detail !== undefined && detail.length > 0
+        ? `Denied by policy: ${detail}`
+        : `Denied by policy: ${resource}/${action}`;
     case null:
       return `No matching grants for ${resource}/${action}`;
   }
@@ -118,13 +124,11 @@ function safeOnDecision(
 export function createAuthzExtension<Ctx = unknown>(
   opts: AuthzExtensionOptions<Ctx>,
 ): BeforeToolExtension {
-  // The reactor does not know workflow concepts; per-call context is the
-  // caller's domain. The third arg is plumbing here -- if the caller
-  // needs to attach context (workflow step, tenant id, request id), they
-  // do so by closure on the authorize function. The empty object is the
-  // safe default at this layer.
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- the inference layer has no domain knowledge to construct a Ctx; callers that need a populated context use closure capture on the authorize function (see @intx/workflow's AuthorizeContext)
-  const emptyContext = Object.freeze({}) as Ctx;
+  // Per-call context for the authorize callback: the call itself, frozen.
+  // Locally patched — see vendor/intx-inference/PATCHES.md#authz-ts-authorize-call-context
+  const frozenCallContext = (call: ToolCall): Ctx =>
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- shape-freeze hygiene; the call is the per-call identity the Ctx contract exists to carry
+    Object.freeze(call) as Ctx;
 
   // One-shot bypass tokens, keyed on ToolCall.id. A token authorizes a single
   // re-dispatch of an already-approved call to skip the `ask` gate it would
@@ -154,7 +158,7 @@ export function createAuthzExtension<Ctx = unknown>(
 
       let result: AuthzCallResult;
       try {
-        result = await opts.authorize(resource, action, emptyContext);
+        result = await opts.authorize(resource, action, frozenCallContext(call));
       } catch (cause) {
         const msg = cause instanceof Error ? cause.message : String(cause);
         const decision: AuthzDecision = {
@@ -179,7 +183,12 @@ export function createAuthzExtension<Ctx = unknown>(
       // are blocks.
       const blockReason =
         result.effect === "deny" || result.effect === null
-          ? formatBlockReason(result.effect, resource, action)
+          ? formatBlockReason(
+              result.effect,
+              resource,
+              action,
+              result.effect === "deny" ? result.reason : undefined,
+            )
           : undefined;
 
       const decision: AuthzDecision = {

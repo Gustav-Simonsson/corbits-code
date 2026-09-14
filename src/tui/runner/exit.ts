@@ -41,6 +41,10 @@ import { suppressProviderFailurePresentation } from "../provider/failure-attempt
 import { normalizeInferenceErrorForTerminal } from "../../inference-gateway-error.js";
 import { codexProfileFromProviderName } from "../../config/codex-providers.js";
 import { xaiProfileFromProviderName } from "../../config/xai-providers.js";
+import {
+  peekSourceCredentialSecret,
+  registerSourceCredential,
+} from "../../config/source-credentials.js";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
 import { cancelFeedbackCapture } from "../../telemetry/feedback.js";
 import {
@@ -403,10 +407,10 @@ export async function createRunLifecycle(
     const active = state.activeCodexSource;
     if (active === undefined) return;
     const { access } = await getValidCodexToken(active.profile);
-    const source: InferenceSource =
-      access === active.source.apiKey
-        ? active.source
-        : { ...active.source, apiKey: access };
+    const source: InferenceSource = active.source;
+    if (access !== peekSourceCredentialSecret(source.credentialId)) {
+      registerSourceCredential(source.credentialId, access);
+    }
     state.activeCodexSource = { profile: active.profile, source };
     state.liveSource = source;
     setAgentSourceUnlessClosed(liveAgent(state), source);
@@ -416,10 +420,10 @@ export async function createRunLifecycle(
     const active = state.activeXaiSource;
     if (active === undefined) return;
     const { access } = await getValidXaiToken(active.profile);
-    const source: InferenceSource =
-      access === active.source.apiKey
-        ? active.source
-        : { ...active.source, apiKey: access };
+    const source: InferenceSource = active.source;
+    if (access !== peekSourceCredentialSecret(source.credentialId)) {
+      registerSourceCredential(source.credentialId, access);
+    }
     state.activeXaiSource = { profile: active.profile, source };
     state.liveSource = source;
     setAgentSourceUnlessClosed(liveAgent(state), source);

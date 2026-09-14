@@ -17,6 +17,10 @@ import type { ContextTransform } from "@intx/types/runtime";
 import { type } from "arktype";
 
 import { ID_PREFIX } from "../../src/branding.js";
+import {
+  readSourceCredentialMaterial,
+  registerSourceCredential,
+} from "../../src/config/source-credentials.js";
 import { createPermissionGate } from "../../src/permission/gate.js";
 import { createOptimizedContextStore } from "../../src/session/optimized-context-store.js";
 import {
@@ -148,11 +152,13 @@ describe("integration — vendored feature carry", () => {
       });
 
       const storage = await createOptimizedContextStore(workdir);
+      registerSourceCredential(INTEGRATION_SOURCE.id, "integration-test-key");
       const agent = await createAgent(def, {
         sources: [INTEGRATION_SOURCE],
         defaultSource: INTEGRATION_SOURCE.id,
         storage,
         workdir,
+        readCurrentMaterial: readSourceCredentialMaterial,
         deps: harness.deps,
         audit: noopAuditStore(),
         authorize: permissiveAuthorize(),

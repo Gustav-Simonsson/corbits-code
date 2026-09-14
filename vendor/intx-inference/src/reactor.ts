@@ -46,7 +46,11 @@ import type { CredentialMaterialResolver } from "@intx/types";
 import { canonicalJsonStringify } from "@intx/types/wire-definition-hash";
 import { type } from "arktype";
 import { runInference } from "./harness";
-import type { Dependencies, InferenceHarnessOptions } from "./harness";
+import type {
+  Dependencies,
+  InferenceHarnessOptions,
+  PollBatchLivenessPredicate,
+} from "./harness";
 import { createCapabilities } from "./director";
 import { createGateManager } from "./gates";
 import { createCorrelationRegistry } from "./correlation";
@@ -72,6 +76,18 @@ const SUSPENDED = Symbol("suspended");
 function assertNever(x: never): never {
   throw new Error(`Unhandled resume case: ${JSON.stringify(x)}`);
 }
+
+/**
+ * `InferenceOptions` plus vendored-only fields the published `@intx/types`
+ * does not carry. `ephemeralTurns` are appended to the materialized prompt
+ * for one inference only and never written to durable history, so transient
+ * director guidance leaves the cached transcript prefix untouched.
+ *
+ * Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-ephemeral-turns
+ */
+export type ExtendedInferenceOptions = InferenceOptions & {
+  ephemeralTurns?: ConversationTurn[];
+};
 
 function buildHarnessOpts(
   turns: ConversationTurn[],
@@ -132,6 +148,14 @@ export type ReactorConfig = {
   beforeToolExtensions?: BeforeToolExtension[];
   toolResultTransforms?: ToolResultTransform[];
   contextTransforms?: ContextTransform[];
+  /**
+   * Liveness policy for the doom-loop guard's batch accounting. A direct
+   * value wins over the one riding `deps`; when neither is set every batch
+   * counts, same as before.
+   *
+   * Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-doom-loop-poll-exemption
+   */
+  isPollOnlyPendingBatch?: PollBatchLivenessPredicate;
   compactors?: Record<string, Compactor>;
   afterCheckpoint?: () => Promise<void>;
   onShutdown?: () => Promise<void>;
@@ -237,6 +261,18 @@ export function createReactor(config: ReactorConfig): Reactor {
   // is active, or `null` when the caller disabled it with `false`. Every
   // downstream comparison reads this binding, never the raw config value.
   const doomLoopThreshold = resolveDoomLoopThreshold(config.doomLoopThreshold);
+
+  // Liveness policy for the doom-loop guard's batch accounting, resolved
+  // direct-wins-over-deps at the construction edge: a value composed straight
+  // into the reactor config wins over one riding a shared `deps` object, and
+  // an absent policy counts every batch, same as before.
+  const isPollOnlyPendingBatch =
+    config.isPollOnlyPendingBatch ?? deps.isPollOnlyPendingBatch;
+
+  // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-doom-loop-warning-turn
+  // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-doom-loop-fail-run
+  const doomLoopCorrectiveNote = deps.doomLoopCorrectiveNote;
+  const doomLoopPolicy = deps.doomLoopPolicy ?? "shutdown";
 
   // Monotonic sequence counter, scoped to this session.
   let seq = 0;
@@ -398,6 +434,9 @@ export function createReactor(config: ReactorConfig): Reactor {
   // transform invocation (tool result, context, compactor). Flushed via
   // contextStore.writeManifest at cycle boundaries.
   let manifestBuffer: TransformRecord[] = [];
+
+  // Compacted turns stay off reactor memory until the cycle commit publishes.
+  let pendingCompactOutput: ConversationTurn[] | null = null;
 
   // Tracks how the current cycle should be summarized in the commit message.
   let cycleInferred = false;
@@ -561,73 +600,76 @@ export function createReactor(config: ReactorConfig): Reactor {
     // double-deliver early-returns rather than double-dispatching.
     const op = pending;
 
-    let dispatch: ResumeDispatch;
+    // A finally clears the in-flight marker on every exit — success included.
+    // Without it the success path leaves the id in the set forever, leaking
+    // one entry per correlated message for the life of the session.
+    //
+    // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-correlating-ids-leak
     try {
-      dispatch = resumePendingOperation(op, message);
-    } catch (cause) {
-      correlatingIds.delete(correlationId);
-      throw cause;
-    }
+      const dispatch = resumePendingOperation(op, message);
 
-    const gate = gates.findByCorrelationId(correlationId);
-    switch (dispatch.mode) {
-      case "redispatch": {
-        // Clear the gate WITHOUT enqueuing gate.cleared: the re-dispatched call
-        // is the resumption, so a gate.cleared-driven re-infer would double the
-        // continuation. The re-dispatch's own tool.done drives the re-infer.
-        if (gate !== undefined) {
-          gates.clearSilently(gate.gateId);
+      const gate = gates.findByCorrelationId(correlationId);
+      switch (dispatch.mode) {
+        case "redispatch": {
+          // Clear the gate WITHOUT enqueuing gate.cleared: the re-dispatched call
+          // is the resumption, so a gate.cleared-driven re-infer would double the
+          // continuation. The re-dispatch's own tool.done drives the re-infer.
+          if (gate !== undefined) {
+            gates.clearSilently(gate.gateId);
+            if (stateManager !== null) {
+              stateManager.setGatesSnapshot(gates.snapshot());
+            }
+          }
+          correlations.remove(correlationId);
           if (stateManager !== null) {
-            stateManager.setGatesSnapshot(gates.snapshot());
+            stateManager.removePendingOperation(correlationId);
           }
+          // The grant is already recorded (synchronously, in
+          // resumePendingOperation) with no await since; enqueue the re-dispatch
+          // so it runs on the loop with normal event ordering. The director seeds
+          // its outstanding-result count off this event before the call's
+          // tool.done arrives.
+          enqueue({ type: "resume.execute_tools", calls: dispatch.calls });
+          break;
         }
-        correlations.remove(correlationId);
-        if (stateManager !== null) {
-          stateManager.removePendingOperation(correlationId);
-        }
-        // The grant is already recorded (synchronously, in
-        // resumePendingOperation) with no await since; enqueue the re-dispatch
-        // so it runs on the loop with normal event ordering. The director seeds
-        // its outstanding-result count off this event before the call's
-        // tool.done arrives.
-        enqueue({ type: "resume.execute_tools", calls: dispatch.calls });
-        break;
-      }
-      case "error_result": {
-        // The approver denied the call. Clear the gate SILENTLY (like the
-        // approved redispatch) so it cannot also trip onGateCleared and enqueue
-        // a second continuation. The synthetic error result answers the parked
-        // call; the director appends it and re-infers once.
-        if (gate !== undefined) {
-          gates.clearSilently(gate.gateId);
+        case "error_result": {
+          // The approver denied the call. Clear the gate SILENTLY (like the
+          // approved redispatch) so it cannot also trip onGateCleared and enqueue
+          // a second continuation. The synthetic error result answers the parked
+          // call; the director appends it and re-infers once.
+          if (gate !== undefined) {
+            gates.clearSilently(gate.gateId);
+            if (stateManager !== null) {
+              stateManager.setGatesSnapshot(gates.snapshot());
+            }
+          }
+          correlations.remove(correlationId);
           if (stateManager !== null) {
-            stateManager.setGatesSnapshot(gates.snapshot());
+            stateManager.removePendingOperation(correlationId);
           }
+          enqueue({ type: "resume.tool_result", result: dispatch.result });
+          break;
         }
-        correlations.remove(correlationId);
-        if (stateManager !== null) {
-          stateManager.removePendingOperation(correlationId);
-        }
-        enqueue({ type: "resume.tool_result", result: dispatch.result });
-        break;
-      }
-      case "gate-cleared": {
-        // Async-tool resumption: clear the gate normally so the director
-        // re-infers, and append the correlated response to history so the model
-        // sees the content it was waiting on.
-        if (gate !== undefined) {
-          gates.clear(gate.gateId);
-        }
-        correlations.remove(correlationId);
-        if (stateManager !== null) {
-          stateManager.removePendingOperation(correlationId);
-          const msg = createInboundTurn(message);
-          if (msg !== null) {
-            stateManager.appendTurn(msg);
+        case "gate-cleared": {
+          // Async-tool resumption: clear the gate normally so the director
+          // re-infers, and append the correlated response to history so the model
+          // sees the content it was waiting on.
+          if (gate !== undefined) {
+            gates.clear(gate.gateId);
           }
+          correlations.remove(correlationId);
+          if (stateManager !== null) {
+            stateManager.removePendingOperation(correlationId);
+            const msg = createInboundTurn(message);
+            if (msg !== null) {
+              stateManager.appendTurn(msg);
+            }
+          }
+          break;
         }
-        break;
       }
+    } finally {
+      correlatingIds.delete(correlationId);
     }
 
     emit({
@@ -662,7 +704,7 @@ export function createReactor(config: ReactorConfig): Reactor {
   }
 
   async function executeInfer(
-    options: InferenceOptions | undefined,
+    options: ExtendedInferenceOptions | undefined,
   ): Promise<void> {
     if (stateManager === null) return;
 
@@ -693,6 +735,11 @@ export function createReactor(config: ReactorConfig): Reactor {
       prompt = result.output;
       manifestBuffer.push(result.record);
       await persistBlobs(result.blobs);
+    }
+
+    const ephemeral = options?.ephemeralTurns;
+    if (ephemeral !== undefined && ephemeral.length > 0) {
+      prompt = [...prompt, ...ephemeral];
     }
 
     // Tripwire: a malformed tool sequence is invalid in a coherent tool
@@ -946,7 +993,18 @@ export function createReactor(config: ReactorConfig): Reactor {
     // when it reaches the threshold. A `null` threshold means detection is
     // disabled, so the accounting is skipped entirely.
     const ranCalls = calls.filter((_call, i) => outcomes[i] !== SUSPENDED);
-    if (doomLoopThreshold !== null && ranCalls.length > 0) {
+    // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-doom-loop-poll-exemption
+    // A still-pending poll batch is liveness, not a loop: reset the streak
+    // (a skip would preserve a stale count and false-positive later) while
+    // mixed and terminal batches count normally.
+    const isLivePollBatch =
+      doomLoopThreshold !== null &&
+      ranCalls.length > 0 &&
+      isPollOnlyPendingBatch?.(ranCalls, results) === true;
+    if (isLivePollBatch) {
+      lastToolBatchSignature = null;
+      toolBatchRepeatCount = 0;
+    } else if (doomLoopThreshold !== null && ranCalls.length > 0) {
       const signature = toolBatchSignature(ranCalls);
       if (signature === lastToolBatchSignature) {
         toolBatchRepeatCount += 1;
@@ -957,14 +1015,54 @@ export function createReactor(config: ReactorConfig): Reactor {
       lastToolBatchNames = ranCalls.map((call) => call.name);
     }
 
-    cycleToolCallsExecuted += results.length;
-
-    if (addToHistory && stateManager !== null && results.length > 0) {
-      stateManager.appendTurn(createToolResultTurn(results));
+    // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-doom-loop-warning-turn
+    // One warning turn before the fatal trip: a repeat at count threshold-1
+    // gets a corrective note appended so the model can see it is looping.
+    // `>= 2` keeps threshold 2 from annotating a batch's first execution.
+    let annotatedResults = results;
+    if (
+      doomLoopThreshold !== null &&
+      toolBatchRepeatCount >= 2 &&
+      toolBatchRepeatCount === doomLoopThreshold - 1 &&
+      doomLoopCorrectiveNote !== undefined
+    ) {
+      const note = doomLoopCorrectiveNote({
+        calls: ranCalls,
+        repeatCount: toolBatchRepeatCount,
+        threshold: doomLoopThreshold,
+      });
+      if (note !== undefined && note.length > 0) {
+        annotatedResults = results.map((result) => ({
+          ...result,
+          content:
+            typeof result.content === "string"
+              ? `${result.content}\n\n${note}`
+              : { ...result.content, doom_loop_warning: note },
+        }));
+      }
     }
 
-    for (const result of results) {
+    cycleToolCallsExecuted += annotatedResults.length;
+
+    if (addToHistory && stateManager !== null && annotatedResults.length > 0) {
+      stateManager.appendTurn(createToolResultTurn(annotatedResults));
+    }
+
+    for (const result of annotatedResults) {
       enqueue({ type: "tool.done", result });
+    }
+
+    // Checkpoint the completed tool cycle (the assistant tool_call turn plus
+    // its results) so an interrupt that rebuilds the agent from the store
+    // reloads the full exchange. Otherwise context commits only at cycle
+    // terminals and an uncommitted tool turn vanishes on rebuild. Guarded on
+    // addToHistory: only then does history end with the tool_result turn, so
+    // the persisted prefix is well-formed rather than an assistant turn with
+    // unanswered tool calls.
+    //
+    // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-checkpoint-after-tool-cycle
+    if (addToHistory) {
+      await commitCycle();
     }
   }
 
@@ -986,9 +1084,10 @@ export function createReactor(config: ReactorConfig): Reactor {
     };
     const result = await compactor.apply(stateManager.getTurns(), ctx);
 
-    stateManager.replaceTurns(result.output);
-    await contextStore.writeTurns(result.output);
+    // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-compact-publish-then-memory
     await persistBlobs(result.blobs);
+    await contextStore.writeTurns(result.output);
+    pendingCompactOutput = result.output;
     manifestBuffer.push(result.record);
     cycleCompactorName = compactor.name;
 
@@ -1049,24 +1148,48 @@ export function createReactor(config: ReactorConfig): Reactor {
     const message = buildCycleMessage();
 
     try {
-      await contextStore.writeTurns(stateManager.getTurns());
+      // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-skip-unchanged-history
+      const currentRevision = stateManager.getTurnsRevision();
+      // A staged compact already wrote the new generation. Do not writeTurns
+      // live memory over that staging — memory still holds the old turns.
+      if (pendingCompactOutput === null && currentRevision !== lastWrittenTurnsRevision) {
+        await contextStore.writeTurns(stateManager.getTurns());
+        lastWrittenTurnsRevision = currentRevision;
+      }
       await contextStore.writeManifest(manifestBuffer);
       await writeMetadata();
       const commit = await contextStore.commit({ message });
       lastCheckpointHash = commit.hash;
+      if (pendingCompactOutput !== null) {
+        stateManager.replaceTurns(pendingCompactOutput);
+        lastWrittenTurnsRevision = stateManager.getTurnsRevision();
+        pendingCompactOutput = null;
+      }
     } catch (cause) {
       logger.error`Cycle commit failed: ${cause}`;
       emitError(
         `Cycle commit failed: ${cause instanceof Error ? cause.message : String(cause)}`,
         false,
       );
+      // A staged compact must not leak into a later infer/tools cycle: skip-write
+      // plus replaceTurns would publish stale compact output over live memory.
+      pendingCompactOutput = null;
       resetCycleAccumulators();
       return;
     }
 
     resetCycleAccumulators();
 
-    if (afterCheckpoint !== undefined) {
+    // Fire only for commits the director actually asked to checkpoint.
+    // A hasWork-only commit (e.g. the auto-commit after execute_tools with
+    // addToHistory) is internal durability plumbing, not a checkpoint the
+    // caller requested — without this guard, a director that checkpoints
+    // in a later decide() call (as opposed to pairing checkpoint with the
+    // action that produced the work) gets afterCheckpoint invoked twice
+    // for what is, from the director's perspective, a single checkpoint.
+    //
+    // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-after-checkpoint-director-only
+    if (afterCheckpoint !== undefined && hasOverride) {
       try {
         await afterCheckpoint();
       } catch (cause) {
@@ -1515,6 +1638,22 @@ export function createReactor(config: ReactorConfig): Reactor {
             `${String(doomLoopThreshold)} times consecutively`;
           emitError(message, true);
           closeMessageRun("failed", { message, kind: "doom_loop" });
+          // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-doom-loop-fail-run
+          if (doomLoopPolicy === "fail-run") {
+            // The run is dead but the reactor is not: drop the doomed batch's
+            // queued cycle events so the director never sees a tool.done that
+            // would re-infer, then return to idle. Non-cycle events already
+            // queued (inbound mail, gate clears) still process normally, and
+            // the next message.received opens a fresh run bracket.
+            for (let i = queue.length - 1; i >= 0; i--) {
+              const queued = queue[i];
+              if (queued !== undefined && CYCLE_EVENT_TYPES.has(queued.type)) {
+                queue.splice(i, 1);
+              }
+            }
+            pendingContinuations = 0;
+            continue;
+          }
           done = true;
           await initiateShutdown();
           break;
@@ -1537,6 +1676,14 @@ export function createReactor(config: ReactorConfig): Reactor {
   }
 
   let lastCheckpointHash: string | undefined;
+
+  // Turns revision most recently serialized to the context store. A checkpoint
+  // whose history has not changed since this revision skips writeTurns rather
+  // than re-serializing the entire (potentially large) conversation and its
+  // historical tool-output blobs.
+  //
+  // Locally patched — see vendor/intx-inference/PATCHES.md#reactor-ts-last-written-turns-revision
+  let lastWrittenTurnsRevision = 0;
 
   async function initiateShutdown(): Promise<void> {
     if (shutdownStarted) return;

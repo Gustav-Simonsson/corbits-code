@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { KEYLESS_API_KEY } from "../config/index.js";
+import { peekSourceCredentialSecret } from "../config/source-credentials.js";
 import { OPENCODE_GO_BASE_URL } from "../../packages/opencode-go/src/index.js";
 import { buildSubAgentPrimarySource } from "./run.js";
 
@@ -19,9 +19,10 @@ describe("buildSubAgentPrimarySource", () => {
       id: "ollama/default",
       provider: "openai-compatible",
       baseURL: "http://localhost:11434/v1",
-      apiKey: KEYLESS_API_KEY,
+      credentialId: "ollama/default",
       model: "qwen3",
     });
+    expect(peekSourceCredentialSecret("ollama/default")).toBe("keyless");
   });
 
   test.each([
@@ -43,9 +44,10 @@ describe("buildSubAgentPrimarySource", () => {
       expect(source).toMatchObject({
         id: providerName,
         provider: "openai-responses",
-        apiKey: "sk-go",
+        credentialId: providerName,
         model: "gpt-5.6-luna",
       });
+      expect(peekSourceCredentialSecret(providerName)).toBe("sk-go");
       expect(typeof sessionId).toBe("string");
       expect(sessionId).not.toHaveLength(0);
       expect(source?.defaults?.providerOptions?.openaiSessionId).toBe(

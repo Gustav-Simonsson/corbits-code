@@ -3,12 +3,13 @@ import * as codexSession from "../auth/codex/session.js";
 import * as xaiSession from "../auth/xai/session.js";
 
 import type { InferenceSource } from "@intx/types/runtime";
+import { peekSourceCredentialSecret } from "../config/source-credentials.js";
 
-const baseSource = (id: string, apiKey = "stale"): InferenceSource => ({
+const baseSource = (id: string): InferenceSource => ({
   id,
   provider: "openai",
   baseURL: "https://api.openai.com/v1",
-  apiKey,
+  credentialId: id,
   model: "gpt-4o",
 });
 
@@ -18,15 +19,18 @@ describe("refresh-inference-source", () => {
     spyOn(xaiSession, "getValidXaiToken").mockRestore();
   });
 
-  test("ensureFreshInferenceSource replaces stale Codex apiKey after refresh", async () => {
+  test("ensureFreshInferenceSource registers the fresh Codex token in the credential cell", async () => {
     spyOn(codexSession, "getValidCodexToken").mockResolvedValue({
       access: "fresh-codex-token",
     });
     const { ensureFreshInferenceSource } =
       await import("./refresh-inference-source.js");
-    const source = baseSource("codex/default", "stale");
+    const source = baseSource("codex/default");
     const out = await ensureFreshInferenceSource(source, []);
-    expect(out.apiKey).toBe("fresh-codex-token");
+    expect(out).toBe(source);
+    expect(peekSourceCredentialSecret(source.credentialId)).toBe(
+      "fresh-codex-token",
+    );
   });
 
   test("refreshInferenceSourceBundle refreshes each leg", async () => {
@@ -44,7 +48,7 @@ describe("refresh-inference-source", () => {
   test("ensureFreshInferenceSource leaves non-OAuth sources unchanged", async () => {
     const { ensureFreshInferenceSource } =
       await import("./refresh-inference-source.js");
-    const source = baseSource("custom-gateway", "key-abc");
+    const source = baseSource("custom-gateway");
     const out = await ensureFreshInferenceSource(source, [
       {
         name: "custom-gateway",
@@ -53,6 +57,6 @@ describe("refresh-inference-source", () => {
         apiKey: "key-abc",
       },
     ]);
-    expect(out.apiKey).toBe("key-abc");
+    expect(out).toBe(source);
   });
 });

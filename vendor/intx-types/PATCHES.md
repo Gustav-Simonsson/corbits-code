@@ -8,6 +8,14 @@ which lines are ours — run `bin/vendor-patch-diff` to produce it. The
 `Locally patched — see …#<anchor>` comments and the entries below are
 signposts that point into that diff; they do not define its extent.
 
+### 2026-09-14 re-sync (upstream `1ad0104`)
+
+Both entries re-carried; the `stopReason` spread sites in the Anthropic
+and Gemini adapters were rewritten to match upstream's new object-literal
+usage emission. Upstream deleted `packages/types/src/sidecar-placement.ts`;
+no entry lived there. Unaffected by upstream's `credentialId` auth-model
+rewrite.
+
 ## runtime-ts-audit-store-load-errors
 
 `runtime.ts` — `AuditStore` grows `loadErrors(sessionId, signal?)` so a

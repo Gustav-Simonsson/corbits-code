@@ -24,6 +24,7 @@ import {
   buildArchiveSummaryExcerpt,
   type SummaryExcerptArchive,
 } from "./summary-excerpt.js";
+import { readSourceCredentialMaterial } from "../config/source-credentials.js";
 
 const logger = getLogger([LOG_NAMESPACE_ROOT, "session", "summarizer"]);
 
@@ -200,6 +201,9 @@ function defaultComplete(deps: Dependencies, timeoutMs: number): CompletionFn {
       signal,
       nextSeq: () => seq++,
       deps,
+      // The source names a credentialId; resolve its secret from the
+      // first-party cell (see ../config/source-credentials.ts).
+      readMaterial: readSourceCredentialMaterial,
       inferenceOptions: {
         totalTimeoutMs: timeoutMs,
         retryPolicy: NO_HARNESS_RETRY,
