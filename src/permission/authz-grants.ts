@@ -97,9 +97,12 @@ export interface EvaluateApprovalsInput {
   workspace: GrantWorkspace;
 }
 
-// Single grant-evaluation owner: both the queued-request path
-// (isRequestCoveredByGrant) and the shell per-segment path decide coverage
-// through this function, so the two never drift. Fail-closed throughout:
+// Grant-evaluation owner for the live decide() path: the shell per-segment
+// checks and the path-arg check inside decide() resolve coverage through this
+// function. The queued-request reconciliation path (isRequestCoveredByApprovals
+// in gate.ts) matches inline against the same scope helper and pattern
+// matcher instead of calling here, so keep the two in sync when changing
+// matching semantics. Fail-closed throughout:
 // unknown tools, unknown runners, and empty grant lists all refuse.
 export async function approvalCoversSubject(
   input: EvaluateApprovalsInput,
