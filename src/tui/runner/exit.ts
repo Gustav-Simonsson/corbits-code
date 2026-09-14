@@ -359,24 +359,19 @@ export async function createRunLifecycle(
   };
   state.reloadIfIdle = reloadIfIdle;
 
-  // tool_search (and contextual triggers, e.g. the lsp hint) promote tools into
-  // the advertised set. Advertising takes effect on the next infer; a reload is
-  // scheduled so a newly connected MCP tool also becomes dispatchable after a
-  // rebuild (built-in tools are already dispatchable, so promoting them alone
-  // needs no reload, but the reload is a cheap no-op in that case).
+  // tool_search (and contextual triggers, e.g. the lsp hint) promote tools by
+  // opening the call gate: the model invokes the match from the result card's
+  // schema on the very next turn. The schema itself joins the wire set at the
+  // next cache-safe boundary (compaction fold), never mid-thread — the
+  // serialized tools array heads the provider's cached prefix (CL-7868). No
+  // reload is scheduled: dispatchability comes from the live call gate, not
+  // the rebuilt agent.
   const promoteTools = (names: string[]): void => {
     if (!services.activatedToolNames.activate(names)) return;
-    services.directorHolder.instance?.updateToolDefinitions(
-      services.computeAdvertised(
-        services.toolset.dynamicRunner.currentDefinitions(),
-      ),
-    );
     // Activation is model-visible contract — persist it now so a crash or
     // restart before the next turn boundary does not strand the transcript's
     // "these tools are available" record.
     void persistRunSnapshot("running");
-    state.pendingReload = true;
-    reloadIfIdle();
   };
   services.toolset.setToolPromoter(promoteTools);
 
@@ -400,7 +395,7 @@ export async function createRunLifecycle(
   // as a CodexAuthError naming the profile and rejects the send.
   //
   // The source is pushed on every send, not only when the token changed: an
-  // agent rebuild (tool promotion, interrupt, /clear) reseeds the source from
+  // agent rebuild (interrupt, /clear) reseeds the source from
   // the original login-time token, so unconditionally re-pushing the live token
   // is what keeps the rebuilt agent from sending a stale credential.
   const refreshCodexBeforeSend = async (): Promise<void> => {

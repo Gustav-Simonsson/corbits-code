@@ -1,10 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { createChatDirector, askOperatorDefinition } from "./agent/director.js";
 import { createAgentToolset } from "./agent/tools.js";
-import {
-  advertisedTools,
-  createActivatedToolTracker,
-} from "./agent/tool-search.js";
 import { createAdvertisedToolset } from "./session/assemble-runtime.js";
 import { createPermissionGate } from "./permission/gate.js";
 import {
@@ -1146,12 +1142,13 @@ describe("updateToolDefinitions rewrites infer tools", () => {
     expect(JSON.stringify(after)).toBe(JSON.stringify(before));
   });
 
-  // CL-7868: the provider cache is a prefix cache keyed on the tools array,
-  // so a tool_search turn that promotes a genuinely new tool must not reshape
-  // the wire set mid-session. The call gate opens (the model invokes the tool
-  // from the search result's schema) while the advertised array holds steady
-  // until the next cache-safe boundary.
-  test("a tool_search turn promoting a genuinely new tool leaves the wire byte-identical", async () => {
+  // CL-7868 (direction A): the provider cache is a prefix cache keyed on the
+  // tools array, so a tool_search turn that promotes a genuinely new tool must
+  // not reshape the wire set mid-session. The call gate opens (the model
+  // invokes the tool from the search result's schema) while the advertised
+  // array holds steady; the growth event lands at the next cache-safe
+  // boundary (compaction fold), appended after the untouched fixed prefix.
+  test("a tool_search turn promoting a genuinely new tool leaves the wire byte-identical until the fold commits it", async () => {
     const linearTool = {
       name: "mcp__linear__list_issues",
       description: "list issues",
@@ -1188,18 +1185,46 @@ describe("updateToolDefinitions rewrites infer tools", () => {
     );
 
     // tool_search matched a genuinely new tool: the runner opens the call
-    // gate and refreshes the director exactly as it does today.
-    advertised.activated.activate(["mcp__linear__list_issues"]);
+    // gate (activation); the per-turn wire recompute deliberately ignores it.
+    expect(advertised.activated.activate(["mcp__linear__list_issues"])).toBe(
+      true,
+    );
     director.updateToolDefinitions(
       advertised.computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
     );
 
+    // Mid-session the wire is byte-identical — the hot prefix never grows —
+    // while the gate is open so the model can invoke the match from the
+    // result card's schema.
     const after = await firstInferTools(
       director,
       makeMessageReceivedEvent("continue"),
     );
     expect(JSON.stringify(after)).toBe(JSON.stringify(before));
     expect(advertised.isAdvertised("mcp__linear__list_issues")).toBe(true);
+
+    // Cache-safe boundary (compaction fold): the pending promotion commits and
+    // the next turn declares it after the untouched fixed prefix.
+    expect(advertised.flushPromotions()).toBe(true);
+    director.updateToolDefinitions(
+      advertised.computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
+    );
+    const folded = await firstInferTools(
+      director,
+      makeMessageReceivedEvent("after fold"),
+    );
+    const foldedNames = (folded as { name: string }[]).map((t) => t.name);
+    expect(foldedNames).toContain("mcp__linear__list_issues");
+    const beforeNames = (before as { name: string }[])
+      .map((t) => t.name)
+      .filter((n) => n !== "submit_output");
+    const foldedPrefix = foldedNames.filter(
+      (n) => n !== "submit_output" && n !== "mcp__linear__list_issues",
+    );
+    expect(foldedPrefix).toEqual(beforeNames);
+    expect(foldedNames.indexOf("mcp__linear__list_issues")).toBe(
+      beforeNames.length,
+    );
 
     await toolset.dispose();
   });
@@ -1224,12 +1249,13 @@ describe("updateToolDefinitions rewrites infer tools", () => {
     expect(inferToolNames(inferAction)).toContain("submit_output");
   });
 
-  // End-to-end: tool_search matches an MCP tool, the runner's promote wiring
-  // (mirrored here via createActivatedToolTracker + updateToolDefinitions) grows
-  // the wire set once with the tool's full definition, and it then holds steady.
-  // On a strict provider, a model can only call a tool
-  // that was actually declared on the wire, so promotion must land here.
-  test("a tool_search match is on the wire on the next turn, then the array holds stable", async () => {
+  // End-to-end: tool_search matches an MCP tool; the runner's gate-only promote
+  // wiring (mirrored here via createAdvertisedToolset + updateToolDefinitions)
+  // keeps it off the wire the next turn — the hot prefix stays byte-identical
+  // while the gate lets the model call it from the result card. The fold
+  // commits the pending promotion with the tool's full definition, appended
+  // after the untouched fixed prefix, and the array then holds steady.
+  test("a tool_search match stays off the wire until the fold, then holds stable", async () => {
     const linearTool = {
       name: "mcp__linear__list_issues",
       description: "list issues",
@@ -1249,10 +1275,14 @@ describe("updateToolDefinitions rewrites infer tools", () => {
       { kind: "string", definition: linearTool, handler: async () => "ok" },
     ]);
 
-    const activated = createActivatedToolTracker();
+    const advertised = createAdvertisedToolset({
+      sessionMode: "orchestrator",
+      toolAvailability: { languageServerAvailable: false },
+      getProvider: () => ({ providerName: "openai", model: "gpt-5" }),
+    });
     const computeAdvertised = (
       all: ReturnType<typeof toolset.dynamicRunner.currentDefinitions>,
-    ) => advertisedTools(all, activated.list());
+    ) => advertised.computeAdvertised(all);
     const director = createChatDirector(
       "base-prompt",
       computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
@@ -1268,16 +1298,33 @@ describe("updateToolDefinitions rewrites infer tools", () => {
     expect(beforeNames).not.toContain("mcp__linear__list_issues");
     const beforeJson = JSON.stringify(before);
 
-    // Simulate the runner's promoteTools: tool_search matched this tool, so it
-    // is activated and the director's tool set is updated for the next infer.
-    activated.activate(["mcp__linear__list_issues"]);
+    // Simulate the runner's gate-only promoter plus its boundary wire push:
+    // the gate opens but the wire recompute is byte-identical until the fold.
+    advertised.activated.activate(["mcp__linear__list_issues"]);
+    director.updateToolDefinitions(
+      computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
+    );
+
+    const gated = await firstInferTools(
+      director,
+      makeMessageReceivedEvent("continue"),
+    );
+    expect((gated as { name: string }[]).map((t) => t.name)).not.toContain(
+      "mcp__linear__list_issues",
+    );
+    expect(JSON.stringify(gated)).toBe(beforeJson);
+
+    // Simulate the compaction fold: commit the pending promotion, push the
+    // refreshed set, and the tool is declared — appended after the fixed
+    // built-in prefix, which survives untouched ahead of it.
+    advertised.flushPromotions();
     director.updateToolDefinitions(
       computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
     );
 
     const after = await firstInferTools(
       director,
-      makeMessageReceivedEvent("continue"),
+      makeMessageReceivedEvent("after fold"),
     );
     const afterTools = after as { name: string }[];
     const afterNames = afterTools.map((t) => t.name);

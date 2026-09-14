@@ -47,15 +47,46 @@ describe("createAdvertisedToolset", () => {
     expect(names).not.toContain("mystery_tool");
   });
 
-  test("appends activated tools after the prefix, in activation order", () => {
-    const { activated, computeAdvertised } = createAdvertisedToolset(wiring());
+  // CL-7868 (direction A): mid-session activation opens the call gate but must
+  // not reshape the wire set, so computeAdvertised ignores it until a
+  // cache-safe boundary commits it via flushPromotions.
+  test("activation alone leaves the wire set untouched until flushPromotions commits it", () => {
+    const { activated, computeAdvertised, flushPromotions } =
+      createAdvertisedToolset(wiring());
+    const registry = [def("read_file"), def("mystery_tool")];
+    const wireBefore = JSON.stringify(computeAdvertised(registry));
     expect(activated.activate(["mystery_tool"])).toBe(true);
-    const names = computeAdvertised([
-      def("read_file"),
-      def("mystery_tool"),
-    ]).map((d) => d.name);
+    // Byte-identical adapter input across turns differing only in activation:
+    // the provider's serialized tools payload cannot drift mid-session.
+    expect(JSON.stringify(computeAdvertised(registry))).toBe(wireBefore);
+    expect(flushPromotions()).toBe(true);
+    const names = computeAdvertised(registry).map((d) => d.name);
     expect(names[names.length - 1]).toBe("mystery_tool");
     expect(names.slice(0, -1)).not.toContain("mystery_tool");
+    // A second flush with nothing pending is a no-op so the array holds steady.
+    expect(flushPromotions()).toBe(false);
+  });
+
+  test("flushPromotions commits pending activations in order and resume re-arms them", () => {
+    const { activated, computeAdvertised, flushPromotions } =
+      createAdvertisedToolset(wiring());
+    expect(flushPromotions()).toBe(false);
+    expect(activated.activate(["tool_b", "tool_a"])).toBe(true);
+    expect(flushPromotions()).toBe(true);
+    const names = computeAdvertised([
+      def("read_file"),
+      def("tool_a"),
+      def("tool_b"),
+    ]).map((d) => d.name);
+    expect(names.slice(-2)).toEqual(["tool_b", "tool_a"]);
+    // Rotation clears the gate and the wire snapshot; session start replays the
+    // restored names (activate) at a cache-safe boundary (flush), re-arming
+    // both while the pending edge stays empty afterwards.
+    activated.clear();
+    expect(flushPromotions()).toBe(false);
+    expect(activated.activate(["tool_a", "tool_b"])).toBe(true);
+    expect(flushPromotions()).toBe(true);
+    expect(flushPromotions()).toBe(false);
   });
 
   test("honors an explicit built-in prefix", () => {

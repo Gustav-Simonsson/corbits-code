@@ -344,12 +344,25 @@ export interface AdvertisedToolset {
   // so a registered-but-unadvertised call surfaces as a tool_search error
   // instead of silently dispatching.
   isAdvertised: (name: string) => boolean;
+  // Commit activated-but-unadvertised names onto the wire set, in activation
+  // order. Returns whether the wire set actually grew. Call only at a
+  // cache-safe boundary (session start/resume, rotation, compaction): the
+  // serialized tools array heads the provider's cached prefix, so growing it
+  // mid-thread re-prefills the whole request. See CL-7868.
+  flushPromotions: () => boolean;
 }
 
 /**
  * Fixed built-in prefix plus session-activated tools, family-gated for the
  * wire. The provider identity is read per call so a live model switch
  * re-gates without rebuilding the agent.
+ *
+ * Activation and advertisement are split on purpose. Activating a name opens
+ * the call gate at once (isAdvertised flips, so the model can invoke the tool
+ * from the tool_search result card's schema), but the newly promoted schema
+ * stays off the wire array until flushPromotions commits it at the next
+ * cache-safe boundary. Mid-session promotion therefore never reshapes the
+ * provider's cached prefix.
  *
  * `pinnedTools` (local settings) merge into the prefix — advertised from the
  * first turn and exempt from activation state, so a resume needs no
@@ -370,6 +383,24 @@ export function createAdvertisedToolset(args: {
     ...(args.pinnedTools ?? []).filter((name) => !builtIn.includes(name)),
   ];
   const activated = createActivatedToolTracker();
+  // Wire-committed activations. activate() opens the call gate (see
+  // isAdvertised) at once, but names join this snapshot only via
+  // flushPromotions at a cache-safe boundary — the serialized tools array
+  // heads the provider's cached prefix, so growing it mid-thread re-prefills
+  // the whole request. clear() resets both: a rotated session restarts at the
+  // prefix (see newSession).
+  let wireActivated: string[] = [];
+  const wireActivatedSet = new Set<string>();
+  const advertised: ActivatedToolTracker = {
+    activate: (names) => activated.activate(names),
+    has: (name) => activated.has(name),
+    list: () => activated.list(),
+    clear: () => {
+      activated.clear();
+      wireActivated = [];
+      wireActivatedSet.clear();
+    },
+  };
   // Advertise then family-gate wire schemas (kimi gets a non-recursive present).
   // The primary session is always the orchestrator (SessionMode is the single
   // literal "orchestrator"), so orchestrator: true is passed directly instead
@@ -396,8 +427,11 @@ export function createAdvertisedToolset(args: {
       denied.length === 0
         ? prefix
         : prefix.filter((name) => !denied.includes(name));
+    // The wire carries the fixed prefix plus wire-committed activations only:
+    // fresh activations open the call gate (isAdvertised) at once but stay off
+    // this array until flushPromotions commits them at a cache-safe boundary.
     return normalizeToolDefinitionsForProvider(
-      advertisedTools(all, activated.list(), gatedPrefix),
+      advertisedTools(all, wireActivated, gatedPrefix),
       {
         ...provider,
       },
@@ -407,7 +441,22 @@ export function createAdvertisedToolset(args: {
     if (deniedFor(args.getProvider()).includes(name)) return false;
     return prefix.includes(name) || activated.has(name);
   };
-  return { activated, computeAdvertised, isAdvertised };
+  const flushPromotions = (): boolean => {
+    let grew = false;
+    for (const name of activated.list()) {
+      if (wireActivatedSet.has(name)) continue;
+      wireActivatedSet.add(name);
+      wireActivated.push(name);
+      grew = true;
+    }
+    return grew;
+  };
+  return {
+    activated: advertised,
+    computeAdvertised,
+    isAdvertised,
+    flushPromotions,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -421,8 +470,6 @@ export interface ChatAgentWiring {
   getDynamicRunner: () => AgentToolset["dynamicRunner"];
   computeAdvertised: (all: readonly ToolDefinition[]) => ToolDefinition[];
   activateTools: (names: readonly string[]) => boolean;
-  /** Fires after the standard activate + director-update handling. */
-  onToolsPromoted?: () => void;
   inactivityTimeoutMs: number;
   totalTimeoutMs?: number | undefined;
   onTasksChange: (tasks: Task[]) => void;
@@ -483,13 +530,12 @@ export function assembleChatAgent(wiring: ChatAgentWiring): AssembledChatAgent {
         wiring.computeAdvertised([...agentCtx.toolDefinitions]),
         {
           onActivateTools: (names) => {
-            if (!wiring.activateTools(names)) return;
-            directorHolder.instance?.updateToolDefinitions(
-              wiring.computeAdvertised(
-                wiring.getDynamicRunner().currentDefinitions(),
-              ),
-            );
-            wiring.onToolsPromoted?.();
+            // Gate-only: activation lets the model invoke the tool from the
+            // tool_search result card's schema at once. The schema itself
+            // stays off the wire array until flushPromotions commits it at a
+            // cache-safe boundary, so mid-session promotion never reshapes
+            // the provider's cached prefix (CL-7868).
+            wiring.activateTools(names);
           },
           inactivityTimeoutMs: wiring.inactivityTimeoutMs,
           totalTimeoutMs: wiring.totalTimeoutMs,

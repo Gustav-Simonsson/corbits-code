@@ -48,7 +48,6 @@ import type {
   ContextStore,
   InferenceSource,
   InboundMessage,
-  ToolDefinition,
 } from "@intx/types/runtime";
 import { OPERATOR_ORIGINATED_FLAG } from "../agent/message-provenance.js";
 import { loadAgentProfiles } from "../agent/profiles.js";
@@ -403,14 +402,14 @@ export function createExecToolCallGate(
 export function createExecToolPromoter(args: {
   activate: (names: readonly string[]) => boolean;
   isAllowed: (name: string) => boolean;
-  currentDefinitions: () => readonly ToolDefinition[];
-  computeAdvertised: (all: readonly ToolDefinition[]) => ToolDefinition[];
-  updateDirectorTools: (defs: ToolDefinition[]) => void;
   persist?: () => void;
 }): (names: string[]) => void {
   return (names) => {
+    // Gate-only, like the TUI promoteTools: activation lets the model invoke
+    // the match from the result card's schema at once, while the schema joins
+    // the wire set at the next cache-safe boundary (compaction fold) so the
+    // provider's cached prefix never grows mid-thread (CL-7868).
     if (!args.activate(names.filter((name) => args.isAllowed(name)))) return;
-    args.updateDirectorTools(args.computeAdvertised(args.currentDefinitions()));
     args.persist?.();
   };
 }
@@ -818,6 +817,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
       activated: activatedToolNames,
       computeAdvertised,
       isAdvertised,
+      flushPromotions,
     } = createAdvertisedToolset({
       sessionMode,
       toolAvailability,
@@ -879,6 +879,17 @@ export async function runExec(config: Config): Promise<ExecResult> {
             return tools.length > 0 ? { activatedTools: tools } : undefined;
           },
           telemetry: liveTelemetry,
+          onFolded: () => {
+            // A fold restarts the provider's cached prefix anyway: commit
+            // mid-session promotions so the next turn declares them.
+            if (flushPromotions()) {
+              directorHolder.instance?.updateToolDefinitions(
+                computeAdvertised(
+                  agentToolset.dynamicRunner.currentDefinitions(),
+                ),
+              );
+            }
+          },
         }),
       onBuilt: (agent, storage) => {
         currentAgent = agent;
@@ -895,11 +906,6 @@ export async function runExec(config: Config): Promise<ExecResult> {
       createExecToolPromoter({
         activate: (names) => activatedToolNames.activate(names),
         isAllowed: (name) => isExecOverlayToolAllowed(overlay, name),
-        currentDefinitions: () =>
-          agentToolset.dynamicRunner.currentDefinitions(),
-        computeAdvertised,
-        updateDirectorTools: (defs) =>
-          directorHolder.instance?.updateToolDefinitions(defs),
         persist: () => {
           void persist("running");
         },

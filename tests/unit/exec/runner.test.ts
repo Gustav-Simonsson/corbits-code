@@ -773,7 +773,7 @@ describe("exec tool call gate and promoter", () => {
       stringTool(shellDefinition.name, "sh", "run a shell command"),
       stringTool(updatePlanDefinition.name, "planned", "update the plan"),
     ]);
-    const { activated, isAdvertised, computeAdvertised } =
+    const { activated, isAdvertised, computeAdvertised, flushPromotions } =
       createAdvertisedToolset({
         sessionMode: "orchestrator",
         toolAvailability: { languageServerAvailable: false },
@@ -781,15 +781,9 @@ describe("exec tool call gate and promoter", () => {
       });
     runner.setCallGate(createExecToolCallGate(isAdvertised, { isCodex }));
     let persistCount = 0;
-    const directorNames: string[][] = [];
     const promote = createExecToolPromoter({
       activate: (names) => activated.activate(names),
       isAllowed: () => true,
-      currentDefinitions: () => runner.currentDefinitions(),
-      computeAdvertised,
-      updateDirectorTools: (defs) => {
-        directorNames.push(defs.map((d) => d.name));
-      },
       persist: () => {
         persistCount += 1;
       },
@@ -801,7 +795,13 @@ describe("exec tool call gate and promoter", () => {
         runner.currentDefinitions().find((d) => d.name === name),
       promote,
     });
-    return { runner, persistCount: () => persistCount, directorNames, search };
+    return {
+      runner,
+      persistCount: () => persistCount,
+      computeAdvertised,
+      flushPromotions,
+      search,
+    };
   }
 
   async function dispatch(
@@ -815,20 +815,32 @@ describe("exec tool call gate and promoter", () => {
   }
 
   test("tool_search then MCP dispatch with the gate on", async () => {
-    const { runner, search, persistCount, directorNames } =
+    const { runner, search, persistCount, computeAdvertised, flushPromotions } =
       wireExecDiscovery(false);
     const blocked = await dispatch(runner, "mcp__linear__save_issue");
     expect(blocked.isError).toBe(true);
     expect(blocked.content).toContain("tool_search");
 
+    const wireBefore = JSON.stringify(
+      computeAdvertised(runner.currentDefinitions()),
+    );
     if (search.kind !== "string") throw new Error("expected string tool");
     await search.handler({ query: "linear" }, new AbortController().signal);
     expect(persistCount()).toBe(1);
-    expect(directorNames.at(-1)).toContain("mcp__linear__save_issue");
 
+    // Gate-only promotion: the tool dispatches now, but the wire set holds
+    // steady until a cache-safe boundary commits it.
     const allowed = await dispatch(runner, "mcp__linear__save_issue");
     expect(allowed.content).toBe("saved");
     expect(allowed.isError).toBeUndefined();
+    expect(JSON.stringify(computeAdvertised(runner.currentDefinitions()))).toBe(
+      wireBefore,
+    );
+
+    expect(flushPromotions()).toBe(true);
+    expect(
+      computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
+    ).toContain("mcp__linear__save_issue");
   });
 
   test("present and plugin names pass the gate after tool_search promote", async () => {

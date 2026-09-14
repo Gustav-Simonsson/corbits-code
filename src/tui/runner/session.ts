@@ -460,13 +460,16 @@ export async function assembleTUISession(
   });
   workflowHostHolder.instance = workflowHost;
 
-  // Dynamic tool discovery: only the fixed built-in prefix plus activated
-  // tools reach the wire, so the provider cache prefix holds steady; MCP
-  // tools must be promoted here before the model can invoke them.
+  // Dynamic tool discovery: only the fixed built-in prefix plus
+  // wire-committed activations reach the wire, so the provider cache prefix
+  // holds steady; MCP tools must be promoted here before the model can invoke
+  // them, and their schemas join the wire at a cache-safe boundary (below,
+  // and on compaction folds).
   const {
     activated: activatedToolNames,
     computeAdvertised,
     isAdvertised,
+    flushPromotions,
   } = createAdvertisedToolset({
     sessionMode: liveSessionMode,
     toolAvailability,
@@ -476,8 +479,11 @@ export async function assembleTUISession(
       : {}),
   });
   // Re-activate the prior run's promoted tools before the first build so the
-  // post-resume wire matches the transcript the model still sees.
+  // post-resume wire matches the transcript the model still sees. Session
+  // start is a cache-safe boundary: commit them to the wire now so the first
+  // turn already declares them.
   activatedToolNames.activate(start.resumeSeed.activatedTools);
+  flushPromotions();
   // A registered tool the wire never advertised must error toward tool_search
   // instead of dispatching blind — the transcript would otherwise claim a call
   // the next infer does not declare. submit_output rides every infer via the
@@ -626,10 +632,6 @@ export async function assembleTUISession(
     // without rebuilding the agent (aligned with transcript stamp).
     getProviderId: () => state.config.providerName,
     directorHolder,
-    onToolsPromoted: () => {
-      state.pendingReload = true;
-      state.reloadIfIdle?.();
-    },
     getWorkdir: () => state.workdir,
     getSessionId: () => state.sessionId,
     authorize: createReactorAuthorize(permissionGate),
@@ -646,7 +648,17 @@ export async function assembleTUISession(
         summaryContext,
         telemetry: liveTelemetry,
         // Main-session folds only — exec runner and subagents stay silent.
-        onFolded: (info) => emitter.emit("compaction", info),
+        onFolded: (info) => {
+          // A fold restarts the provider's cached prefix anyway, so this is
+          // the cache-safe moment to commit mid-session promotions: the next
+          // turn declares the newly callable tools' schemas.
+          if (flushPromotions()) {
+            directorHolder.instance?.updateToolDefinitions(
+              computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
+            );
+          }
+          emitter.emit("compaction", info);
+        },
       }),
     onBuilt: (agent, storage) => {
       state.currentAgent = agent;
