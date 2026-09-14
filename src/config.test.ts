@@ -1460,6 +1460,15 @@ describe("buildOpenAISource", () => {
     expect(source.baseURL).toBe("https://fp/v1");
   });
 
+  test("stays above the reasoning truncation floor", () => {
+    // Reasoning tokens consume max_output_tokens before any answer text is
+    // emitted. Measured on muse-spark-1.3-contributor, a 512-token cap at
+    // medium effort spent 397 tokens reasoning and returned 3 tokens of
+    // answer; 1024 was the lowest cap that answered on every rung. 4096 is
+    // the floor we will not drop below. See CL-7867.
+    expect(SOURCE_MAX_TOKENS).toBeGreaterThanOrEqual(4096);
+  });
+
   test("omits reasoning_effort when effort is absent", () => {
     const source = buildOpenAISource({
       id: "fp",

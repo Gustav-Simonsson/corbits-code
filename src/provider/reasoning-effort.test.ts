@@ -163,6 +163,40 @@ describe("supportedEfforts", () => {
     expect(supportedEfforts("glm-5.3")).toEqual(["low", "high", "max"]);
     expect(supportedEfforts("glm-5.3-flash")).toEqual(["low", "high", "max"]);
   });
+
+  // Five ids ship across two catalogs (packages/opencode-go and packages/zen)
+  // and nothing normalizes the model string before it reaches supportedEfforts,
+  // so every one of them has to land on the same ladder.
+  test.each([
+    "muse-spark-1.3-contributor",
+    "muse-spark-1.2-contributor",
+    "muse-spark-1.3",
+    "muse-spark-1.2",
+    "muse-spark-1.3-contributor-free",
+  ])("Muse Spark id %s supports minimal through high", (model) => {
+    expect(supportedEfforts(model)).toEqual([
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+    expect(defaultEffortForModel(model)).toBe("low");
+  });
+
+  test("a model merely containing muse-spark is not matched", () => {
+    expect(supportedEfforts("not-muse-spark-1.3")).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
+  });
+
+  test("Muse Spark never offers none", () => {
+    // The Go gateway answers HTTP 400 on reasoning.effort: "none".
+    expect(supportedEfforts("muse-spark-1.3-contributor")).not.toContain(
+      "none",
+    );
+  });
 });
 
 describe("validateEffort", () => {
@@ -187,6 +221,13 @@ describe("validateEffort", () => {
   test("accepts xhigh on grok-4.6 and rejects it on grok-4.5", () => {
     expect(validateEffort("grok-4.6", "xhigh")).toEqual({ ok: true });
     expect(validateEffort("grok-4.5", "xhigh").ok).toBe(false);
+  });
+
+  test("accepts minimal on Muse Spark and rejects none", () => {
+    expect(validateEffort("muse-spark-1.3-contributor", "minimal")).toEqual({
+      ok: true,
+    });
+    expect(validateEffort("muse-spark-1.3-contributor", "none").ok).toBe(false);
   });
 
   test("rejects medium on glm-5.3 family", () => {

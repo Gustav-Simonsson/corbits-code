@@ -61,6 +61,30 @@ const UNKNOWN_MODEL_EFFORTS: readonly ReasoningEffort[] = [
   "high",
 ];
 
+// Muse Spark (Responses protocol) accepts minimal through high. Not `none` —
+// the gateway rejects it with HTTP 400 on `reasoning.effort`. Measured on
+// muse-spark-1.3-contributor and muse-spark-1.2-contributor via the Go
+// endpoint and muse-spark-1.3-contributor-free via Zen: `minimal` returns 200
+// and `none` returns 400 on all three. See CL-7867.
+const MUSE_SPARK_EFFORTS: readonly ReasoningEffort[] = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+];
+
+// Matched by prefix, not by an id list. The family ships under five ids across
+// two catalogs — `muse-spark-1.3-contributor` / `-1.2-contributor` in
+// packages/opencode-go, and `muse-spark-1.3` / `-1.2` /
+// `-1.3-contributor-free` in packages/zen — and nothing normalizes the model
+// string before it reaches here. An exact list silently missed three of them
+// and left the ladder at the unknown-model default. The `/^.../i` + `trim()`
+// shape mirrors the grok/kimi prefix checks in
+// src/subagent/provider-family.ts.
+function isMuseSparkModel(model: string): boolean {
+  return /^muse-spark/i.test(model.trim());
+}
+
 // grok-4.6 accepts xhigh; grok-4.5 and composer stay on the unknown-model subset.
 const GROK_46_EFFORTS: readonly ReasoningEffort[] = [
   "low",
@@ -143,6 +167,9 @@ export function supportedEfforts(
   if (GLM_53_MODELS.includes(model)) {
     return [...GLM_53_EFFORTS];
   }
+  if (isMuseSparkModel(model)) {
+    return [...MUSE_SPARK_EFFORTS];
+  }
   return [...UNKNOWN_MODEL_EFFORTS];
 }
 
@@ -196,7 +223,7 @@ export function cycleReasoningEffort(
  * (`defaultEffortForDirector`): this is what the prompt shows and what Shift+Tab
  * advances from when the operator has not picked a level.
  *
- * Family table: grok* → high; glm-5.3* → max; Codex → medium; gpt-5.1 chat (`none` on the
+ * Family table: grok* → high; glm-5.3* → max; muse-spark* → low; Codex → medium; gpt-5.1 chat (`none` on the
  * ladder, not Codex) → none; gpt-5/gpt-6/o1/o3/o4 → medium. Unknown models with a
  * conservative rung set stay undefined so we do not invent a family default.
  */
@@ -210,6 +237,7 @@ export function defaultEffortForModel(
     supported.includes(desired) ? desired : undefined;
   if (model.startsWith("grok")) return pick("high");
   if (GLM_53_MODELS.includes(model)) return pick("max");
+  if (isMuseSparkModel(model)) return pick("low");
   if (!isCodex && supported.includes("none")) return "none";
   if (isCodex || isKnownOpenAIReasoningModel(model)) return pick("medium");
   return undefined;
