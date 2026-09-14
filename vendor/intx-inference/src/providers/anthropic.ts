@@ -39,8 +39,6 @@ export const ADAPTIVE_THINKING_MODELS: ReadonlySet<string> = new Set([
   "claude-sonnet-5",
   "claude-opus-5",
   "claude-fable-5",
-  // Locally patched — see vendor/intx-inference/PATCHES.md#providers-ts-anthropic-adaptive-fable-5-1
-  "claude-fable-5-1",
   "claude-opus-4-8",
   "claude-opus-4-6",
   "claude-opus-4-7",
@@ -554,8 +552,6 @@ const ContentBlockStop = type({
 
 const MessageDelta = type({
   type: "'message_delta'",
-  // Locally patched — see vendor/intx-inference/PATCHES.md#inference-ts-cl-7783-truncated-tool-call
-  "delta?": { "stop_reason?": "string" },
   "usage?": { "output_tokens?": "number" },
 });
 
@@ -574,12 +570,15 @@ const MessageStart = type({
 const MessageStop = type({ type: "'message_stop'" });
 const Ping = type({ type: "'ping'" });
 
-const AnthropicSSEEvent = ContentBlockDelta.or(ContentBlockStart)
-  .or(ContentBlockStop)
-  .or(MessageDelta)
-  .or(MessageStart)
-  .or(MessageStop)
-  .or(Ping);
+const AnthropicSSEEvent = type.or(
+  ContentBlockDelta,
+  ContentBlockStart,
+  ContentBlockStop,
+  MessageDelta,
+  MessageStart,
+  MessageStop,
+  Ping,
+);
 
 // Maps Anthropic's wire usage object onto the internal TokenUsage. Anthropic
 // never reports a distinct thinking-token count, so `thinking` is always 0.
@@ -818,17 +817,11 @@ function parseResponse(
         cacheWrite: 0,
         thinking: 0,
       };
-      // Locally patched — see vendor/intx-inference/PATCHES.md#inference-ts-cl-7783-truncated-tool-call
-      const stopReason = event.delta?.stop_reason;
       return [
         {
           type: "inference.usage",
           seq,
-          data: {
-            usage: inferenceUsage,
-            ...(stopReason === undefined ? {} : { stopReason }),
-            source,
-          },
+          data: { usage: inferenceUsage, source },
         },
       ];
     }
@@ -877,8 +870,6 @@ const NonStreamingUsage = type({
 const NonStreamingMessage = type({
   type: "'message'",
   content: "unknown[]",
-  // Locally patched — see vendor/intx-inference/PATCHES.md#inference-ts-cl-7783-truncated-tool-call
-  "stop_reason?": "string",
   usage: NonStreamingUsage,
 });
 
@@ -1074,13 +1065,7 @@ function parseJSONResponse(
   events.push({
     type: "inference.usage",
     seq,
-    data: {
-      usage: toInferenceUsage(message.usage),
-      ...(message.stop_reason === undefined
-        ? {}
-        : { stopReason: message.stop_reason }),
-      source,
-    },
+    data: { usage: toInferenceUsage(message.usage), source },
   });
 
   return events;

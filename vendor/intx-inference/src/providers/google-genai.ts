@@ -1461,14 +1461,7 @@ function parseResponse(
     out.push({
       type: "inference.usage",
       seq,
-      // Locally patched — see vendor/intx-inference/PATCHES.md#inference-ts-cl-7783-truncated-tool-call
-      data: {
-        usage: tokenUsage,
-        ...(candidate.finishReason === undefined
-          ? {}
-          : { stopReason: candidate.finishReason }),
-        source,
-      },
+      data: { usage: tokenUsage, source },
     });
 
     // Terminal events seal the response. A still-pending
