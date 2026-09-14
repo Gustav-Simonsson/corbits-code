@@ -92,6 +92,26 @@ describe("runWithWatchdog", () => {
     expect(stalls).toEqual([[1, 3]]);
   });
 
+  test("a stall-declared run that exits on its own keeps its code and is not retried", async () => {
+    // Ignores SIGTERM so the watchdog's stall kill cannot take it out, then
+    // exits 3 on its own well after the stall window (so the stall is
+    // declared first). The real code must survive and the run must not retry.
+    const result = await runWithWatchdog({
+      command: process.execPath,
+      args: [
+        "-e",
+        'process.on("SIGTERM", () => {}); setTimeout(() => process.exit(3), 4_000);',
+      ],
+      stallMs: TEST_STALL_MS,
+      onStall: () => {
+        throw new Error("must not retry a run that exited on its own");
+      },
+    });
+    expect(result.exitCode).toBe(3);
+    expect(result.stalled).toBe(false);
+    expect(result.attempts).toBe(1);
+  });
+
   test("gives up after the final attempt with exit code 1", async () => {
     const stalls: [number, number][] = [];
     const result = await runWithWatchdog({

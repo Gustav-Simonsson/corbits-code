@@ -126,9 +126,12 @@ async function runAttempt(
   exited = true;
   clearInterval(watchdog);
   await Promise.allSettled(pumps);
-  // null means killed by a signal; the stalled flag says who did it.
-  const exitCode = raw === null ? (stalled ? STALL_CODE : 1) : raw;
-  return { exitCode, stalled };
+  // A SIGTERM kill surfaces as null (died by signal) or 143 (Bun's SIGTERM
+  // exit); any other code means the child exited on its own and keeps its
+  // code unretried, even if the watchdog already fired.
+  const killedByWatchdog = stalled && (raw === null || raw === 143);
+  const exitCode = killedByWatchdog ? STALL_CODE : (raw ?? 1);
+  return { exitCode, stalled: killedByWatchdog };
 }
 
 export async function runWithWatchdog(
