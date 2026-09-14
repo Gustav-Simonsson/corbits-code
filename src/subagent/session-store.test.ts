@@ -2123,6 +2123,57 @@ describe("CL-7344 follow-up stash", () => {
     );
   });
 
+  test("run-completion wins the race: the flip clears the interrupt stopReason", async () => {
+    const store = createSubAgentSessionStore();
+    const started: string[] = [];
+    const session = runningRetained(store, async (message) => {
+      started.push(message);
+      return "followup reply";
+    });
+    store.sendInputOne(session.id, "steer now", { interrupt: true });
+    // The stash stamps the interrupt while the original run is still live.
+    expect(store.get(session.id)?.stopReason).toBe("interrupted");
+    store.complete(session.id, "## Summary\nOriginal done.");
+    // The run won, so the lane flips back to a fresh turn: the launcher runs
+    // once and the stale interrupt stamp must not outlive the new turn.
+    expect(started).toEqual(["steer now"]);
+    expect(store.get(session.id)?.stopReason).toBeUndefined();
+    expect(store.get(session.id)?.lifecycleStatus).toBe("running");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.get(session.id)?.stopReason).toBeUndefined();
+  });
+
+  test("salvage completion with agentRetained:false drops the queued steer loudly", async () => {
+    const store = createSubAgentSessionStore();
+    const started: string[] = [];
+    const failures: unknown[] = [];
+    const session = runningRetained(store, async (message) => {
+      started.push(message);
+      return "should not run";
+    });
+    store.sendInputOne(session.id, "steer now", {
+      interrupt: true,
+      onFail: (err: unknown) => {
+        failures.push(err);
+      },
+    });
+    // Mirrors run.ts's salvage return: the report resolves through complete()
+    // but the agent is already disposed, so the queued steer is superseded.
+    store.complete(session.id, "Stopped: deadline\n\nPartial work...", {
+      agentRetained: false,
+    });
+    await Promise.resolve();
+    expect(started).toEqual([]);
+    expect(failures).toHaveLength(1);
+    expect(String(defined(failures[0]))).toContain("steer now");
+    expect(store.get(session.id)?.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "report",
+        content: expect.stringContaining("steer now"),
+      }),
+    );
+  });
+
   test("CL-7989 run-completion wins with queued steers: all deliver in order", async () => {
     const store = createSubAgentSessionStore();
     const started: string[] = [];
