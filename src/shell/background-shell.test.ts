@@ -122,4 +122,53 @@ describe("background shell registry", () => {
     const after = await registry.collect(started.id, 0);
     expect(after.state).toBe("not-found");
   });
+
+  test("collect with an aborted signal releases as running without killing the child", async () => {
+    const token = `ic_bg_abort_${randomUUID()}`;
+    const registry = createBackgroundShellRegistry();
+    const started = registry.start({
+      command: `bash -c 'exec -a ${token} sleep 600'`,
+      cwd: tmpCwd,
+    });
+    if ("error" in started) throw new Error(started.error);
+    try {
+      const aborted = new AbortController();
+      aborted.abort(new Error("interrupted by interrupt_agent"));
+      const snapshot = await registry.collect(
+        started.id,
+        60_000,
+        aborted.signal,
+      );
+      expect(snapshot.state).toBe("running");
+      const stillThere = await registry.collect(started.id, 0);
+      expect(stillThere.state).toBe("running");
+      const probe = spawnSync("pgrep", ["-f", token], { encoding: "utf8" });
+      expect(probe.status).toBe(0);
+    } finally {
+      registry.disposeAll("test done");
+    }
+  });
+
+  test("releaseWaiters wakes a parked collect without killing the child", async () => {
+    const token = `ic_bg_release_${randomUUID()}`;
+    const registry = createBackgroundShellRegistry();
+    const started = registry.start({
+      command: `bash -c 'exec -a ${token} sleep 600'`,
+      cwd: tmpCwd,
+    });
+    if ("error" in started) throw new Error(started.error);
+    try {
+      const pending = registry.collect(started.id, 60_000);
+      await new Promise((r) => setTimeout(r, 100));
+      registry.releaseWaiters();
+      const snapshot = await pending;
+      expect(snapshot.state).toBe("running");
+      const stillThere = await registry.collect(started.id, 0);
+      expect(stillThere.state).toBe("running");
+      const probe = spawnSync("pgrep", ["-f", token], { encoding: "utf8" });
+      expect(probe.status).toBe(0);
+    } finally {
+      registry.disposeAll("test done");
+    }
+  });
 });
