@@ -86,20 +86,31 @@ describe("check gate", () => {
   });
 
   test("CI test shards cover exactly the suite's paths", () => {
+    // Time-balanced --shard slices each run the full union (bun partitions
+    // files across the slices, balanced by --timings), so coverage holds
+    // when the matrix has all four slices and the shard command template
+    // carries the suite's paths plus the interpolated --shard flag.
     // Sharding must never silently drop (or double-run) part of the suite:
-    // expanding the matrix shards' filters to test files has to equal the
-    // unsharded `test` script's paths expanded the same way. Subdirectory
-    // shards (src-a/b/c) can never equal the literal ./src string, so this
-    // compares sorted file sets; a file covered twice fails the equality
-    // through the duplicate entry.
-    const shardFilters = [...ci.matchAll(/^\s+paths: (.+)$/gm)].flatMap(
-      (match) => match[1]?.trim().split(/\s+/) ?? [],
-    );
+    // expanding the template's filters to test files has to equal the
+    // unsharded `test` script's paths expanded the same way.
+    for (const shard of ["1/4", "2/4", "3/4", "4/4"]) {
+      expect(ci).toContain(`"${shard}"`);
+    }
+    const runArgs = [
+      ...ci.matchAll(/^\s*run: bun run check:projects-dir-guard(.+)$/gm),
+    ]
+      .map((match) => match[1] ?? "")
+      .find((args) => args.includes("--shard=${{ matrix.shard }}"));
+    expect(runArgs).toBeDefined();
+    const shardFilters = (runArgs ?? "")
+      .split(/\s+/)
+      .filter((part) => part.startsWith("./"));
     const suiteFilters = TEST_SUITE.split(" ").filter((part) =>
       part.startsWith("./"),
     );
     expect(expandToTestFiles(shardFilters)).toEqual(
       expandToTestFiles(suiteFilters),
     );
+    expect(runArgs).toContain("--timings=./scripts/ci-timings.json");
   });
 });
