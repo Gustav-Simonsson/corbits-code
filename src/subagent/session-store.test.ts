@@ -1836,13 +1836,13 @@ describe("CL-7344 follow-up stash", () => {
     expect(store.isRunInFlight(session.id)).toBe(true);
   });
 
-  test("complete drops a stashed follow-up and keeps the original report", async () => {
+  test("complete on a resumable session delivers the stash and preserves the original report", async () => {
     const store = createSubAgentSessionStore();
     const started: string[] = [];
     const failures: unknown[] = [];
     const session = runningRetained(store, async (message) => {
       started.push(message);
-      return "should not run";
+      return `reply to ${message}`;
     });
     const onFail = (err: unknown): void => {
       failures.push(err);
@@ -1850,18 +1850,16 @@ describe("CL-7344 follow-up stash", () => {
     store.sendInputOne(session.id, "steer one", { interrupt: true, onFail });
     store.sendInputOne(session.id, "steer two", { interrupt: true, onFail });
     store.complete(session.id, "## Summary\nOriginal done.");
-    await Promise.resolve();
-    expect(started).toEqual([]);
-    expect(store.get(session.id)?.report).toBe("## Summary\nOriginal done.");
-    expect(store.get(session.id)?.lifecycleStatus).toBe("completed");
-    expect(store.isRunInFlight(session.id)).toBe(false);
-    expect(failures).toHaveLength(2);
-    expect(String(defined(failures[0]))).toContain("steer one");
-    expect(String(defined(failures[1]))).toContain("steer two");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(["steer one", "steer two"]);
+    expect(failures).toEqual([]);
+    expect(store.get(session.id)?.lifecycle.state).toBe("completed");
+    expect(store.get(session.id)?.report).toBe("reply to steer two");
     expect(store.get(session.id)?.entries).toContainEqual(
       expect.objectContaining({
         kind: "report",
-        content: expect.stringContaining("steer two"),
+        content: expect.stringContaining("Original done"),
       }),
     );
   });
@@ -1921,7 +1919,17 @@ describe("CL-7344 follow-up stash", () => {
   test("dropped steers report which message was lost and why", async () => {
     const store = createSubAgentSessionStore();
     const failures: unknown[] = [];
-    const session = runningRetained(store, async () => "x");
+    // No retained:true: the session cannot resume, so a run-completion win
+    // surfaces the queued steer as a loss instead of delivering it.
+    const session = store.start({
+      description: "d",
+      agentId: "a",
+      brief: "b",
+    });
+    store.markRunning(session.id);
+    store.markRunInFlight(session.id);
+    store.registerInterrupt(session.id, () => undefined);
+    store.registerFollowup(session.id, async () => "x");
     store.sendInputOne(session.id, "steer now", {
       interrupt: true,
       onFail: (err) => {
@@ -2051,5 +2059,176 @@ describe("CL-7344 follow-up stash", () => {
     rejectFollowup(new AgentClosedError());
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(store.get(session.id)?.lifecycle.state).toBe("shutdown");
+  });
+
+  test("CL-7989 interrupt wins the race: stashed steer launches from attachReport", async () => {
+    const store = createSubAgentSessionStore();
+    const started: string[] = [];
+    const failures: unknown[] = [];
+    const replies: string[] = [];
+    const session = runningRetained(store, async (message) => {
+      started.push(message);
+      return "followup reply";
+    });
+    store.sendInputOne(session.id, "steer now", {
+      interrupt: true,
+      onFail: (err: unknown) => {
+        failures.push(err);
+      },
+      onFollowupReply: (reply: string) => {
+        replies.push(reply);
+      },
+    });
+    store.attachReport(session.id, "salvage", { stopReason: "interrupted" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(["steer now"]);
+    expect(failures).toEqual([]);
+    expect(replies).toEqual(["followup reply"]);
+    expect(store.get(session.id)?.lifecycle.state).toBe("completed");
+    expect(store.get(session.id)?.report).toBe("followup reply");
+  });
+
+  test("CL-7989 run-completion wins the race: stashed steer delivers as a fresh follow-up", async () => {
+    const store = createSubAgentSessionStore();
+    const started: string[] = [];
+    const failures: unknown[] = [];
+    const replies: string[] = [];
+    const session = runningRetained(store, async (message) => {
+      started.push(message);
+      return "followup reply";
+    });
+    store.sendInputOne(session.id, "steer now", {
+      interrupt: true,
+      onFail: (err: unknown) => {
+        failures.push(err);
+      },
+      onFollowupReply: (reply: string) => {
+        replies.push(reply);
+      },
+    });
+    store.complete(session.id, "## Summary\nOriginal done.");
+    expect(store.get(session.id)?.lifecycleStatus).toBe("running");
+    expect(store.isRunInFlight(session.id)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(["steer now"]);
+    expect(failures).toEqual([]);
+    expect(replies).toEqual(["followup reply"]);
+    expect(store.get(session.id)?.lifecycle.state).toBe("completed");
+    expect(store.get(session.id)?.report).toBe("followup reply");
+    expect(store.get(session.id)?.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "report",
+        content: expect.stringContaining("Original done"),
+      }),
+    );
+  });
+
+  test("CL-7989 run-completion wins with queued steers: all deliver in order", async () => {
+    const store = createSubAgentSessionStore();
+    const started: string[] = [];
+    const failures: unknown[] = [];
+    const session = runningRetained(store, async (message) => {
+      started.push(message);
+      return `reply to ${message}`;
+    });
+    const onFail = (err: unknown): void => {
+      failures.push(err);
+    };
+    store.sendInputOne(session.id, "steer one", { interrupt: true, onFail });
+    store.sendInputOne(session.id, "steer two", { interrupt: true, onFail });
+    store.complete(session.id, "## Summary\nOriginal done.");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(["steer one", "steer two"]);
+    expect(failures).toEqual([]);
+    expect(store.get(session.id)?.lifecycle.state).toBe("completed");
+    expect(store.get(session.id)?.report).toBe("reply to steer two");
+  });
+
+  test("CL-7989 run-completion wins on a non-retained session: loss is surfaced", async () => {
+    const store = createSubAgentSessionStore();
+    const started: string[] = [];
+    const failures: unknown[] = [];
+    const session = store.start({
+      description: "d",
+      agentId: "a",
+      brief: "b",
+    });
+    store.markRunning(session.id);
+    store.markRunInFlight(session.id);
+    store.registerInterrupt(session.id, () => undefined);
+    store.registerFollowup(session.id, async (message) => {
+      started.push(message);
+      return "should not run";
+    });
+    store.sendInputOne(session.id, "steer now", {
+      interrupt: true,
+      onFail: (err: unknown) => {
+        failures.push(err);
+      },
+    });
+    store.complete(session.id, "## Summary\nOriginal done.");
+    await Promise.resolve();
+    expect(started).toEqual([]);
+    expect(store.get(session.id)?.report).toBe("## Summary\nOriginal done.");
+    expect(store.get(session.id)?.lifecycleStatus).toBe("completed");
+    expect(failures).toHaveLength(1);
+    expect(String(defined(failures[0]))).toContain("steer now");
+    expect(store.get(session.id)?.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "report",
+        content: expect.stringContaining("steer now"),
+      }),
+    );
+  });
+
+  test("a throwing handoff onReply does not stall the queued steers behind it", async () => {
+    const store = createSubAgentSessionStore();
+    const started: string[] = [];
+    const session = runningRetained(store, async (message) => {
+      started.push(message);
+      return `reply to ${message}`;
+    });
+    store.sendInputOne(session.id, "steer one", {
+      interrupt: true,
+      onFollowupReply: () => {
+        throw new Error("observer blew up");
+      },
+    });
+    store.sendInputOne(session.id, "steer two", { interrupt: true });
+    store.complete(session.id, "## Summary\nOriginal done.");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(["steer one", "steer two"]);
+    expect(store.get(session.id)?.lifecycle.state).toBe("completed");
+    expect(store.get(session.id)?.report).toBe("reply to steer two");
+  });
+
+  test("CL-7989 run-failure wins the race: loss is surfaced, never silent", async () => {
+    const store = createSubAgentSessionStore();
+    const started: string[] = [];
+    const failures: unknown[] = [];
+    const session = runningRetained(store, async (message) => {
+      started.push(message);
+      return "should not run";
+    });
+    store.sendInputOne(session.id, "steer now", {
+      interrupt: true,
+      onFail: (err: unknown) => {
+        failures.push(err);
+      },
+    });
+    store.fail(session.id, "provider 500");
+    await Promise.resolve();
+    expect(started).toEqual([]);
+    expect(store.get(session.id)?.lifecycle.state).toBe("failed");
+    expect(failures).toHaveLength(1);
+    expect(String(defined(failures[0]))).toContain("steer now");
+    expect(store.get(session.id)?.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "report",
+        content: expect.stringContaining("steer now"),
+      }),
+    );
   });
 });
