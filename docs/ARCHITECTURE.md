@@ -76,11 +76,11 @@ In TUI chat mode there is no completion gate — the session stays open across t
 - Both settings files and the project/global grant store (`.corbits/permissions.json`) are on the secret-guard denylist for path-keyed tools, so the agent cannot `read_file` its own credentials or persist standing auto-approvals. Shell commands that reference them still require explicit operator approval.
 - Credential-surface ownership: each auth store module enumerates its own files (`*_AUTH_FILENAME` / `MCP_AUTH_DIRNAME`), the data-only registry in `src/auth/credential-surface.ts` turns them into denylist patterns, `secret-guard-plugin.ts` owns matching (lexical plus realpath), and `@mention` resolution consumes the resolved check — never the registry directly. A new `*-auth.json` token store is denied only once its store module exports its filename and the registry lists it; the coverage test scans store sources for `*-auth.json` literals (registered dirnames get an includes-check instead) and fails the build until both exist.
 
-### TUI Runner (`src/tui/runner.ts`)
+### TUI Runner (`src/tui/runner/`)
 
 - Builds a chat-mode agent using the `ChatDirector`
 - Wires `ask_operator` to an operator-gate event resolved by a modal
-- Mounts the OpenTUI host via `mountRunnerHost` (`src/tui/runner-host.ts`), which mounts `mountProductHost` (`src/tui/product-host.ts`) over the shell (`src/tui/shell.ts`)
+- Mounts the OpenTUI host via `mountRunnerHost` (`src/tui/runner/host.ts`), which mounts `mountProductHost` (`src/tui/product-host.ts`) over the shell (`src/tui/shell/`)
 - Bridges reactor events to the OpenTUI host via a plain `EventEmitter`
 - **Mid-run injection** — Shell `session-queue` items drain at the parent
   `tool.boundary` through `SessionPort.deliver`. Production `routeQueuedDelivery`
@@ -314,7 +314,7 @@ Every shipped specialist is a **director package** — a prompt-first `DirectorP
 
 **Wait mailbox** (`src/subagent/agent-fleet.ts` `FleetMailbox`): per-install overlay over that session store. Wait JSON is a projection of stored lifecycle plus mailbox membership, pin, collected, and optional interrupt override — not a second terminal store. Mailbox `register` pins an uncollected result (honored by prune); past `MAX_FLEET_RECORDS` the oldest never-collected pin is compacted to a tombstone. Operator cancel projects wait status `interrupted`.
 
-**Observe (OpenTUI)**: `shell.ts:enterSubagentObserve` swaps the transcript for a child's stream (live while running, historical when done) without stealing the parent reactor; child events are mapped to stream rows by `src/tui/observe-map.ts`. Esc leaves observe and restores the parent transcript. Parent Esc/stop and `/clear` still call `cancelAll` so live children close (`agent.close`) instead of continuing after the parent stops. The host-injection point that resolves a live session (`onObserveRequest` → `observeSessionFromSubAgents`, `src/tui/runner-host.ts`, picking the newest running child else the most recent session of any status) is triggered by Alt+O (`shell.ts:observeActiveSubagent`) — the command palette action that used to call it is gone along with `src/tui/palette.ts` itself, but the chord replaces it rather than dropping the feature.
+**Observe (OpenTUI)**: `shell/observe.ts:enterSubagentObserve` swaps the transcript for a child's stream (live while running, historical when done) without stealing the parent reactor; child events are mapped to stream rows by `src/tui/observe-map.ts`. Esc leaves observe and restores the parent transcript. Parent Esc/stop and `/clear` still call `cancelAll` so live children close (`agent.close`) instead of continuing after the parent stops. The host-injection point that resolves a live session (`onObserveRequest` → `observeSessionFromSubAgents`, `src/tui/runner/host.ts`, picking the newest running child else the most recent session of any status) is triggered by Alt+O (`src/tui/shell/observe.ts:observeActiveSubagent`) — the command palette action that used to call it is gone along with `src/tui/shell/palette.ts` itself, but the chord replaces it rather than dropping the feature.
 
 Data-only agent plugins (`src/plugins/data-only-agent.ts`) synthesize `agentPlugin.agents[]` from `agents/*.md` or flat `*.md` in the plugin directory, with optional co-located `skills/`. `loadPluginEntry` tries JS entrypoints first, then falls back to this layout (`/plugins` add-by-path supports filesystem completion via `listPathSuggestions`).
 
@@ -413,7 +413,7 @@ A queued gate's display-dependent timers (auto-deny timeout, tool-budget pause c
 
 ### TUI (`src/tui/`)
 
-OpenTUI (`@opentui/core`) is the shipping shell; the Ink/React tree has been deleted from the repo. The runner (`src/tui/runner.ts`) mounts the host via `mountRunnerHost` (`src/tui/runner-host.ts`), which mounts `mountProductHost` (`src/tui/product-host.ts`) over the shell (`src/tui/shell.ts`).
+OpenTUI (`@opentui/core`) is the shipping shell; the Ink/React tree has been deleted from the repo. The runner (`src/tui/runner/`) mounts the host via `mountRunnerHost` (`src/tui/runner/host.ts`), which mounts `mountProductHost` (`src/tui/product-host.ts`) over the shell (`src/tui/shell/`).
 
 - **Shell** (`shell.ts`) — Owns the transcript window, header, status line, prompt, overlay/palette stack, and layout/relayout (`applyLayout`, `relayout`). Transcript rows are appended via `appendStreamRow`/`appendObserveStreamRow`; focus moves between prompt and transcript via `applyFocus`/`toggleShellFocus`.
 - **Product host** (`product-host.ts`) — Creates the `CliRenderer`, wires the event emitter bridge, model/command catalogs, and chrome pushes.

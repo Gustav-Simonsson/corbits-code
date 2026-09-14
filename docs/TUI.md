@@ -2,9 +2,7 @@
 
 This is the normative behavior spec for the terminal UI: Corbits Code, built on
 OpenTUI (`@opentui/core`). It describes what the shell must do, not how the
-OpenTUI cutover got here. The implementation lives in `src/tui/`; the
-runner that mounts it is `src/tui/runner.ts` (see `docs/ARCHITECTURE.md` for
-how the TUI fits the rest of the system). A reviewer should be able to hold a
+OpenTUI cutover got here. The implementation lives in `src/tui/`; the runner that mounts it is `mountRunnerHost` in `src/tui/runner/host.ts` (see `docs/ARCHITECTURE.md` for how the TUI fits the rest of the system). A reviewer should be able to hold a
 PR against this document; someone building a new overlay or picker should be
 able to build it correctly from this document alone.
 
@@ -28,8 +26,7 @@ A single **geometry resolver** turns terminal size, zone visibility, and
 overlay mode into region rects; every zone reads its rect from that resolver
 instead of computing its own height from `process.stdout.rows`. On an 80×24
 terminal with nothing optional showing, the transcript floor is 12 rows
-(`IDLE_TRANSCRIPT_FLOOR`); with an inset overlay open the floor drops to a
-proposed 8 rows (`OVERLAY_TRANSCRIPT_FLOOR`) so the log stays glanceable
+(`IDLE_TRANSCRIPT_FLOOR`); with an inset overlay open the floor drops to 8 rows (`OVERLAY_TRANSCRIPT_FLOOR`) so the log stays glanceable
 underneath a permission prompt. When space is scarce, collapse follows a
 fixed order — transient banners first, then settings/plugin notices, then
 task/agents strips, then progress, then the prompt itself shrinks one
@@ -337,6 +334,13 @@ a single tally. Errors clip to `OUTCOME_CHARS`/`MAX_UPDATE_CHARS` on the
 "one update is one row" rule. `fleetDigest()` is the on-demand counterpart
 for `/status` or an operator question mid-run.
 
+### Subagent observe
+
+Alt+O swaps the transcript for a running child's stream without stealing the
+parent reactor (`enterSubagentObserve`, `src/tui/shell/observe.ts`); Esc
+leaves observe and restores the parent transcript. With no subagent session at
+all, the chord paints a system row saying so instead of opening anything.
+
 ## How pop-ups should feel
 
 A blocking surface (permissions, an operator question, the model/provider
@@ -370,7 +374,7 @@ below the prompt floor (`PROMPT_BASE_ROWS`). An unanswerable approval
 deadlocks the session; a cramped prompt does not. An overlay must never paint
 past the box it was actually assigned, and its border must always close.
 
-Escape dismisses the open overlay and, for a permission or operator prompt,
+Escape dismisses the open overlay, or leaves subagent observe when observe holds the transcript, and, for a permission or operator prompt,
 that dismissal **denies** the request rather than leaving it unresolved
 (`src/tui/gate-wire.ts`: both `onPermission`'s and `onOperator`'s
 `onCancel` handlers resolve the pending promise — as a deny for permissions,
@@ -445,7 +449,7 @@ leading marker column and no per-row kind column; the selected row is marked
 by text color only (`paintPaletteList` in `overlay-view.ts`: "the highlighted row
 already stands out by sitting under the cursor, so a leading `>` and a grey
 block would both be saying the same thing twice"). Rows stay name-only
-(`/help`, `/model`); the focused command's registry description paints in the
+(`/help`, `/model`) except plugin-supplied commands, which append their origin marker (`/name [bundled]` for bundled repo commands, `/name [<origin>]` otherwise); the focused command's registry description paints in the
 shared two-line description zone under the list (`openListOverlay({ describe })`,
 `paintDescriptionZone` in `overlay-view.ts`). A missing or blank `description` still
 reserves the zone (rule plus two blank lines); it does not collapse. Built-ins
@@ -469,6 +473,7 @@ lives in the prompt — list chrome is in How selectors should work above.
 When the prefix matches nothing, the list stays open and paints a
 `(no matches)` row (CL-6699: a close-and-reopen refresh would drain a
 queued gate); Enter then dismisses and leaves the prompt as typed (`/z`).
+Elsewhere, an empty list paints `(no choices)` inside the body chrome with zero list rows (`OVERLAY_EMPTY_STATE`).
 Every entry is backed by the live command registry
 (`src/tui/command-catalog.ts:commandItemsFromRegistry`) — there is no
 separate palette overlay and no shell-owned action outside the registry. The
@@ -486,14 +491,14 @@ in `SHELL_SHORTCUTS` documents that in place of a dedicated `?` row.
 `/plugins` lists every discovered plugin in a flat list. The title line carries
 how-to hints (`Esc cancel · Enter toggle · Alt+A add path · Alt+X remove`,
 falling back to shorter forms as the terminal narrows). Enter toggles
-enablement. Alt+A adds a plugin by path. Alt+X removes a user, project, or
+enablement (blocked pre-trust). Alt+C opens credentials, Alt+V verifies, Alt+T trusts, Alt+A adds a plugin by path, Alt+W picks the web provider. Alt+X removes a user, project, or
 path plugin (owned user/project installs, including a path-origin plugin
 whose directory sits under those roots, confirm before deleting from disk).
 Every remove writes `enabled: false` rather than dropping `settings.plugins[id]`
 so in-session command gating holds; disk and unique `pluginPaths` entries are
 still removed so the plugin is gone after restart. Bundled Corbits plugins
 cannot be uninstalled — Alt+X disables them instead and they stay listed.
-Claude marketplace installs write `enabled: false` and never delete `~/.claude`.
+Plugin rows carry their origin marker (`pluginOriginMarker`): `[bundled]` for repo-origin bundled plugins, `[<origin>]` otherwise. Claude marketplace installs write `enabled: false` and never delete `~/.claude`.
 
 The idle landing paints two doors beside the mark, keys aligned so the
 descriptions share a column (`LANDING_HINTS` in `src/tui/landing.ts`): `/`
@@ -558,6 +563,12 @@ pair as the default (global `defaultProvider` + that provider's `defaultModel`
 disable, **Alt+R** remove — never bare letters. A remove confirm drops those
 manage hints so the footer is the default Esc/Enter pair.
 
+Each row carries its live state (`mcpRowLabel`): `name — connecting`,
+`name — connected · N tools`, `name — needs auth`, `name — failed`,
+`name — disabled`. Enter authorizes, retries, or re-enables depending on that
+state; Alt+A adds, Alt+D disables, Alt+R removes. An empty catalog paints a
+`No MCP servers configured` row above `Close mcp`.
+
 The list itself never nests by provider, but connecting a new provider is not
 a flat-list row either: the picker used to grow a "connect →" row per
 not-yet-configured provider kind, filtered out once that kind had any
@@ -613,8 +624,7 @@ The prompt is a genuine multi-line composing area built on OpenTUI's
 `TextareaRenderable` rather than its single-line `InputRenderable`, because
 the single-line widget is hard-wired to one row, no wrapping, and strips
 newlines (`src/tui/prompt-input.ts`). Enter sends; a literal newline
-needs an explicit chord: Ctrl+Enter or Ctrl+J work on every terminal, and
-Shift+Enter works too on a terminal that negotiates the kitty keyboard
+needs an explicit chord: Ctrl+Enter and Ctrl+J (`linefeed`) are the portable pair — they work on every terminal — while Shift+Enter needs a terminal that negotiates the kitty keyboard
 protocol (this app requests it — `useKittyKeyboard` in `product-host.ts`) and
 reports the modifier back. A plain terminal sends the same bare `\r` for
 Enter and Shift+Enter, so on those Shift+Enter silently does nothing — driven
