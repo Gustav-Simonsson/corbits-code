@@ -542,12 +542,16 @@ requires instead of the `thinking:{type:"enabled",budget_tokens}` shape
 adaptive-only models reject. Upstream's list lacks the model. Consumed by the
 `first-class-providers` registry (`claude-fable-5-1` is a shipped, selectable
 anthropic and zen model; CHANGELOG 0.3.17 advertises adaptive thinking for
-Fable 5) and guarded by the "adaptive thinking request shape" suite in
-`providers/anthropic.test.ts`.
+Fable 5). The companion "adaptive thinking request shape" suite that once
+guarded the wire shape in `providers/anthropic.test.ts` was dropped by the
+2026-09-14 pristine overwrite (`5a291aad5`) and never re-applied, so the
+wire shape currently rides without an in-tree guard; only the model id is
+covered, by the first-party `first-class-providers` registry test.
 
 **Disposition:** Re-carryable — a one-line list addition that survives sync
-trivially; the guard suite re-applies verbatim. Risk: upstream may grow its
-own adaptive-models list; reconcile the two on next sync. **Removal path:**
+trivially. Risk: upstream may grow its own adaptive-models list; reconcile
+the two on next sync, and consider restoring the dropped guard suite.
+**Removal path:**
 Upstream adding `claude-fable-5-1` to its own `ADAPTIVE_THINKING_MODELS`.
 
 ---
