@@ -80,8 +80,10 @@ const BUILT_IN_AGENT_NAMES: ReadonlySet<string> = new Set([
 // eleven bundled skills carry it — eight stay listed and loadable
 // (git-rebase, linear-issue-workflow, opsh, philosophy, style, typescript,
 // native-integration, ponytail), `git-worktrees` resolves by explicit name
-// only, and two stay hidden bake-only (idiot-proof, native-runtime), which
-// are baked into agent prompts rather than invoked as skills. Of the eleven,
+// only, and two stay hidden from listings (idiot-proof, native-runtime):
+// `disable-model-invocation` keeps them out of discovery, but an explicit
+// `use_skill` / `resolveSkillBody` load still resolves — and reports `custom`.
+// Of the eleven,
 // seven are reported by name and four stay `custom` (pinned; conservative
 // under-reporting, never a leak). Project- or plugin-authored skills are
 // never reported by name.
