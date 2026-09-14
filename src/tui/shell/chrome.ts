@@ -1120,7 +1120,10 @@ function paintAppendStreamRow(shell: AppShell, row: StreamRow): void {
   clearLandingMark(shell);
   const seq = (paintSequence.get(shell) ?? 0) + 1;
   paintSequence.set(shell, seq);
-  if (isDuplicateSystemEcho(shell, row)) return;
+  if (isDuplicateSystemEcho(shell, row)) {
+    systemPushSequence.set(shell, seq);
+    return;
+  }
   const gainedVoice = noteAgentVoice(shell, row);
   shell.streamLog.push(row);
   if (row.role === "system") systemPushSequence.set(shell, seq);
