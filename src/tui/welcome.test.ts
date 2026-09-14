@@ -71,18 +71,13 @@ describe("runWelcome", () => {
 });
 
 describe("resolveWelcomeLine", () => {
-  test("keeps the full factory sentence or hides it, never a mid-word slice", () => {
-    expect(resolveWelcomeLine(80)).toBe(WELCOME_LINE);
-    expect(resolveWelcomeLine(stringWidth(WELCOME_LINE))).toBe(WELCOME_LINE);
-
-    const truncated = WELCOME_LINE.slice(0, 39);
-    expect(truncated).toContain("facto");
-    expect(truncated).not.toBe(WELCOME_LINE);
-
-    const narrow = resolveWelcomeLine(40);
-    expect(narrow === "" || narrow === WELCOME_LINE).toBe(true);
-    expect(narrow).not.toBe(truncated);
-    expect(narrow.includes("facto") && !narrow.includes("factory")).toBe(false);
+  test("returns the full line or nothing, never a fragment", () => {
+    const fullWidth = stringWidth(WELCOME_LINE);
+    for (let columns = 0; columns < fullWidth; columns += 1) {
+      expect(resolveWelcomeLine(columns)).toBe("");
+    }
+    expect(resolveWelcomeLine(fullWidth)).toBe(WELCOME_LINE);
+    expect(resolveWelcomeLine(fullWidth + 40)).toBe(WELCOME_LINE);
   });
 });
 
@@ -114,8 +109,14 @@ describe("runWelcome hold and cancel", () => {
       await harness.renderOnce();
       await harness.renderOnce();
       const frame = harness.captureCharFrame();
-      expect(frame).not.toContain("software facto");
-      expect(frame.includes("facto") && !frame.includes("factory")).toBe(false);
+      expect(frame).not.toContain(WELCOME_LINE);
+      const words = WELCOME_LINE.split(/[^A-Za-z]+/).filter(
+        (word) => word.length >= 6,
+      );
+      expect(words.length).toBeGreaterThan(0);
+      for (const word of words) {
+        expect(frame).not.toContain(word);
+      }
     } finally {
       harness.pressKey("Ctrl+C");
       await Promise.race([done, new Promise((r) => setTimeout(r, 50))]);

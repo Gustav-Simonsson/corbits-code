@@ -32,14 +32,16 @@ function host(): SelectionCopyHost & {
 describe("copyFinishedSelection", () => {
   test("writes selected text, flashes, and clears the highlight", () => {
     const h = host();
+    const selected = "hello world";
     const ok = copyFinishedSelection(h, {
       isDragging: false,
-      getSelectedText: () => "hello world",
+      getSelectedText: () => selected,
     });
     expect(ok).toBe(true);
-    expect(h.clipboard.writes).toEqual(["hello world"]);
-    expect(h.flashes[0]).toContain("Copied 11 chars");
-    expect(h.flashes[0]).toContain("hello world");
+    expect(h.clipboard.writes).toEqual([selected]);
+    expect(h.flashes).toHaveLength(1);
+    expect(h.flashes[0]).toContain(String(selected.length));
+    expect(h.flashes[0]).toContain(selected);
     expect(h.cleared).toBe(1);
   });
 
@@ -120,7 +122,7 @@ describe("copyFinishedSelection", () => {
     resolveWrite();
     await writeP;
     await Promise.resolve();
-    expect(flashes[0]).toContain("Copied 7 chars");
+    expect(flashes[0]).toContain(String("pending".length));
     expect(cleared).toBe(1);
   });
 

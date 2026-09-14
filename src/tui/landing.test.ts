@@ -715,23 +715,15 @@ describe("landing screen", () => {
       });
       try {
         await settle(h);
-        const frame = h.captureCharFrame();
-        // Assert the badge token, not "queue": this worktree path contains
-        // "queued" and would false-fail a cwd substring check.
-        for (const gone of [
-          "BUSY",
-          "IDLE",
-          "FOLLOW",
-          "follow-up",
-          "lines",
-          "focus",
-        ]) {
-          expect(frame).not.toContain(gone);
-        }
-        // The old header blue and status green are gone as fills.
-        const fills = new Set(backgrounds(h));
-        expect(fills.has("#3d59a1")).toBe(false);
-        expect(fills.has("#9ece6a")).toBe(false);
+        // A bare landing seats exactly two zones: the transcript canvas above
+        // the prompt box. Resurrected chrome would arrive as a new region.
+        expect(Object.keys(shell.layout.regions).sort()).toEqual([
+          "prompt",
+          "transcript",
+        ]);
+        // The old header blue and status green were fills; no chrome fill
+        // survives when every painted span shares one background.
+        expect(new Set(backgrounds(h)).size).toBe(1);
       } finally {
         shell.dispose();
       }

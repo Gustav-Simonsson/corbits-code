@@ -102,6 +102,26 @@ describe("discoverZenModels", () => {
     });
   });
 
+  test("labels every catalog failure as OpenCode Zen, never OpenCode Go", async () => {
+    globalThis.fetch = (async () =>
+      new Response("no", { status: 503 })) as unknown as typeof fetch;
+    const http = await discoverZenModels();
+    expect(http.status).toBe("unavailable");
+    if (http.status !== "unavailable") throw new Error("expected unavailable");
+    expect(http.message.startsWith("OpenCode Zen")).toBe(true);
+    expect(http.message).not.toContain("OpenCode Go");
+
+    globalThis.fetch = (async () =>
+      oversizedCatalogResponse(
+        MAX_ZEN_CATALOG_BYTES + 1,
+      )) as unknown as typeof fetch;
+    const oversize = await discoverZenModels();
+    expect(oversize.status).toBe("malformed");
+    if (oversize.status !== "malformed") throw new Error("expected malformed");
+    expect(oversize.message.startsWith("OpenCode Zen")).toBe(true);
+    expect(oversize.message).not.toContain("OpenCode Go");
+  });
+
   test("rejects an oversized catalog body without treating it as models", async () => {
     globalThis.fetch = (async () =>
       oversizedCatalogResponse(

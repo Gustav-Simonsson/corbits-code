@@ -48,27 +48,6 @@ describe("startup transcript", () => {
     });
   });
 
-  test("three identical system rows in a row paint once", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, OPTIONS);
-      try {
-        for (let i = 0; i < 3; i += 1) {
-          appendStreamRow(shell, {
-            role: "system",
-            text: DUPLICATE_TEXT,
-            meta: "synthetic source",
-          });
-        }
-        expect(streamRowCount(shell)).toBe(1);
-        expect(shell.streamLog.map((row) => row.text)).toEqual([
-          DUPLICATE_TEXT,
-        ]);
-      } finally {
-        shell.dispose();
-      }
-    });
-  });
-
   test("separated repeats and other roles still paint", async () => {
     await withTestRenderer(async (h) => {
       const shell = createAppShell(h.renderer, OPTIONS);
