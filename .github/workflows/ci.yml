@@ -78,19 +78,28 @@ jobs:
         run: bun run build
 
   # The suite is sharded so the slowest slice, not the whole suite, sets the
-  # wall clock. Every shard still goes through check:projects-dir-guard: the
+  # wall clock. The old ./src leg (387 files, ~88s local) is split into three
+  # path-disjoint shards measured at ~30s (src-a: tui, 146 files), ~46s
+  # (src-b: agent + subagent, 90 files), and ~45s (src-c: everything else in
+  # src, 153 files); the ./tests leg stays whole because ./evals ./scripts
+  # finish in ~1s and a leg of their own would be all setup overhead.
+  # Every shard still goes through check:projects-dir-guard: the
   # guard forwards these path filters to the suite it wraps, and the union of
   # the shards' filters is exactly ./src ./tests ./evals ./scripts, so the gate covers
   # the same tests as before, all of them sandboxed.
   test:
     runs-on: ubuntu-latest
     strategy:
-      # A red shard must not cancel the other; both results are the signal.
+      # A red shard must not cancel the others; every result is the signal.
       fail-fast: false
       matrix:
         shard:
-          - name: src
-            paths: ./src
+          - name: src-a
+            paths: ./src/tui
+          - name: src-b
+            paths: ./src/agent ./src/subagent
+          - name: src-c
+            paths: ./src/auth ./src/changelog ./src/config ./src/cost ./src/crash ./src/exec ./src/logging ./src/mcp ./src/perf ./src/permission ./src/plugins ./src/provider ./src/session ./src/shell ./src/telemetry ./src/tools ./src/trust ./src/upgrade ./src/util ./src/web ./src/config.test.ts ./src/context-compactor.test.ts ./src/director.test.ts ./src/inference-abort.test.ts ./src/inference-error-message.test.ts ./src/inference-gateway-error.test.ts ./src/list-dir.test.ts ./src/pricing-fetcher.test.ts ./src/pricing-metadata.test.ts ./src/profiles.test.ts ./src/prompts.test.ts ./src/renderer.test.ts ./src/settings.test.ts ./src/state.test.ts
           - name: tests-evals-and-scripts
             paths: ./tests ./evals ./scripts
     name: test (${{ matrix.shard.name }})
@@ -158,6 +167,16 @@ jobs:
 
   build-and-test:
     needs: [build, test]
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+
+  # The src-a/src-b/src-c matrix legs replaced the single test (src) leg, so
+  # this publishes that context name once all legs pass. needs: test waits for
+  # every matrix leg; a red leg skips this instead of greening it.
+  test-src:
+    name: test (src)
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - run: "true"

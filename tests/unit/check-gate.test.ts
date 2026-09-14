@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 // Guard against the gate drifting apart again (CL-7300): `bun run check` and
@@ -26,6 +26,25 @@ const guardSource = readFileSync(
 const GUARD_SCRIPT = "check:projects-dir-guard";
 const TEST_SUITE =
   "bun test ./src ./tests ./evals ./scripts --randomize --seed 424242";
+
+function expandToTestFiles(filters: string[]): string[] {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const absolute = join(dir, entry.name);
+      if (entry.isDirectory()) walk(absolute);
+      else if (entry.name.endsWith(".test.ts"))
+        files.push(relative(repoRoot, absolute).split("/").join("/"));
+    }
+  };
+  for (const filter of filters) {
+    const absolute = join(repoRoot, filter.replace(/^\.\//, ""));
+    if (statSync(absolute).isFile())
+      files.push(relative(repoRoot, absolute).split("/").join("/"));
+    else walk(absolute);
+  }
+  return files.sort();
+}
 
 describe("check gate", () => {
   test("`test` is the seeded, randomized one-process suite whose path union CI shards", () => {
@@ -67,14 +86,20 @@ describe("check gate", () => {
   });
 
   test("CI test shards cover exactly the suite's paths", () => {
-    // Sharding must never silently drop part of the suite: the union of the
-    // matrix shards has to equal the unsharded `test` script's paths.
-    const shardPaths = [...ci.matchAll(/^\s+paths: (.+)$/gm)]
-      .flatMap((match) => match[1]?.trim().split(/\s+/) ?? [])
-      .sort();
-    const suitePaths = TEST_SUITE.split(" ")
-      .filter((part) => part.startsWith("./"))
-      .sort();
-    expect(shardPaths).toEqual(suitePaths);
+    // Sharding must never silently drop (or double-run) part of the suite:
+    // expanding the matrix shards' filters to test files has to equal the
+    // unsharded `test` script's paths expanded the same way. Subdirectory
+    // shards (src-a/b/c) can never equal the literal ./src string, so this
+    // compares sorted file sets; a file covered twice fails the equality
+    // through the duplicate entry.
+    const shardFilters = [...ci.matchAll(/^\s+paths: (.+)$/gm)].flatMap(
+      (match) => match[1]?.trim().split(/\s+/) ?? [],
+    );
+    const suiteFilters = TEST_SUITE.split(" ").filter((part) =>
+      part.startsWith("./"),
+    );
+    expect(expandToTestFiles(shardFilters)).toEqual(
+      expandToTestFiles(suiteFilters),
+    );
   });
 });
