@@ -78,10 +78,11 @@ new upstream moved under the patch:
   `packages/inference/src/providers/google-genai.test.ts`; no ledger
   entry lived in either file, so nothing was triaged out with them.
 - Upstream replaced inline `apiKey` with a `credentialId` + credential-cell
-  auth model. No entry touches auth, and first-party callers needed no
-  migration: provider auth resolves inside the vendored trees
-  (`createDefaultDependencies`), and no `src/` caller passes provider
-  credentials into them.
+  auth model. No entry touches auth, so the vendored trees needed no
+  migration; first-party callers were migrated to the new model instead
+  (each built source registers its secret in
+  `src/config/source-credentials.ts`, handed to the vendored trees as
+  their resolver).
 
 ## adapter-ts-stream-terminal-detector
 

@@ -108,8 +108,10 @@ a ledger entry), and the second re-applies each `PATCHES.md` entry with an
 as-is / adapt / subsumed triage recorded in the ledgers. No entry was
 subsumed upstream. Upstream replaced inline provider `apiKey` plumbing
 with a `credentialId` + credential-cell model; no ledger entry touches
-auth and no first-party caller passes provider credentials into the
-vendored trees, so no migration was needed.
+auth so the vendored trees needed no migration, but first-party callers
+were migrated to the new model (each built source registers its secret
+in `src/config/source-credentials.ts`, handed to the vendored trees as
+their resolver).
 
 `vendor/intx-workflow-host/workflow-definition-loader.ts` is new in this
 sync: a second partial-tree path alongside `adapters/`, carrying

@@ -3,7 +3,10 @@ import * as codexSession from "../auth/codex/session.js";
 import * as xaiSession from "../auth/xai/session.js";
 
 import type { InferenceSource } from "@intx/types/runtime";
-import { peekSourceCredentialSecret } from "../config/source-credentials.js";
+import {
+  clearSourceCredentials,
+  peekSourceCredentialSecret,
+} from "../config/source-credentials.js";
 
 const baseSource = (id: string): InferenceSource => ({
   id,
@@ -15,6 +18,7 @@ const baseSource = (id: string): InferenceSource => ({
 
 describe("refresh-inference-source", () => {
   afterEach(() => {
+    clearSourceCredentials();
     spyOn(codexSession, "getValidCodexToken").mockRestore();
     spyOn(xaiSession, "getValidXaiToken").mockRestore();
   });

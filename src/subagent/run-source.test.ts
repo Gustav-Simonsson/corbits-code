@@ -1,8 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, afterEach } from "bun:test";
 
-import { peekSourceCredentialSecret } from "../config/source-credentials.js";
+import {
+  clearSourceCredentials,
+  peekSourceCredentialSecret,
+} from "../config/source-credentials.js";
 import { OPENCODE_GO_BASE_URL } from "../../packages/opencode-go/src/index.js";
 import { buildSubAgentPrimarySource } from "./run.js";
+
+afterEach(() => {
+  clearSourceCredentials();
+});
 
 describe("buildSubAgentPrimarySource", () => {
   test("projects an Ollama root into the subagent OpenAI-compatible source", () => {
