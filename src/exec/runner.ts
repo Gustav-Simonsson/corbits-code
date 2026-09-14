@@ -976,6 +976,8 @@ export async function runExec(config: Config): Promise<ExecResult> {
       const sendResult = await activeAgent.send(operatorTaskMessage(task));
       // A suspension must not park silently in exec: the approval resume owns
       // the terminal prompt flow and delivers the decision to the reactor.
+      // No resolveParkedCallId: the vendored reactor exposes no
+      // correlationId-to-call lookup, so the history heuristic is the path.
       await createApprovalResume({
         getAgent: () => activeAgent,
         gate: permissionGate,
