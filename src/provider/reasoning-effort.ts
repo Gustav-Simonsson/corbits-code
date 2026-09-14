@@ -78,9 +78,9 @@ const MUSE_SPARK_EFFORTS: readonly ReasoningEffort[] = [
 // packages/opencode-go, and `muse-spark-1.3` / `-1.2` /
 // `-1.3-contributor-free` in packages/zen — and nothing normalizes the model
 // string before it reaches here. An exact list silently missed three of them
-// and left the ladder at the unknown-model default. This also matches
-// isMuseSparkLeafProvider in src/subagent/provider-family.ts, which already
-// keyed off the same prefix.
+// and left the ladder at the unknown-model default. The `/^.../i` + `trim()`
+// shape mirrors the grok/kimi prefix checks in
+// src/subagent/provider-family.ts.
 function isMuseSparkModel(model: string): boolean {
   return /^muse-spark/i.test(model.trim());
 }
