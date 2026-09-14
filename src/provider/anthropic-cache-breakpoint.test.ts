@@ -1,0 +1,154 @@
+import { describe, expect, test } from "bun:test";
+import type { AdapterRegistry } from "@intx/inference";
+import { createBuiltinRegistry } from "@intx/inference/providers";
+import type {
+  ConversationTurn,
+  InferenceOptions,
+  LastCycleSource,
+} from "@intx/types/runtime";
+import { withAnthropicCacheBreakpoint } from "./anthropic-cache-breakpoint.js";
+import { createOpenCodeGoAnthropicAdapter } from "./opencode-go-anthropic-adapter.js";
+import { createZenAnthropicAdapter } from "./zen-anthropic-adapter.js";
+
+function sourceFor(provider: string): LastCycleSource {
+  return { sourceId: `test-${provider}`, provider, model: "test-model" };
+}
+
+const inner: AdapterRegistry = {
+  has: (provider) => createBuiltinRegistry().has(provider),
+  resolve: (source) => {
+    if (source.provider === "zen-messages") {
+      return createZenAnthropicAdapter(source);
+    }
+    if (source.provider === "opencode-go-messages") {
+      return createOpenCodeGoAnthropicAdapter(source);
+    }
+    return createBuiltinRegistry().resolve(source);
+  },
+};
+
+const adapters = withAnthropicCacheBreakpoint(inner);
+
+function userTurn(text: string): ConversationTurn {
+  return {
+    role: "user",
+    timestamp: 0,
+    content: [{ type: "text", text }],
+  };
+}
+
+function assistantTurn(text: string): ConversationTurn {
+  return {
+    role: "assistant",
+    timestamp: 0,
+    content: [{ type: "text", text }],
+  };
+}
+
+type WireBlock = {
+  cache_control?: unknown;
+  text?: string;
+  name?: string;
+};
+
+type WireBody = {
+  messages: { role: string; content: WireBlock[] }[];
+  system?: WireBlock[];
+  tools?: WireBlock[];
+};
+
+function wireBody(body: string): WireBody {
+  return JSON.parse(body) as WireBody;
+}
+
+function build(provider: string, options: InferenceOptions): WireBody {
+  const persisted = [userTurn("q1"), assistantTurn("a1"), userTurn("q2")];
+  const nudge = userTurn("wrap up soon");
+  const request = adapters
+    .resolve(sourceFor(provider))
+    .buildRequest([...persisted, nudge], "test-model", {
+      ...options,
+      ephemeralTurns: [nudge],
+    } as InferenceOptions);
+  return wireBody(request.body);
+}
+
+describe("anthropic cache breakpoint with ephemeral turns", () => {
+  for (const provider of [
+    "anthropic",
+    "zen-messages",
+    "opencode-go-messages",
+  ]) {
+    test(`${provider}: breakpoint lands on the last persisted user turn, not the ephemeral tail`, () => {
+      const body = build(provider, {});
+
+      expect(body.messages).toHaveLength(4);
+      expect(body.messages[3]?.content[0]?.text).toBe("wrap up soon");
+      expect(
+        body.messages[2]?.content[body.messages[2].content.length - 1]
+          ?.cache_control,
+      ).toEqual({ type: "ephemeral" });
+      expect(
+        body.messages[3]?.content.filter(
+          (block) => block.cache_control !== undefined,
+        ),
+      ).toEqual([]);
+    });
+  }
+
+  test("system and tools breakpoints stay untouched while the nudge is attached", () => {
+    const persisted = [
+      { ...userTurn("sys"), role: "system" as const },
+      userTurn("q1"),
+      assistantTurn("a1"),
+      userTurn("q2"),
+    ];
+    const nudge = userTurn("wrap up soon");
+    const request = adapters
+      .resolve(sourceFor("anthropic"))
+      .buildRequest([...persisted, nudge], "test-model", {
+        ephemeralTurns: [nudge],
+        tools: [{ name: "run_shell", description: "run", inputSchema: {} }],
+      } as InferenceOptions);
+    const body = wireBody(request.body);
+
+    expect(body.system?.[0]?.cache_control).toEqual({ type: "ephemeral" });
+    expect(body.tools?.[body.tools.length - 1]?.cache_control).toEqual({
+      type: "ephemeral",
+    });
+    expect(
+      body.messages[2]?.content[body.messages[2].content.length - 1]
+        ?.cache_control,
+    ).toEqual({ type: "ephemeral" });
+    expect(
+      body.messages[3]?.content.filter(
+        (block) => block.cache_control !== undefined,
+      ),
+    ).toEqual([]);
+  });
+
+  test("without ephemeral turns the request is byte-identical to the base adapter", () => {
+    const turns = [userTurn("q1"), assistantTurn("a1"), userTurn("q2")];
+    const base = inner
+      .resolve(sourceFor("anthropic"))
+      .buildRequest(turns, "test-model", {});
+    const wrapped = adapters
+      .resolve(sourceFor("anthropic"))
+      .buildRequest(turns, "test-model", {});
+    expect(wrapped.body).toBe(base.body);
+  });
+
+  test("non-anthropic providers pass through untouched", () => {
+    const persisted = [userTurn("q1"), assistantTurn("a1"), userTurn("q2")];
+    const nudge = userTurn("wrap up soon");
+    const options = { ephemeralTurns: [nudge] } as InferenceOptions;
+    const base = inner
+      .resolve(sourceFor("openai"))
+      .buildRequest([...persisted, nudge], "test-model", options);
+    const wrapped = adapters
+      .resolve(sourceFor("openai"))
+      .buildRequest([...persisted, nudge], "test-model", options);
+    expect(wrapped.body).toBe(base.body);
+    expect(wrapped.body).not.toContain("cache_control");
+  });
+});
