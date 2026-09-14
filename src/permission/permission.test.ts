@@ -1069,6 +1069,47 @@ describe("gate denies path tools path-escape will reject", () => {
   });
 });
 
+describe("gate cache identity matches the plugin rewrite for nested paths", () => {
+  // authorizeCall caches by identityArguments; executionVerdict must hit that
+  // cache when execution hands it the plugin-rewritten (workspace-absolute)
+  // arguments. A grant seeded after authorize changes what a fresh decide
+  // would say, so a miss visibly flips to allow while a hit reuses the ask.
+  test("nested in-bounds call authorizes once and executes without re-decide", async () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "corbits-identity-")));
+    const gate = createPermissionGate({
+      approvals: [],
+      cwd,
+      requestApproval: async () => ({ allow: false }),
+      interactive: true,
+      skipPermissions: false,
+      reactorGated: true,
+    });
+    const call: ToolCall = {
+      id: "c",
+      name: "write_file",
+      arguments: {
+        path: "notes.txt",
+        options: { path: "notes.txt" },
+        content: "x",
+      },
+    };
+    const authorized = await gate.authorizeCall(call);
+    expect(authorized.effect).toBe("ask");
+    gate.setSeededApprovals([
+      { tool: "write_file", pattern: join(cwd, "notes.txt") },
+    ]);
+    const executed = await gate.executionVerdict({
+      ...call,
+      arguments: {
+        path: join(cwd, "notes.txt"),
+        options: { path: join(cwd, "notes.txt") },
+        content: "x",
+      },
+    });
+    expect(executed.effect).toBe("ask");
+  });
+});
+
 describe("createPermissionGate", () => {
   test("allow-tier tools pass without asking", async () => {
     let asked = 0;
