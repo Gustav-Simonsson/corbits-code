@@ -326,9 +326,10 @@ shape.
   `skill_search` / `use_skill` when they only set `user-invocable: false`
   (`git-rebase`, `linear-issue-workflow`, `style`, `philosophy`,
   `native-integration`, `typescript`, `ponytail`, `opsh`). Background libs
-  such as `git-worktrees` set both flags. Bake-only bodies such as
-  `idiot-proof` and `native-runtime` also set both flags (baked into workers;
-  not a slash and not listed for `use_skill`). The slash command is a direct
+  such as `git-worktrees` set both flags. Bodies that stay out of discovery
+  such as `idiot-proof` and `native-runtime` also set both flags (not a slash,
+  and hidden from the skill listing — though an explicit `use_skill` load by
+  name still resolves). The slash command is a direct
   user entry point on top.
 - **First-party catalog.** `plugins/corbits-skills/` (id `corbits-skills`,
   kind `command`, `defaultEnabled: true`) is the bundled skill catalog. Origin

@@ -345,7 +345,7 @@ describe("grant-mismatch asks carry the guard reason as a notice (CL-6824)", () 
     expect(verdict.allowed).toBe(false);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.notice).toBe(
-      "A standing grant matches this command, but it uses --force, so it still needs approval.",
+      "A standing grant matches this command, but it uses --force=true, so it still needs approval.",
     );
   });
 
@@ -357,7 +357,7 @@ describe("grant-mismatch asks carry the guard reason as a notice (CL-6824)", () 
     expect(verdict.allowed).toBe(false);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.notice).toBe(
-      "A standing grant matches this command, but it uses --force, so it still needs approval.",
+      "A standing grant matches this command, but it uses -f=true, so it still needs approval.",
     );
   });
 
@@ -369,7 +369,7 @@ describe("grant-mismatch asks carry the guard reason as a notice (CL-6824)", () 
     expect(verdict.allowed).toBe(false);
     expect(seen).toHaveLength(1);
     expect(seen[0]?.notice).toBe(
-      "A standing grant matches this command, but it uses --force, so it still needs approval.",
+      "A standing grant matches this command, but it uses -ftrue, so it still needs approval.",
     );
   });
 

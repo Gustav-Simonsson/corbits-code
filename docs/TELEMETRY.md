@@ -86,7 +86,8 @@ skill out of slash synthesis, not out of name reporting: eleven bundled
 skills carry the flag — eight stay listed and loadable (`git-rebase`,
 `linear-issue-workflow`, `opsh`, `philosophy`, `style`, `typescript`,
 `native-integration`, `ponytail`), `git-worktrees` resolves by explicit name
-only, and two stay hidden bake-only (`idiot-proof`, `native-runtime`). Of
+only, and two stay hidden from discovery (`idiot-proof`, `native-runtime`):
+still loadable by explicit name, but every load reports `custom`. Of
 the eleven, seven are reported by name and four stay `custom` (pinned;
 conservative under-reporting, never a leak). Unknown,
 project-local, and plugin-authored skill names are never transmitted —

@@ -11,6 +11,7 @@ import {
   streamRowGutter,
   toolRowLines,
   toolSentenceLines,
+  transcriptSyntaxStyle,
   type RowLayout,
   type StreamRow,
 } from "./stream";
@@ -531,5 +532,17 @@ describe("sub-agent dispatch row marks", () => {
     });
     const merged = mergeToolRows({ ...dispatch, agentWorking: true }, result);
     expect(streamRowGutter(merged, SOLO).content).toContain("✓");
+  });
+});
+
+// TUI markdown links are click-only: there is no hover tracking, so no hover
+// state may add an affordance the idle render does not have. Pin
+// underline-absence on the link scopes so a future hover style cannot sneak
+// one in (CL-7927).
+describe("transcriptSyntaxStyle markdown links", () => {
+  test("link cells carry no underline", () => {
+    const styles = transcriptSyntaxStyle().getAllStyles();
+    expect(styles.get("markup.link")?.underline).not.toBe(true);
+    expect(styles.get("markup.link.url")?.underline).not.toBe(true);
   });
 });
