@@ -56,9 +56,17 @@ async function waitForChildExit(
  * spawns a real `sleep` descendant and pends (like shell collection output);
  * the abort listener kills the child first, mirroring runGuardedShell's
  * onAbort. `stream()` stays open until `releaseStream` — the session cannot
- * drain while the descendant is wedged.
+ * drain while the descendant is wedged. `leakOnAbort` models a stub that
+ * never kills: send-abort rejects and close() releases the stream, both
+ * without killAll (and close stays non-wedged). The descendant is spawned
+ * outside the shell guard, so production teardown never sees it — the run
+ * must settle with the child still live, and the test reaps its own orphan
+ * via the exposed killAll.
  */
-function createShellChildAgent(opts?: { wedgeClose?: boolean }) {
+function createShellChildAgent(opts?: {
+  wedgeClose?: boolean;
+  leakOnAbort?: boolean;
+}) {
   const children: ChildProcess[] = [];
   let releaseStream: () => void = () => {
     // Replaced by the streamGate resolver below; the initializer only
@@ -84,6 +92,7 @@ function createShellChildAgent(opts?: { wedgeClose?: boolean }) {
   return {
     children,
     releaseStream,
+    killAll,
     async send(_content: string, optsSend?: { signal?: AbortSignal }) {
       const child = spawn("sleep", ["60"], {
         stdio: "ignore",
@@ -93,7 +102,10 @@ function createShellChildAgent(opts?: { wedgeClose?: boolean }) {
       children.push(child);
       return await new Promise<never>((_resolve, reject) => {
         const abort = (reason: unknown): void => {
-          killAll();
+          // leakOnAbort rejects without killing: the descendant stays live
+          // through teardown (production only reaps shell-guard-tracked
+          // children, and this stub-spawned sleep is not one).
+          if (opts?.leakOnAbort !== true) killAll();
           reject(reason instanceof Error ? reason : new Error("aborted"));
         };
         if (optsSend?.signal?.aborted === true) {
@@ -117,8 +129,9 @@ function createShellChildAgent(opts?: { wedgeClose?: boolean }) {
     deliver: () => undefined,
     close: async () => {
       // close() initiates the kill, but a wedged descendant holds the stream
-      // open and the close itself never completes.
-      killAll();
+      // open and the close itself never completes. leakOnAbort instead
+      // releases the stream without killing, and stays non-wedged.
+      if (opts?.leakOnAbort !== true) killAll();
       releaseStream();
       if (opts?.wedgeClose === true) {
         await new Promise<never>(() => {
@@ -180,27 +193,39 @@ async function runWithShellChildAgent(
   return { runPromise, handles };
 }
 
+/**
+ * Drive a body with the live-tool-dispatch module mocked to hand out `agent`.
+ * Extracts the mock boilerplate shared by every test below; the body is
+ * invoked unchanged.
+ */
+async function runWithStubAgent<T>(
+  agent: ReturnType<typeof createShellChildAgent>,
+  body: () => Promise<T>,
+): Promise<T> {
+  return withMockedModuleDuring(
+    import.meta.resolve("../agent/live-tool-dispatch.js"),
+    (real: typeof import("../agent/live-tool-dispatch.js")) => ({
+      ...real,
+      createAgentWithLiveToolDispatch: async () =>
+        agent as unknown as Awaited<
+          ReturnType<typeof real.createAgentWithLiveToolDispatch>
+        >,
+    }),
+    body,
+  );
+}
+
 describe("CL-7990 shell-child reap: sessions holding a live shell child settle", () => {
   test("interrupt settles a session parked behind a live shell child", async () => {
     const agent = createShellChildAgent();
-    const outcome = await withMockedModuleDuring(
-      import.meta.resolve("../agent/live-tool-dispatch.js"),
-      (real: typeof import("../agent/live-tool-dispatch.js")) => ({
-        ...real,
-        createAgentWithLiveToolDispatch: async () =>
-          agent as unknown as Awaited<
-            ReturnType<typeof real.createAgentWithLiveToolDispatch>
-          >,
-      }),
-      async () => {
-        const { runPromise, handles } = await runWithShellChildAgent(agent, {
-          persist: true,
-        });
-        handles.interrupt();
-        const result = (await runPromise) as { interrupted?: boolean };
-        return result;
-      },
-    );
+    const outcome = await runWithStubAgent(agent, async () => {
+      const { runPromise, handles } = await runWithShellChildAgent(agent, {
+        persist: true,
+      });
+      handles.interrupt();
+      const result = (await runPromise) as { interrupted?: boolean };
+      return result;
+    });
     expect(outcome.interrupted).toBe(true);
     for (const child of agent.children) {
       await waitForChildExit(child);
@@ -218,46 +243,36 @@ describe("CL-7990 shell-child reap: sessions holding a live shell child settle",
       retained: true,
     });
     const followupCalls: string[] = [];
-    const outcome = await withMockedModuleDuring(
-      import.meta.resolve("../agent/live-tool-dispatch.js"),
-      (real: typeof import("../agent/live-tool-dispatch.js")) => ({
-        ...real,
-        createAgentWithLiveToolDispatch: async () =>
-          agent as unknown as Awaited<
-            ReturnType<typeof real.createAgentWithLiveToolDispatch>
-          >,
-      }),
-      async () => {
-        const { runPromise, handles } = await runWithShellChildAgent(agent, {
-          persist: true,
-        });
-        // Wire the live run's handles like agent-fleet's onAgentReady.
-        store.registerInterrupt(session.id, handles.interrupt);
-        store.registerFollowup(session.id, async (message: string) => {
-          followupCalls.push(message);
-          return "steer reply";
-        });
-        store.markRunning(session.id);
-        // The steer arrives while the worker is wedged: it stashes and fires
-        // the interrupt; the bounded teardown must still settle the run.
-        expect(
-          store.sendInputOne(session.id, "steer mid-wedge", {
-            interrupt: true,
-          }),
-        ).toEqual({ ok: true, status: "interrupted" });
-        const result = (await runPromise) as RunSubAgentResult;
-        // agent-fleet settlement: attach the salvage so the stashed steer
-        // launches instead of stranding on a phantom turn.
-        store.attachReport(
-          session.id,
-          result.report,
-          result.stopReason !== undefined
-            ? { stopReason: result.stopReason }
-            : undefined,
-        );
-        return result;
-      },
-    );
+    const outcome = await runWithStubAgent(agent, async () => {
+      const { runPromise, handles } = await runWithShellChildAgent(agent, {
+        persist: true,
+      });
+      // Wire the live run's handles like agent-fleet's onAgentReady.
+      store.registerInterrupt(session.id, handles.interrupt);
+      store.registerFollowup(session.id, async (message: string) => {
+        followupCalls.push(message);
+        return "steer reply";
+      });
+      store.markRunning(session.id);
+      // The steer arrives while the worker is wedged: it stashes and fires
+      // the interrupt; the bounded teardown must still settle the run.
+      expect(
+        store.sendInputOne(session.id, "steer mid-wedge", {
+          interrupt: true,
+        }),
+      ).toEqual({ ok: true, status: "interrupted" });
+      const result = (await runPromise) as RunSubAgentResult;
+      // agent-fleet settlement: attach the salvage so the stashed steer
+      // launches instead of stranding on a phantom turn.
+      store.attachReport(
+        session.id,
+        result.report,
+        result.stopReason !== undefined
+          ? { stopReason: result.stopReason }
+          : undefined,
+      );
+      return result;
+    });
     expect(outcome.interrupted).toBe(true);
     // The stash launched synchronously from attachReport: the queued steer
     // was delivered, not dropped, and the shell child was reaped.
@@ -271,40 +286,68 @@ describe("CL-7990 shell-child reap: sessions holding a live shell child settle",
     "close settles a session whose stream is wedged by a shell descendant",
     async () => {
       const agent = createShellChildAgent({ wedgeClose: true });
-      const outcome = await withMockedModuleDuring(
-        import.meta.resolve("../agent/live-tool-dispatch.js"),
-        (real: typeof import("../agent/live-tool-dispatch.js")) => ({
-          ...real,
-          createAgentWithLiveToolDispatch: async () =>
-            agent as unknown as Awaited<
-              ReturnType<typeof real.createAgentWithLiveToolDispatch>
-            >,
-        }),
-        async () => {
-          const { runPromise, handles } = await runWithShellChildAgent(agent, {
-            persist: false,
-          });
-          const closeError = await handles.close(500).then(
-            () => undefined,
-            (err: unknown) => err,
-          );
-          expect(String(defined(closeError))).toMatch(/session close exceeded/);
-          const settled = await Promise.race([
-            runPromise.then(
-              (result) => ({ state: "resolved" as const, result }),
-              (error: unknown) => ({ state: "rejected" as const, error }),
-            ),
-            new Promise<{ state: "timeout" }>((resolve) => {
-              setTimeout(() => resolve({ state: "timeout" }), 45_000);
-            }),
-          ]);
-          expect(settled.state).not.toBe("timeout");
-          return settled;
-        },
-      );
+      const outcome = await runWithStubAgent(agent, async () => {
+        const { runPromise, handles } = await runWithShellChildAgent(agent, {
+          persist: false,
+        });
+        const closeError = await handles.close(500).then(
+          () => undefined,
+          (err: unknown) => err,
+        );
+        expect(String(defined(closeError))).toMatch(/session close exceeded/);
+        const settled = await Promise.race([
+          runPromise.then(
+            (result) => ({ state: "resolved" as const, result }),
+            (error: unknown) => ({ state: "rejected" as const, error }),
+          ),
+          new Promise<{ state: "timeout" }>((resolve) => {
+            setTimeout(() => resolve({ state: "timeout" }), 45_000);
+          }),
+        ]);
+        expect(settled.state).not.toBe("timeout");
+        return settled;
+      });
       expect(outcome.state).not.toBe("timeout");
       for (const child of agent.children) {
         await waitForChildExit(child);
+      }
+    },
+    { timeout: 60_000 },
+  );
+
+  test(
+    "interrupt with a leaky stub settles while the descendant is still live",
+    async () => {
+      // The stub never kills: send-abort rejects and close() releases the
+      // stream, both without killAll (and close stays non-wedged). The run
+      // must still settle — teardown never waits on a descendant it cannot
+      // see. The stub-spawned sleep is outside the shell guard's tracked
+      // set, so production cannot reap it: the test reaps its own orphan in
+      // the finally, and waitForChildExit proves the collection.
+      const agent = createShellChildAgent({ leakOnAbort: true });
+      try {
+        const outcome = await runWithStubAgent(agent, async () => {
+          const { runPromise, handles } = await runWithShellChildAgent(agent, {
+            persist: true,
+          });
+          handles.interrupt();
+          const result = (await runPromise) as { interrupted?: boolean };
+          return result;
+        });
+        expect(outcome.interrupted).toBe(true);
+        // The wedged-descendant shape, for real this time: the child is
+        // still live at settle time — no stub kill and no production reap
+        // collected it behind the scenes.
+        expect(agent.children.length).toBeGreaterThan(0);
+        for (const child of agent.children) {
+          expect(child.exitCode).toBeNull();
+          expect(child.signalCode).toBeNull();
+        }
+      } finally {
+        agent.killAll();
+        for (const child of agent.children) {
+          await waitForChildExit(child);
+        }
       }
     },
     { timeout: 60_000 },
