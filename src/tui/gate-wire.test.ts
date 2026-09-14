@@ -22,7 +22,7 @@ import {
 } from "./shell/overlay-list.js";
 import { streamRowGutter } from "./stream.js";
 import { APPROVAL_UNAVAILABLE_MESSAGE } from "./gate-events.js";
-import { SESSION_IDENTITY_ABORT_REASON } from "./queued-delivery.js";
+import { SESSION_IDENTITY_ABORT_REASON } from "./delivery-queue.js";
 import {
   approvalOutcomeFromSelection,
   operatorCancelResult,

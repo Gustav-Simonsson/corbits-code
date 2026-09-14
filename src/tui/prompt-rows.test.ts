@@ -6,13 +6,11 @@ import {
   PROMPT_CAP_FRACTION,
   PROMPT_IDLE_INPUT_ROWS,
   PROMPT_IDLE_ROWS,
-} from "./geometry/index.js";
-import {
   promptBoxCapRows,
   promptBoxRows,
   promptInputRows,
   promptIsScrolling,
-} from "./prompt-rows.js";
+} from "./geometry/zones.js";
 
 describe("prompt box sizing", () => {
   test("an empty prompt still offers a composing area", () => {

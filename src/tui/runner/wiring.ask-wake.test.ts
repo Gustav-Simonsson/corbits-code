@@ -19,8 +19,8 @@ import { clearTranscript } from "../shell/chrome.js";
 import {
   createDeliveryGeneration,
   createLeftoverSend,
-} from "../queued-delivery.js";
-import { createSessionOperationQueue } from "../session-operation-queue.js";
+  createSessionOperationQueue,
+} from "../delivery-queue.js";
 
 test("failed reset releases publication without flushing partially cancelled workers", () => {
   const store = createSubAgentSessionStore();

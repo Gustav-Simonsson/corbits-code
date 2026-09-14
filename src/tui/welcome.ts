@@ -29,7 +29,7 @@ import {
   MARK_SMALL,
   type MarkGrid,
 } from "./mark-shape.js";
-import { resolveSideMargin } from "./geometry/margins.js";
+import { resolveSideMargin } from "./geometry/zones.js";
 import { destroySubtree } from "./teardown.js";
 import { UI } from "./theme.js";
 import { stringWidth } from "./view/height.js";

@@ -34,7 +34,7 @@ row at a time down to its 3-row base — never the transcript
 (`COLLAPSE_ORDER` in `zones.ts`).
 
 Horizontally, every surface sits inside one shared gutter
-(`resolveSideMargin`, `src/tui/geometry/margins.ts`) so the shell reads
+(`resolveSideMargin`, `src/tui/geometry/zones.ts`) so the shell reads
 as a single column of content rather than stacked panes.
 `resolveGeometry` always returns `layoutMode: "stack"` — full-width
 y-stack, no dual-column rail. Live workers paint in the agents strip
@@ -711,7 +711,7 @@ thing they were trying to deliver. It now reports `interrupt — N pending
 kept`: the run stops, the queue survives, and those messages are handed over
 at the interrupt itself (`doInterrupt` drains after `port.interrupt()`), not
 left waiting on an idle event the stop may never produce (`interrupt` in
-`session-queue.ts` no longer clears `items`).
+`delivery-queue.ts` no longer clears `items`).
 
 **Fleet agent lanes on redirect.** Soft steer (Enter mid-run) and follow-up
 (queued drain) leave running workers alone — they never call

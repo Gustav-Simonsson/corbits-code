@@ -1,9 +1,22 @@
 import type { StyledSegment } from "../markdown-parser.js";
 import { color, type SemanticRole } from "../semantic-theme.js";
 import { wrapLines } from "./height.js";
-import type { ViewNode } from "./spec.js";
+import type { Tone, ViewNode } from "./spec.js";
 import { VIEW_GRID_MAX_ROWS } from "./spec.js";
-import { GAP, PAD, toneRole, truncate } from "./registry.js";
+
+const GAP = 2;
+const PAD = 2;
+
+function toneRole(tone: Tone | undefined): SemanticRole | undefined {
+  if (tone === undefined || tone === "default") return undefined;
+  return tone;
+}
+
+function truncate(text: string, width: number): string {
+  if (width <= 0) return "";
+  if (text.length <= width) return text;
+  return width <= 1 ? text.slice(0, width) : `${text.slice(0, width - 1)}…`;
+}
 
 export type StyledLine = StyledSegment[];
 

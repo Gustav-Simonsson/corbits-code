@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { defined } from "../../tests/helpers/defined.js";
 import { toolCallRow } from "./diff";
-import { resolveSideMargin } from "./geometry/margins";
+import { resolveSideMargin } from "./geometry/zones";
 import { withTestRenderer } from "./harness";
 import { pushToolCall, pushToolResult } from "./tool-rows";
 import {

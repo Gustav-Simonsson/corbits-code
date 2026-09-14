@@ -5,7 +5,7 @@ import type { ConversationTurn } from "@intx/types/runtime";
 
 import type { PermissionGate } from "../../../src/permission/gate.js";
 import { createApprovalResume } from "../../../src/session/approval-resume.js";
-import { createSessionOperationQueue } from "../../../src/tui/session-operation-queue.js";
+import { createSessionOperationQueue } from "../../../src/tui/delivery-queue.js";
 import {
   runWhileAgentBusy,
   type RunnerState,

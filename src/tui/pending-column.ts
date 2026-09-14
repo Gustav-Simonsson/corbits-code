@@ -9,14 +9,14 @@
  * transcript rows on it: items sit here while pending and land in the
  * transcript as ordinary user rows only when they actually deliver.
  *
- * Pure: session-queue items in, row models out. Paint lives in
+ * Pure: delivery-queue items in, row models out. Paint lives in
  * shell/chrome.ts (`syncPendingRows`); the row budget lives in geometry
  * (zone `pending`).
  */
 
 import { PENDING_MAX_VISIBLE } from "./geometry/zones.js";
 import { sliceToWidth, stringWidth } from "./view/height.js";
-import type { QueueItem } from "./session-queue.js";
+import type { QueueItem } from "./delivery-queue.js";
 
 /** Marker opening every pending row — a pointer at the prompt it sits on. */
 const ROW_MARK = "›";

@@ -5,7 +5,7 @@
  * gutter, and the reasoning line has to keep costing exactly one turn gap.
  */
 import { describe, expect, test } from "bun:test";
-import { resolveContentWidth, resolveSideMargin } from "./geometry/margins";
+import { resolveContentWidth, resolveSideMargin } from "./geometry/zones";
 import { withTestRenderer, type Harness } from "./harness";
 import { appendStreamRow } from "./shell/chrome";
 import { createAppShell } from "./shell/index";

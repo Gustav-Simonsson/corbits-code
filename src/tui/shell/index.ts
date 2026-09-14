@@ -25,7 +25,7 @@ import {
 import { destroySubtree } from "../teardown.js";
 import { createRecordingClipboard } from "../copy-path.js";
 import { copyFinishedSelection } from "../selection-copy.js";
-import { badgeCount, createSessionQueue, enqueue } from "../session-queue.js";
+import { badgeCount, createSessionQueue, enqueue } from "../delivery-queue.js";
 import { UI } from "../theme.js";
 import { createOverlayView, isDecisionOverlay } from "../overlay-view.js";
 import { emptyKillRing } from "../prompt-kill-ring.js";

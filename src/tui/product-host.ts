@@ -64,12 +64,11 @@ import {
   setPaletteCatalog,
 } from "./shell/palette.js";
 import { surfaceSystemNotice } from "./shell/prompt.js";
-import type { QueueKind } from "./session-queue.js";
+import type { DeliverySettle, QueueKind } from "./delivery-queue.js";
 import { hydrateHistoryRows } from "./history-hydrate.js";
 import type { StreamRow } from "./stream.js";
 
 import type { PendingImageAttachment } from "./image-attachments.js";
-import type { DeliverySettle } from "./queued-delivery.js";
 
 /** Suffix the row matching `activeId` (if any) so it reads as the current pick. */
 function annotateCurrent(

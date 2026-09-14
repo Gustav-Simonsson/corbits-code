@@ -27,7 +27,7 @@ import {
 import { prefetchGoModels as prefetchGoModelsRequest } from "../../provider/opencode-go-models.js";
 import { prefetchZenModels as prefetchZenModelsRequest } from "../../provider/zen-models.js";
 import { isZenProviderId } from "../../../packages/zen/src/index.js";
-import { resolveSideMargin } from "../geometry/margins.js";
+import { resolveSideMargin } from "../geometry/zones.js";
 import {
   residualIdFromSelection,
   residualListFromCatalog,

@@ -20,12 +20,12 @@ import { createCorrelationAcceptance } from "../../src/tui/correlation-acceptanc
 import type { PermissionGateEvent } from "../../src/tui/gate-events.js";
 import {
   createDeliveryGeneration,
+  createSessionOperationQueue,
   SESSION_IDENTITY_ABORT_REASON,
-} from "../../src/tui/queued-delivery.js";
+} from "../../src/tui/delivery-queue.js";
 import { createGateRequestApproval } from "../../src/tui/request-approval.js";
 import { startInterruptRebuild } from "../../src/tui/runner/exit.js";
 import { runWhileAgentBusy } from "../../src/tui/runner/state.js";
-import { createSessionOperationQueue } from "../../src/tui/session-operation-queue.js";
 
 const SUSPENDED: SendResult = {
   type: "suspended",

@@ -4,8 +4,7 @@
  */
 
 import type { PendingImageAttachment } from "./image-attachments.js";
-import type { QueueItem, QueueKind } from "./session-queue.js";
-import type { DeliverySettle } from "./queued-delivery.js";
+import type { DeliverySettle, QueueItem, QueueKind } from "./delivery-queue.js";
 import type { SessionPort } from "./runtime-bridge.js";
 
 export type SubmitClassification = "agent" | "local" | "empty";

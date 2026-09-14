@@ -31,7 +31,7 @@ import {
   enqueue,
   enqueueSteer,
   interrupt,
-} from "../session-queue.js";
+} from "../delivery-queue.js";
 import { UI } from "../theme.js";
 
 import {

@@ -18,7 +18,7 @@ import {
 } from "@opentui/core";
 import { sliceTailToWidth, sliceToWidth, stringWidth } from "../view/height.js";
 import { promptRowCount } from "../prompt-input.js";
-import { promptBoxRows } from "../prompt-rows.js";
+import { promptBoxRows } from "../geometry/zones.js";
 import { composeNoticeLine, resolveWaitingOn } from "../notice-line.js";
 import {
   fitPendingRow,
@@ -70,7 +70,7 @@ import {
   setRunState,
   steerCount,
   type RunState,
-} from "../session-queue.js";
+} from "../delivery-queue.js";
 import {
   agentVoicesIn,
   isCollapsibleRow,

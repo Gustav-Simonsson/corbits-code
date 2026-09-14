@@ -77,8 +77,10 @@ import {
 import { ensureFreshInferenceSource } from "../../subagent/refresh-inference-source.js";
 import { setAgentSourceUnlessClosed } from "../agent-source-sync.js";
 import { createSessionCostAccumulator } from "../../cost/session-cost.js";
-import { createSessionOperationQueue } from "../session-operation-queue.js";
-import { createDeliveryGeneration } from "../queued-delivery.js";
+import {
+  createDeliveryGeneration,
+  createSessionOperationQueue,
+} from "../delivery-queue.js";
 import { createCorrelationAcceptance } from "../correlation-acceptance.js";
 import {
   createAgentToolset,

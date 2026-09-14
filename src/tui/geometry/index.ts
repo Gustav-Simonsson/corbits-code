@@ -20,6 +20,10 @@ export {
   zoneDeclaration,
   type ZoneDeclaration,
   type ZoneId,
+  promptBoxCapRows,
+  promptBoxRows,
+  promptInputRows,
+  promptIsScrolling,
 } from "./zones.js";
 
 export {
@@ -33,7 +37,7 @@ export {
   resolveContentWidth,
   resolveSideMargin,
   resolveTopPadRows,
-} from "./margins.js";
+} from "./zones.js";
 
 export {
   desiredHeights,

@@ -31,7 +31,7 @@ import { type LandingAbove, type LandingBelowContent } from "../landing.js";
 import { type PaletteCommand } from "../command-catalog.js";
 import { type ObserveSession } from "../residuals.js";
 import { type ClipboardPort, type CopyTarget } from "../copy-path.js";
-import { type RunState, type SessionQueueState } from "../session-queue.js";
+import { type RunState, type SessionQueueState } from "../delivery-queue.js";
 import { type StreamRow } from "../stream.js";
 import { createOverlayView } from "../overlay-view.js";
 import { type KillRing } from "../prompt-kill-ring.js";

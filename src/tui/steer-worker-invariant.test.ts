@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { attachSessionBridge, createRecordingPort } from "./runtime-bridge";
 import { createAppShell } from "./shell/index";
 import { withTestRenderer } from "./harness";
-import { badgeCount } from "./session-queue";
+import { badgeCount } from "./delivery-queue";
 
 describe("CL-6291 worker-alive invariants", () => {
   test("busy Enter soft-steers: enqueue steer, never port.interrupt", async () => {

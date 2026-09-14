@@ -158,10 +158,10 @@ export interface RunnerServices {
     typeof import("../../cost/session-cost.js").createSessionCostAccumulator
   >;
   sessionOps: ReturnType<
-    typeof import("../session-operation-queue.js").createSessionOperationQueue
+    typeof import("../delivery-queue.js").createSessionOperationQueue
   >;
   deliveryGeneration: ReturnType<
-    typeof import("../queued-delivery.js").createDeliveryGeneration
+    typeof import("../delivery-queue.js").createDeliveryGeneration
   >;
   correlationAcceptance: ReturnType<
     typeof import("../correlation-acceptance.js").createCorrelationAcceptance

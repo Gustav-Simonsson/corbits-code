@@ -4,7 +4,8 @@ import type {
 } from "@intx/types/runtime";
 
 import { isPersistedOccupancyWakeText } from "../subagent/mailbox-mail-drive.js";
-import { validateView, type ViewNode } from "./view/index.js";
+import { validateView } from "./view/validate.js";
+import type { ViewNode } from "./view/spec.js";
 
 interface PlanBlockStep {
   file: string;

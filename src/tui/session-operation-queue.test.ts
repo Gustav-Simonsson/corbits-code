@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { createSessionOperationQueue } from "./session-operation-queue.js";
+import { createSessionOperationQueue } from "./delivery-queue.js";
 
 test("serial operation queue executes operations in order without interleaving", async () => {
   const log: string[] = [];
