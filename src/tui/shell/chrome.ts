@@ -1039,6 +1039,8 @@ export function appendTranscript(
   opts?: { readonly fg?: string },
 ): void {
   clearLandingMark(shell);
+  // A raw paint like any other: it breaks a run of identical system echoes.
+  paintSequence.set(shell, (paintSequence.get(shell) ?? 0) + 1);
   shell.lineCount += 1;
   shell.transcript.add(
     new TextRenderable(shell.renderer as CliRenderer, {
@@ -1082,6 +1084,30 @@ export function appendObserveStreamRow(
 }
 
 /**
+ * Startup echoes (model-picker choice, permission notices) can arrive once per
+ * account or session and read as stutter when they paint back to back. A
+ * system row identical to the one already on top of the transcript adds
+ * nothing, so it collapses — but only when nothing painted since that top row
+ * landed. Observe child rows paint through this same path without touching the
+ * parent log, so log adjacency alone would swallow repeat farewell rows like
+ * "left observe" across enter/leave cycles; the sequence check restores them.
+ */
+const paintSequence = new WeakMap<AppShell, number>();
+const systemPushSequence = new WeakMap<AppShell, number>();
+
+function isDuplicateSystemEcho(shell: AppShell, row: StreamRow): boolean {
+  if (row.role !== "system") return false;
+  const top = shell.streamLog[shell.streamLog.length - 1];
+  if (top === undefined || top.role !== "system" || top.text !== row.text) {
+    return false;
+  }
+  // The in-flight call already advanced the sequence, so the top row is
+  // back-to-back only when it was pushed by the immediately previous paint.
+  const seq = paintSequence.get(shell) ?? 0;
+  return systemPushSequence.get(shell) === seq - 1;
+}
+
+/**
  * Paint + push onto the visible streamLog (child while observing, parent
  * otherwise). The paint tree stays 1:1 with the (retention-capped) log —
  * CL-5551 already bounds `streamLog` to `MAX_RETAINED_STREAM_ROWS`, so there
@@ -1092,8 +1118,12 @@ export function appendObserveStreamRow(
  */
 function paintAppendStreamRow(shell: AppShell, row: StreamRow): void {
   clearLandingMark(shell);
+  const seq = (paintSequence.get(shell) ?? 0) + 1;
+  paintSequence.set(shell, seq);
+  if (isDuplicateSystemEcho(shell, row)) return;
   const gainedVoice = noteAgentVoice(shell, row);
   shell.streamLog.push(row);
+  if (row.role === "system") systemPushSequence.set(shell, seq);
   const baseBefore = shell.streamLogBase;
   shell.streamLogBase = trimRetainedLog(shell.streamLog, shell.streamLogBase);
   shell.lineCount = shell.streamLog.length;
