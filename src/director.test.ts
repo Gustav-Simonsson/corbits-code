@@ -9,7 +9,6 @@ import {
   LEGACY_COMPACT_SPACER_TEXT,
   compactorNoOpFloor,
 } from "./session/compactor.js";
-import type { SessionMetadata, TaskBoundary } from "./session/compactor.js";
 import {
   validateActions,
   type ExtendedInferenceOptions,
@@ -1353,12 +1352,11 @@ describe("updateToolDefinitions rewrites infer tools", () => {
     await toolset.dispose();
   });
 
-  test("the new-task path also carries the current tools", async () => {
-    const classifier = async (_msg: string, _meta: SessionMetadata) =>
-      ({ kind: "new_task" as const, reason: "pivot" }) as TaskBoundary;
+  // CL-7919: the taskClassifier host closure is gone, so a plain message
+  // flows to normal inference with no new-task checkpoint or envelope.
+  test("a message with no classifier configured takes the normal infer path", async () => {
     const director = createChatDirector("base-prompt", [], {
       onTasksChange: () => undefined,
-      taskClassifier: classifier,
     });
     director.updateToolDefinitions([lateTool]);
 
@@ -1373,6 +1371,87 @@ describe("updateToolDefinitions rewrites infer tools", () => {
       | undefined;
     expect(inferAction).toBeDefined();
     expect(inferToolNames(inferAction)).toContain("mcp__acme__list_issues");
+    expect(actions.some((a) => a.type === "checkpoint")).toBe(false);
+  });
+});
+
+describe("CL-7919 coordinator shape", () => {
+  const makeMessageReceivedEvent = (content: string) =>
+    ({
+      type: "message.received",
+      message: { role: "user", content },
+    }) as unknown as ReactorInboundEvent;
+  const capabilitiesWithInferArgs: ReactorCapabilities = {
+    ...mockCapabilities,
+    infer: (opts) =>
+      ({ type: "infer", options: opts }) as unknown as ReactorAction,
+  };
+  const inferEphemeralText = (
+    action: ReactorAction | undefined,
+  ): string | undefined => {
+    if (action?.type !== "infer") return undefined;
+    const turns = (action.options as { ephemeralTurns?: unknown } | undefined)
+      ?.ephemeralTurns;
+    if (!Array.isArray(turns) || turns.length === 0) return undefined;
+    const first = turns[0] as { content?: { text?: string }[] };
+    return first.content?.[0]?.text;
+  };
+
+  // CL-7919: coordination is host-owned and reaches the director only
+  // through setWorkflowCoordinator — the constructor takes no coordinator.
+  // Attaching a live coordinator injects its directive into the next infer.
+  test("setWorkflowCoordinator attaches live coordination to the loop", async () => {
+    const { WorkflowRuntime } = await import("./workflows/runtime.js");
+    const { WorkflowCoordinator } = await import("./workflows/coordinator.js");
+    const workflow = {
+      name: "shape",
+      description: "setter seam",
+      steps: [{ id: "a", label: "A" }],
+    };
+    const runtime = new WorkflowRuntime(new Map(), () => workflow);
+    runtime.start(workflow);
+    const director = createChatDirector("base-prompt", [], {
+      onTasksChange: () => undefined,
+    });
+    director.setWorkflowCoordinator(new WorkflowCoordinator(runtime));
+
+    const actions = actionsArray(
+      await director.decide(
+        makeMessageReceivedEvent("hello"),
+        mockState,
+        capabilitiesWithInferArgs,
+      ),
+    );
+    const infer = actions.find((a) => a.type === "infer");
+    expect(inferEphemeralText(infer)).toContain("[WORKFLOW STEP 1/1: A]");
+  });
+
+  // Detaching restores the plain loop: no directive once cleared.
+  test("clearing the coordinator removes the directive", async () => {
+    const { WorkflowRuntime } = await import("./workflows/runtime.js");
+    const { WorkflowCoordinator } = await import("./workflows/coordinator.js");
+    const workflow = {
+      name: "shape",
+      description: "setter seam",
+      steps: [{ id: "a", label: "A" }],
+    };
+    const runtime = new WorkflowRuntime(new Map(), () => workflow);
+    runtime.start(workflow);
+    const director = createChatDirector("base-prompt", [], {
+      onTasksChange: () => undefined,
+    });
+    director.setWorkflowCoordinator(new WorkflowCoordinator(runtime));
+    director.setWorkflowCoordinator(undefined);
+
+    const actions = actionsArray(
+      await director.decide(
+        makeMessageReceivedEvent("hello"),
+        mockState,
+        capabilitiesWithInferArgs,
+      ),
+    );
+    const infer = actions.find((a) => a.type === "infer");
+    expect(inferEphemeralText(infer)).toBeUndefined();
   });
 });
 

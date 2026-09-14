@@ -14,11 +14,7 @@ import type {
   ConversationTurn,
   RetryPolicy,
 } from "@intx/types/runtime";
-import {
-  type SessionMetadata,
-  type TaskBoundary,
-  isCompactSpacerEchoTurn,
-} from "../session/compactor.js";
+import { isCompactSpacerEchoTurn } from "../session/compactor.js";
 import type { WorkflowCoordinator } from "../workflows/coordinator.js";
 import {
   createCompactionGovernor,
@@ -423,13 +419,23 @@ function applyManageTasksToolCall(
 }
 
 export interface ChatDirectorOptions {
-  taskClassifier?:
-    | ((message: string, metadata: SessionMetadata) => Promise<TaskBoundary>)
-    | undefined;
+  // CL-7919: task-boundary classification and workflow coordination are not
+  // host-injected closures. Classification's pure core lives in
+  // session/compactor.ts (classifyTaskBoundary); the director runs no
+  // decide()-time classification — the taskClassifier seam had zero
+  // production suppliers, and a native heuristics-only hook would newly arm
+  // new-task envelopes in the TUI. Coordination is host-owned (WorkflowHost
+  // owns the runtime lifecycle: start/resume/reset/persist) and reaches the
+  // director only through setWorkflowCoordinator, the narrow live-object
+  // seam below — never through options. Rejected: tools the director calls
+  // (loop-internal automation must not mount model-visible surface),
+  // BaseEnv handles (live non-serializable objects are not config), moving
+  // decide()-time directive/idle/gate rails out of the director (they are
+  // the loop), and keeping the constructor option (dead duplicate of the
+  // setter that keeps a host closure in options).
   onActivateTools?: ((names: string[]) => void) | undefined;
   inactivityTimeoutMs?: number | undefined;
   totalTimeoutMs?: number | undefined;
-  workflowCoordinator?: WorkflowCoordinator | undefined;
   onTasksChange: (tasks: Task[]) => void;
   requestContinuation?: (() => void) | undefined;
   provider?: { providerName: string; model?: string } | undefined;
@@ -465,13 +471,13 @@ class ChatDirectorImpl extends DefaultDirector {
   private readonly lspTriggerCalls = new Set<string>();
   private readonly askOperatorCalls = new Set<string>();
   private readonly onActivateTools: ((names: string[]) => void) | undefined;
-  private readonly taskClassifier:
-    | ((message: string, metadata: SessionMetadata) => Promise<TaskBoundary>)
-    | undefined;
   private readonly _systemPrompt: string;
   private _toolDefinitions: ToolDefinition[];
   private inactivityTimeoutMs: number | undefined;
   private totalTimeoutMs: number | undefined;
+  // CL-7919: host-owned live object, attached via setWorkflowCoordinator
+  // (WorkflowHost owns the runtime lifecycle). Consulted, never constructed
+  // here; deliberately not a constructor option.
   private workflowCoordinator: WorkflowCoordinator | undefined;
   private workflowIdleTurns = 0;
   private idleTerminationNudges = 0;
@@ -482,10 +488,6 @@ class ChatDirectorImpl extends DefaultDirector {
   private operatorJustResponded = false;
   private tasks: Task[] = [];
   private readonly onTasksChange: ((tasks: Task[]) => void) | undefined;
-  private turnCount = 0;
-  private currentTaskLabel: string | undefined;
-  private lastTaskSummary: string | undefined;
-  private startedAt = Date.now();
   private readonly compaction: CompactionGovernor;
   private readonly modelFamilyPolicy: ModelFamilyPolicy;
   private readonly retryPolicy: RetryPolicy;
@@ -526,9 +528,7 @@ class ChatDirectorImpl extends DefaultDirector {
     this._toolDefinitions = toolDefinitions;
     this.inactivityTimeoutMs = options.inactivityTimeoutMs;
     this.totalTimeoutMs = options.totalTimeoutMs;
-    this.taskClassifier = options.taskClassifier;
     this.onActivateTools = options.onActivateTools;
-    this.workflowCoordinator = options.workflowCoordinator;
     this.onTasksChange = options.onTasksChange;
     this.compaction = createCompactionGovernor(
       options.requestContinuation,
@@ -771,52 +771,7 @@ class ChatDirectorImpl extends DefaultDirector {
     }
     if (onTurnBoundary(event)) this.inferenceRecoveries = 0;
 
-    if (
-      event.type === "message.received" &&
-      this.taskClassifier !== undefined
-    ) {
-      const message = event.message;
-      const content =
-        typeof message.content === "string" ? message.content : "";
-      const metadata: SessionMetadata = {
-        turnCount: this.turnCount,
-        currentTaskLabel: this.currentTaskLabel,
-        lastTaskSummary: this.lastTaskSummary,
-        minutesElapsed: Math.floor((Date.now() - this.startedAt) / 60000),
-        toolCallCount: 0,
-      };
-
-      try {
-        const boundary = await this.taskClassifier(content, metadata);
-        if (boundary.kind === "new_task") {
-          this.currentTaskLabel = undefined;
-
-          const envelope =
-            this.lastTaskSummary !== undefined
-              ? `\n--- Compacted prior context ---\n${this.lastTaskSummary}\n---` +
-                `\n\nNew task starting now. Prior context summarized above.\n`
-              : "\n--- Context cleared for new task ---\n";
-
-          return [
-            capabilities.checkpoint(`new-task: ${boundary.reason}`),
-            capabilities.infer(
-              withEphemeralNudge(
-                {
-                  systemPrompt: this._systemPrompt,
-                  tools: this._toolDefinitions,
-                },
-                envelope,
-              ),
-            ),
-          ];
-        }
-      } catch {
-        // Classifier failure should not break the session. Fall through to infer.
-      }
-    }
-
     if (onTurnBoundary(event)) {
-      this.turnCount++;
       const hasToolCalls = event.turn.content.some(
         (b) => b.type === "tool_call",
       );
