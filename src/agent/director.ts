@@ -62,8 +62,13 @@ const logger = getLogger([LOG_NAMESPACE_ROOT, "agent", "director"]);
 // otherwise invisible — it shows up only as a billing and latency spike a turn
 // later. Hashed rather than logged verbatim: MCP tool descriptions are
 // arbitrary-length, server-supplied text and do not belong in the log stream.
-function toolSetDigest(tools: readonly ToolDefinition[]): string {
-  const shape = tools.map((t) => `${t.name}:${t.description ?? ""}`).join("|");
+export function toolSetDigest(tools: readonly ToolDefinition[]): string {
+  const shape = tools
+    .map(
+      (t) =>
+        `${t.name}:${t.description ?? ""}:${JSON.stringify(t.inputSchema ?? null)}`,
+    )
+    .join("|");
   return createHash("sha256").update(shape).digest("hex").slice(0, 12);
 }
 

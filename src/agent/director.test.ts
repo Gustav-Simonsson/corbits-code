@@ -5,7 +5,7 @@ import type {
   ReactorInboundEvent,
   ReactorState,
 } from "@intx/types/runtime";
-import { createChatDirector } from "./director.js";
+import { createChatDirector, toolSetDigest } from "./director.js";
 
 const mockState: ReactorState = { turns: [] } as unknown as ReactorState;
 
@@ -99,6 +99,36 @@ async function runToolOnlyStreak(
   }
   return last;
 }
+
+describe("toolSetDigest", () => {
+  const base = {
+    name: "read_file",
+    description: "read a file",
+    inputSchema: { type: "object" },
+  };
+
+  test("identical sets share a digest", () => {
+    expect(toolSetDigest([{ ...base }])).toBe(toolSetDigest([{ ...base }]));
+  });
+
+  // The digest gates the tool-set-changed log line, and the serialized tools
+  // array is the head of the provider's cached prompt prefix — an
+  // inputSchema-only change reshapes the wire bytes, so it must move the
+  // digest or the cache bust goes unlogged.
+  test("an inputSchema-only change alters the digest", () => {
+    const before = [{ ...base }];
+    const after = [
+      {
+        ...base,
+        inputSchema: {
+          type: "object",
+          properties: { path: { type: "string" } },
+        },
+      },
+    ];
+    expect(toolSetDigest(after)).not.toBe(toolSetDigest(before));
+  });
+});
 
 describe("ChatDirector tool-only loop protection", () => {
   const providerlessPolicy = { providerName: "test-provider" };
