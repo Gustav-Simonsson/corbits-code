@@ -5,6 +5,7 @@ import {
   advertisedTools,
   createActivatedToolTracker,
 } from "./agent/tool-search.js";
+import { createAdvertisedToolset } from "./session/assemble-runtime.js";
 import { createPermissionGate } from "./permission/gate.js";
 import {
   COMPACTOR_KEEP_RECENT_TURNS,
@@ -1143,6 +1144,64 @@ describe("updateToolDefinitions rewrites infer tools", () => {
       makeMessageReceivedEvent("continue"),
     );
     expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+  });
+
+  // CL-7868: the provider cache is a prefix cache keyed on the tools array,
+  // so a tool_search turn that promotes a genuinely new tool must not reshape
+  // the wire set mid-session. The call gate opens (the model invokes the tool
+  // from the search result's schema) while the advertised array holds steady
+  // until the next cache-safe boundary.
+  test("a tool_search turn promoting a genuinely new tool leaves the wire byte-identical", async () => {
+    const linearTool = {
+      name: "mcp__linear__list_issues",
+      description: "list issues",
+      inputSchema: { type: "object", properties: {}, required: [] },
+    };
+    const toolset = await createAgentToolset({
+      cwd: process.cwd(),
+      permissionGate: createPermissionGate({
+        approvals: [],
+        interactive: false,
+        skipPermissions: true,
+        reactorGated: false,
+      }),
+      onOperatorGate: async () => ({ kind: "cancel" }),
+    });
+    toolset.dynamicRunner.addTools([
+      { kind: "string", definition: linearTool, handler: async () => "ok" },
+    ]);
+
+    const advertised = createAdvertisedToolset({
+      sessionMode: "orchestrator",
+      toolAvailability: { languageServerAvailable: false },
+      getProvider: () => ({ providerName: "openai", model: "gpt-5" }),
+    });
+    const director = createChatDirector(
+      "base-prompt",
+      advertised.computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
+      { onTasksChange: () => undefined },
+    );
+
+    const before = await firstInferTools(
+      director,
+      makeMessageReceivedEvent("hello"),
+    );
+
+    // tool_search matched a genuinely new tool: the runner opens the call
+    // gate and refreshes the director exactly as it does today.
+    advertised.activated.activate(["mcp__linear__list_issues"]);
+    director.updateToolDefinitions(
+      advertised.computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
+    );
+
+    const after = await firstInferTools(
+      director,
+      makeMessageReceivedEvent("continue"),
+    );
+    expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+    expect(advertised.isAdvertised("mcp__linear__list_issues")).toBe(true);
+
+    await toolset.dispose();
   });
 
   // submit_output is always on the wire so a workflow going active never grows

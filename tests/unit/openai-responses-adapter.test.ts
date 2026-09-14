@@ -3,12 +3,14 @@ import {
   createOpenAIResponsesAdapter,
   OPENAI_SESSION_ID_OPTION,
 } from "../../src/provider/openai-responses.js";
+import { createAdvertisedToolset } from "../../src/session/assemble-runtime.js";
 import { OPENCODE_SESSION_ID_OPTION } from "../../src/provider/opencode-session.js";
 import { BEARER_CREDENTIAL_SENTINEL } from "@intx/inference";
 import type {
   ConversationTurn,
   InferenceOptions,
   LastCycleSource,
+  ToolDefinition,
 } from "@intx/types/runtime";
 
 const SOURCE: LastCycleSource = {
@@ -67,6 +69,43 @@ describe("openai-responses buildRequest", () => {
       adapter().buildRequest([userTurn("hi")], "gpt-5.6-luna", {}).body,
     ) as Record<string, unknown>;
     expect(body).not.toHaveProperty("prompt_cache_key");
+  });
+});
+
+describe("openai-responses promotion cache safety", () => {
+  function def(name: string): ToolDefinition {
+    return {
+      name,
+      description: `${name} tool`,
+      inputSchema: { type: "object", properties: {} },
+    };
+  }
+
+  // CL-7868: the tools array is the head of the provider's cached prefix, so
+  // a mid-session activation must not change the serialized request body —
+  // the turns differ only in activated tools.
+  test("activating a tool mid-session leaves the serialized wire body byte-identical", () => {
+    const advertised = createAdvertisedToolset({
+      sessionMode: "orchestrator",
+      toolAvailability: { languageServerAvailable: false },
+      getProvider: () => ({ providerName: "openai", model: "gpt-5.6-luna" }),
+    });
+    const defs = [
+      def("read_file"),
+      def("write_file"),
+      def("tool_search"),
+      def("mcp__linear__list_issues"),
+    ];
+    const bodyFor = (tools: ToolDefinition[]): string =>
+      adapter().buildRequest([userTurn("hi")], "gpt-5.6-luna", { tools }).body;
+    const before = bodyFor(advertised.computeAdvertised(defs));
+    expect(JSON.parse(before)).toHaveProperty("tools");
+
+    advertised.activated.activate(["mcp__linear__list_issues"]);
+
+    const after = bodyFor(advertised.computeAdvertised(defs));
+    expect(after).toBe(before);
+    expect(advertised.isAdvertised("mcp__linear__list_issues")).toBe(true);
   });
 });
 
