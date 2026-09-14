@@ -227,6 +227,12 @@ describe("createToolIndex", () => {
   test("returns nothing for an empty query", () => {
     expect(index.search("   ")).toEqual([]);
   });
+
+  test("with an allow list, never returns tools outside the allow list", () => {
+    const allowed = createToolIndex(() => defs, [], ["present"]);
+    expect(allowed.search("pages")).toContain("present");
+    expect(allowed.search("linear")).not.toContain("mcp__linear__create_issue");
+  });
 });
 
 function call(

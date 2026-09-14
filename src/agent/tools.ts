@@ -108,6 +108,7 @@ import {
   createToolIndex,
   createToolSearchTool,
   TOOL_SEARCH_PENDING_WAIT_MS,
+  toolSearchDefinition,
 } from "./tool-search.js";
 import { createSearchAgentsTool } from "./agent-search.js";
 import { createReadAgentTraceTool } from "../subagent/trace-tool.js";
@@ -266,6 +267,13 @@ export interface AgentToolsetArgs {
    * and collect worker reports from mailbox mail instead.
    */
   mountWaitAgents?: boolean;
+  /**
+   * Closed allow list (exec director overlays). tool_search is mounted only
+   * when the allow includes it, and the search index only surfaces allowed
+   * tools so search cannot promote outside the allow. Omit for the product
+   * default (tool_search mounted, index over the live registry).
+   */
+  toolSearchAllow?: readonly string[];
 }
 
 // Per-server connection state surfaced to the TUI.
@@ -722,21 +730,32 @@ export async function createAgentToolset(
   const toolIndex = createToolIndex(
     () => runnerHolder.current?.currentDefinitions() ?? [],
     advertisedBuiltIns,
+    args.toolSearchAllow,
   );
-  baseTools.push(
-    createToolSearchTool({
-      search: (query) => toolIndex.search(query),
-      lookup: (name) =>
-        runnerHolder.current?.currentDefinitions().find((d) => d.name === name),
-      promote: (names) => promoter.promote(names),
-      // Misses wait briefly for in-flight MCP handshakes (bounded, so hung
-      // OAuth cannot hang the call) and re-search before answering. Reads the
-      // connection map live — declared below, populated by the time any
-      // search runs.
-      awaitPendingConnections: (timeoutMs = TOOL_SEARCH_PENDING_WAIT_MS) =>
-        awaitPendingMcpConnections(timeoutMs),
-    }),
-  );
+  // Closed exec allow lists omit tool_search itself (leaf posture); when the
+  // allow excludes it the tool is never mounted, so there is nothing to
+  // search with and nothing the promoter can activate.
+  if (
+    args.toolSearchAllow === undefined ||
+    args.toolSearchAllow.includes(toolSearchDefinition.name)
+  ) {
+    baseTools.push(
+      createToolSearchTool({
+        search: (query) => toolIndex.search(query),
+        lookup: (name) =>
+          runnerHolder.current
+            ?.currentDefinitions()
+            .find((d) => d.name === name),
+        promote: (names) => promoter.promote(names),
+        // Misses wait briefly for in-flight MCP handshakes (bounded, so hung
+        // OAuth cannot hang the call) and re-search before answering. Reads the
+        // connection map live — declared below, populated by the time any
+        // search runs.
+        awaitPendingConnections: (timeoutMs = TOOL_SEARCH_PENDING_WAIT_MS) =>
+          awaitPendingMcpConnections(timeoutMs),
+      }),
+    );
+  }
 
   // Codex apply_patch mounts when isCodex; primary strips it so Corbits DIY
   // stays on write_file/edit_file/delete_file. Leaves keep it via BUILD/DOCS allowlists.
