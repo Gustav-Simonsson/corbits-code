@@ -112,6 +112,9 @@ describe("runWithWatchdog", () => {
     expect(result.attempts).toBe(1);
   });
 
+  // Two stall windows (2 x 1.5s) plus kill/retry overhead exceed the
+  // default 5s timeout when a delayed first tick doubles one attempt
+  // (tickMs == stallMs with a strict `>` check fires on the second tick).
   test("gives up after the final attempt with exit code 1", async () => {
     const stalls: [number, number][] = [];
     const result = await runWithWatchdog({
@@ -126,7 +129,7 @@ describe("runWithWatchdog", () => {
     expect(result.attempts).toBe(2);
     // The final stall is reported by the exit code, not a retry notice.
     expect(stalls).toEqual([[1, 2]]);
-  });
+  }, 10_000);
 
   test("kills the whole process group, including the child's own children", async () => {
     const dir = mkdtempSync(join(tmpdir(), "test-parallel-group-"));
