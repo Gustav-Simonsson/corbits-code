@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import type { ToolPlugin } from "@intx/tools-posix";
 import { isToolOutputLike } from "../util/tool-output-uri.js";
-import { isArchiveLike } from "../session/archive-uri.js";
+import { isArchiveLike } from "../session/compaction-archive.js";
 import { resolveWorkspacePath } from "../permission/path-restriction.js";
 import type { RootsProvider } from "../permission/worktree-roots.js";
 

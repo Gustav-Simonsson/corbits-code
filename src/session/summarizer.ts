@@ -20,12 +20,14 @@ import {
 } from "@intx/types/runtime";
 import { LOG_NAMESPACE_ROOT } from "../branding.js";
 import { NOOP_TELEMETRY, type Telemetry } from "../telemetry/index.js";
-import type { CompactionArchive } from "./compaction-archive.js";
+import {
+  formatArchiveRef,
+  type CompactionArchive,
+} from "./compaction-archive.js";
 import type {
   ArchiveKind,
   ArchiveOccurrence,
 } from "./compaction-archive-schema.js";
-import { formatArchiveRef } from "./archive-uri.js";
 import { readSourceCredentialMaterial } from "../config/source-credentials.js";
 
 const logger = getLogger([LOG_NAMESPACE_ROOT, "session", "summarizer"]);

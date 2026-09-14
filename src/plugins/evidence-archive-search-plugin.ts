@@ -11,7 +11,7 @@ import {
   formatArchiveRef,
   isArchiveLike,
   parseArchiveTarget,
-} from "../session/archive-uri.js";
+} from "../session/compaction-archive.js";
 
 const SEARCH_DEFAULT_MAX = 1000;
 const GREP_DEFAULT_MAX = 500;
