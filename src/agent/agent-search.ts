@@ -36,7 +36,8 @@ export function createAgentIndex(
       lexicalFields(profile.id, profileSearchText(profile)),
       queryTokens,
       rawQuery,
-    ) + ((profile.description ?? "").toLowerCase().includes(rawQuery) ? 0.5 : 0);
+    ) +
+    ((profile.description ?? "").toLowerCase().includes(rawQuery) ? 0.5 : 0);
 
   return {
     search(query: string, limit = 12): AgentProfile[] {
