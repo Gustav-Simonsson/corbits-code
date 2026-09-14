@@ -72,6 +72,7 @@ import {
   submitPrompt,
   syncPromptHighlights,
 } from "./prompt.js";
+import { armMarkdownLinks } from "../url-links.js";
 import {
   createShellKeyHandlers,
   routePromptWheelToTranscript,
@@ -211,6 +212,10 @@ export function createAppShell(
   // every row to say so. Position is legible from the content itself.
   transcript.verticalScrollBar.visible = false;
   transcript.horizontalScrollBar.visible = false;
+  // Markdown blocks have no node of ours to arm; this bubbling handler is
+  // what makes their links Ctrl+click-to-open (armed rows stop propagation
+  // after opening, so a click opens exactly once either way).
+  armMarkdownLinks(transcript, ctx);
 
   // Leading filler that bottom-anchors a short transcript; see
   // `syncTranscriptSpacer`. Zero height until the first sync call.
