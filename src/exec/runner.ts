@@ -132,7 +132,13 @@ import { ID_PREFIX, LOG_NAMESPACE_ROOT } from "../branding.js";
 import type { ReactorEmittedEvent } from "@intx/inference";
 import { setAgentSourceUnlessClosed } from "../tui/agent-source-sync.js";
 import { ensureFreshInferenceSource } from "../subagent/refresh-inference-source.js";
-import { getToolApprovalBudget } from "../tui/tool-execution-watchdog.js";
+import {
+  MAX_TOOL_APPROVAL_PAUSE_MS,
+  getToolApprovalBudget,
+} from "../tui/tool-execution-watchdog.js";
+import { createApprovalDeliverer } from "../tui/approval-delivery.js";
+import { createCorrelationAcceptance } from "../tui/correlation-acceptance.js";
+import { APPROVAL_TIMEOUT_RESULT_TEXT } from "../permission/decline-markers.js";
 import { WorkflowHost } from "../workflows/host.js";
 
 const logger = getLogger([LOG_NAMESPACE_ROOT, "exec"]);
@@ -968,10 +974,20 @@ export async function runExec(config: Config): Promise<ExecResult> {
     // Consume-once gate for the compaction continuation emit: a replayed
     // duplicate of an already-answered emission must not re-deliver.
     const continuationGate = createContinuationGate();
+    // Approval-delivery parity with the TUI: the resume routes its deliver
+    // through the shared acceptance-tracked deliverer, and the stream sink
+    // below feeds acceptances so a delivered decision settles instead of
+    // timing out.
+    const approvalAcceptance = createCorrelationAcceptance();
+    const approvalDeliverer = createApprovalDeliverer({
+      deliverToAgent: (message) => activeAgent.deliver(message),
+      acceptance: approvalAcceptance,
+    });
     // Cycles persist to the context store only on inference.done; the recorder
     // keeps the in-flight cycle's text so an errored or aborted turn leaves
     // its partial output in partial.jsonl instead of vanishing.
     const sink = (event: ReactorEmittedEvent): void => {
+      approvalAcceptance.observe(event);
       // Chat-director reactor events (replacing the former onTasksChange /
       // onActivateTools closures). Exec mode has no live task panel or task
       // stdout output today (unlike the TUI's chrome zone) — debug logging
@@ -1062,6 +1078,10 @@ export async function runExec(config: Config): Promise<ExecResult> {
         resolveParkedCallId: (correlationId) =>
           resolveParkedCallIdFromStore(activeStorage, correlationId),
         gate: permissionGate,
+        deliver: async (message, stillCurrent) => {
+          if (!stillCurrent()) return;
+          await approvalDeliverer.deliver(message);
+        },
       }).handle(sendResult);
       sendCompleted = true;
       runError = runSink.getRunError();
@@ -1307,9 +1327,28 @@ async function promptPermission(
   });
   stderr.write(`  [${scopes.length + 1}] Deny\n`);
   const rl = createInterface({ input, output: stderr });
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const line = (await rl.question("Choice: ")).trim();
-    const n = Number(line);
+    // The reactor bounds an approval suspension (default 1h); the prompt must
+    // settle below that so the gate answers instead of the suspension timing
+    // out. The deadline reuses the tool-budget approval-pause ceiling.
+    const answer = rl.question("Choice: ");
+    const expired = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), MAX_TOOL_APPROVAL_PAUSE_MS);
+    });
+    const line = await Promise.race([answer, expired]);
+    if (line === undefined) {
+      // The deadline won: rl.close() in the finally below does not settle a
+      // pending question, so abandon the loser explicitly. It can never
+      // resolve after close; the attached settlement keeps it contained (no
+      // floating promise) if a future runtime ever settles it.
+      void answer.then(
+        () => undefined,
+        () => undefined,
+      );
+      return { allow: false, message: APPROVAL_TIMEOUT_RESULT_TEXT };
+    }
+    const n = Number(line.trim());
     if (!Number.isInteger(n) || n < 1 || n > scopes.length) {
       return { allow: false };
     }
@@ -1322,6 +1361,7 @@ async function promptPermission(
       ...(chosen.pattern !== null ? { persist: chosen } : {}),
     };
   } finally {
+    if (timer !== undefined) clearTimeout(timer);
     rl.close();
     if (pauseToken !== undefined) budget?.resume(pauseToken);
   }

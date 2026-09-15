@@ -649,6 +649,16 @@ describe("approval resume retry re-await", () => {
     expect(delivered).toHaveLength(1);
   });
 
+  test("distinct correlations gate and deliver independently", async () => {
+    const { resume, delivered, resolveSuspended } = retryHarness({
+      allow: true,
+    });
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(await resume.handle(suspension("corr-B", "echo beta"))).toBe(true);
+    expect(resolveSuspended).toHaveBeenCalledTimes(2);
+    expect(delivered).toHaveLength(2);
+  });
+
   test("retry without acceptance still gates", async () => {
     const delivered: InboundMessage[] = [];
     const deliver = mock((message: InboundMessage): void => {
@@ -700,6 +710,36 @@ describe("approval resume retry re-await", () => {
     expect(await first).toBe(true);
     expect(await second).toBe(true);
     expect(resolveSuspended).toHaveBeenCalledTimes(1);
+    expect(delivered).toHaveLength(1);
+  });
+
+  // CL-7992 K3: concurrent duplicates share one in-flight rejection (one
+  // gate, zero deliveries), then a retry re-gates and delivers exactly
+  // once, and later retries memoize.
+  test("a shared rejection re-gates once, delivers once, then memoizes", async () => {
+    const gate = Promise.withResolvers<{ allow: boolean }>();
+    const { resume, delivered, resolveSuspended } = retryHarness({
+      allow: true,
+    });
+    resolveSuspended.mockImplementationOnce(() => gate.promise);
+    const failure = new Error("gate exploded");
+    const first = resume.handle(suspension("corr-A", "echo alpha"));
+    const second = resume.handle(suspension("corr-A", "echo alpha"));
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(resolveSuspended).toHaveBeenCalledTimes(1);
+    gate.reject(failure);
+    await expect(first).rejects.toBe(failure);
+    await expect(second).rejects.toBe(failure);
+    expect(resolveSuspended).toHaveBeenCalledTimes(1);
+    expect(delivered).toHaveLength(0);
+
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(resolveSuspended).toHaveBeenCalledTimes(2);
+    expect(delivered).toHaveLength(1);
+    expect(decisionBody(onlyDecision(delivered)).outcome).toBe("approved");
+
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(resolveSuspended).toHaveBeenCalledTimes(2);
     expect(delivered).toHaveLength(1);
   });
 });

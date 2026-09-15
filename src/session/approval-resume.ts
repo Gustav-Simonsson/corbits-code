@@ -256,7 +256,10 @@ export function createApprovalResume(args: {
     handle: (result) => {
       if (result.type !== "suspended") return Promise.resolve(false);
       const { correlationId } = result;
-      if (handedOver.has(correlationId)) return Promise.resolve(true);
+      if (handedOver.has(correlationId)) {
+        logger.warn`duplicate approval resume ignored correlation=${correlationId}`;
+        return Promise.resolve(true);
+      }
       const ongoing = inflight.get(correlationId);
       if (ongoing !== undefined) return ongoing;
       const task = settleSuspended(result);

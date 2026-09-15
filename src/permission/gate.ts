@@ -44,6 +44,7 @@ import {
   type RootsProvider,
 } from "./worktree-roots.js";
 import { OPERATOR_DECLINED_PREFIX } from "./decline-markers.js";
+import { DenialMemory, stableRequestId } from "./denial-memory.js";
 import { getSubAgentIdentity } from "../subagent/identity-context.js";
 import { PRODUCT_MUTATION_TOOLS } from "../agent/product-mutation-tools.js";
 
@@ -592,6 +593,9 @@ export function createPermissionGate(
         ),
       );
     }
+    // A new grant can cover a previously-denied request — drop cached denies
+    // so the retry re-evaluates against the live approvals.
+    denialMemory.clear();
   };
 
   // An auto-mode (or non-interactive-unavailable) decision settles the
@@ -626,6 +630,13 @@ export function createPermissionGate(
     string,
     { name: string; arguments: string; verdict: AuthorizeVerdict }
   >();
+
+  // Same-turn denial memory: stable fingerprints of headless and
+  // operator-declined denies so a retry with a fresh tool_call.id returns the
+  // identical cached reason instead of re-evaluating. Cleared by reset() and
+  // by every state change that can flip a deny to an allow (new grants,
+  // re-seeded approvals, auto/skip toggles, provider-identity switches).
+  const denialMemory = new DenialMemory();
 
   // Non-blocking policy decision for one tool call: everything the gate owns —
   // tier pre-filter, auto rules, pre-grant guards, grants, headless denial —
@@ -670,6 +681,17 @@ export function createPermissionGate(
     // match what the shell will open.
     const subAgentIdentity = getSubAgentIdentity();
     const effectiveCwd = subAgentIdentity?.cwd ?? resolvedCwd;
+
+    // A same-turn retry of an already-denied request (fresh tool_call.id, same
+    // stable fingerprint) returns the identical cached reason instead of
+    // re-evaluating and re-logging. This check runs before the path-escape
+    // deny below: the decision is the same deny either way, but the reason
+    // text is the originally recorded one, not a freshly computed escape
+    // reason.
+    const stableId = stableRequestId(call, effectiveCwd, rootsProvider);
+    const cachedDenial = denialMemory.isDenied(stableId);
+    if (cachedDenial !== undefined)
+      return { kind: "deny", reason: cachedDenial };
 
     // Path-escape will hard-reject these at execution unless skipPermissions
     // (already returned allow above). Deny here rather than showing Accept for
@@ -838,12 +860,11 @@ export function createPermissionGate(
             askRule ?? "non-interactive",
             "deny",
           );
-          return {
-            kind: "deny",
-            reason: anySecret
-              ? `${request.action} references a sensitive path and requires operator approval, which is unavailable in a non-interactive run.`
-              : `${request.action} requires operator approval, which is unavailable in a non-interactive run. Re-run with --dangerously-skip-permissions to bypass, or narrow the action.`,
-          };
+          const reason = anySecret
+            ? `${request.action} references a sensitive path and requires operator approval, which is unavailable in a non-interactive run.`
+            : `${request.action} requires operator approval, which is unavailable in a non-interactive run. Re-run with --dangerously-skip-permissions to bypass, or narrow the action.`;
+          denialMemory.record(stableId, reason);
+          return { kind: "deny", reason };
         }
 
         // Secret-path shell must never mint a stored grant — even an exact match
@@ -885,10 +906,9 @@ export function createPermissionGate(
 
       if (!interactive || requestApproval === undefined) {
         recordAutoDecision(request.tool, "non-interactive", "deny");
-        return {
-          kind: "deny",
-          reason: `${request.action} requires operator approval, which is unavailable in a non-interactive run. Re-run with --dangerously-skip-permissions to bypass, or narrow the action.`,
-        };
+        const reason = `${request.action} requires operator approval, which is unavailable in a non-interactive run. Re-run with --dangerously-skip-permissions to bypass, or narrow the action.`;
+        denialMemory.record(stableId, reason);
+        return { kind: "deny", reason };
       }
 
       return { kind: "ask", request, anySecret: false, segmentCount: 0 };
@@ -942,6 +962,20 @@ export function createPermissionGate(
     return outcome;
   };
 
+  // Operator-decline reason for a decided-ask request and its outcome. Shared
+  // by evaluate() (middleware) and resolveSuspended() (reactor) so a cached
+  // decline reads identically whichever path recorded it.
+  const declineReason = (
+    request: PermissionRequest,
+    outcome: ApprovalOutcome | undefined,
+  ): string => {
+    const suffix =
+      outcome?.message !== undefined && outcome.message.length > 0
+        ? ` — ${outcome.message}`
+        : "";
+    return `${OPERATOR_DECLINED_PREFIX}${request.action} (${request.subject})${suffix}`;
+  };
+
   // Middleware path: blocking evaluation used by tool-runner consumers whose
   // calls never pass through the reactor (sub-agents). When the gate is
   // reactor-gated, gateToolCall uses executionVerdict instead of evaluate() so
@@ -953,14 +987,27 @@ export function createPermissionGate(
       return { allowed: false, reason: decision.reason };
     const outcome = await resolveInteractiveAsk(decision);
     if (outcome === undefined || !outcome.allow) {
-      const suffix =
-        outcome?.message !== undefined && outcome.message.length > 0
-          ? ` — ${outcome.message}`
-          : "";
-      return {
-        allowed: false,
-        reason: `${OPERATOR_DECLINED_PREFIX}${decision.request.action} (${decision.request.subject})${suffix}`,
-      };
+      const reason = declineReason(decision.request, outcome);
+      // Cache operator declines so a same-turn retry (fresh tool_call.id,
+      // same stable fingerprint) denies with the identical reason instead of
+      // re-asking. Timeouts, aborts, and missing outcomes are never cached —
+      // the operator made no decision, so the retry must ask again (mirrors
+      // resolveSuspended).
+      if (
+        outcome !== undefined &&
+        !outcome.allow &&
+        classifyOutcome(outcome) === "deny"
+      ) {
+        denialMemory.record(
+          stableRequestId(
+            call,
+            getSubAgentIdentity()?.cwd ?? resolvedCwd,
+            rootsProvider,
+          ),
+          reason,
+        );
+      }
+      return { allowed: false, reason };
     }
     return { allowed: true };
   };
@@ -1021,20 +1068,40 @@ export function createPermissionGate(
       request.tool === "run_shell" &&
       commandReferencesSensitivePath(request.subject, request.cwd) !==
         undefined;
-    return resolveInteractiveAsk(
-      {
-        kind: "ask",
-        request,
-        anySecret,
-        segmentCount:
-          request.tool === "run_shell"
-            ? splitChainedCommand(request.subject).filter(
-                (s) => !isShellCommentOnly(s),
-              ).length
-            : 0,
-      },
-      stillCurrent,
-    );
+    const decision = {
+      kind: "ask" as const,
+      request,
+      anySecret,
+      segmentCount:
+        request.tool === "run_shell"
+          ? splitChainedCommand(request.subject).filter(
+              (s) => !isShellCommentOnly(s),
+            ).length
+          : 0,
+    };
+    return (async () => {
+      const outcome = await resolveInteractiveAsk(decision, stillCurrent);
+      // Cache operator declines so a same-turn reactor retry (fresh
+      // tool_call.id, same stable fingerprint) denies with the identical
+      // reason instead of re-prompting. Timeouts, aborts, and missing outcomes
+      // are never cached — the operator made no decision, so the retry must
+      // ask again. Invalidation (grant-mint/mode/identity clears) is unchanged.
+      if (
+        outcome !== undefined &&
+        !outcome.allow &&
+        classifyOutcome(outcome) === "deny"
+      ) {
+        denialMemory.record(
+          stableRequestId(
+            { id: "", name: request.tool, arguments: request.arguments ?? {} },
+            request.cwd ?? getSubAgentIdentity()?.cwd ?? resolvedCwd,
+            rootsProvider,
+          ),
+          declineReason(request, outcome),
+        );
+      }
+      return outcome;
+    })();
   };
 
   const reset = (): void => {
@@ -1044,6 +1111,7 @@ export function createPermissionGate(
     }
     sessionGrants.length = 0;
     authorizedByCallId.clear();
+    denialMemory.clear();
   };
 
   const sameApproval = (a: Approval, b: Approval): boolean =>
@@ -1069,6 +1137,9 @@ export function createPermissionGate(
   const setSeededApprovals = (seeded: readonly Approval[]): void => {
     approvals.length = 0;
     approvals.push(...seeded, ...sessionGrants);
+    // Re-seeded approvals can cover previously-denied requests — cached
+    // denies must re-evaluate instead of serving stale reasons.
+    denialMemory.clear();
   };
 
   const registerMcpClient = (client: MCPClient): void => {
@@ -1093,13 +1164,19 @@ export function createPermissionGate(
     getAuto: () => auto === true,
     setAuto: (value: boolean) => {
       auto = value;
+      // Mode changes can flip denies to allows — cached denies re-evaluate.
+      denialMemory.clear();
     },
     getSkipPermissions: () => skipPermissions,
     setSkipPermissions: (value: boolean) => {
       skipPermissions = value;
+      // Mode changes can flip denies to allows — cached denies re-evaluate.
+      denialMemory.clear();
     },
     setProviderIdentity: (nextProviderName: string, nextModel: string) => {
       activeProviderModel = `${nextProviderName}:${nextModel}`;
+      // Provider-model grants key off this identity — cached denies re-evaluate.
+      denialMemory.clear();
     },
     registerMcpClient,
     unregisterMcpServer,

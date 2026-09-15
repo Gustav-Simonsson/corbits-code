@@ -32,7 +32,7 @@ type WebFetchFormat = "text" | "markdown" | "html";
 export const webFetchDefinition: ToolDefinition = {
   name: "web_fetch",
   description:
-    "Fetch a web page over HTTP(S) and return its content. Uses built-in Exa MCP by default, or a direct in-process fetch when that built-in is disabled or overridden. Converts HTML to markdown by default. Use for documentation, articles, and other external references.",
+    "Fetch a web page over HTTP(S) and return its content. Uses built-in Exa MCP by default, or a direct in-process fetch when that built-in is disabled or overridden. Converts HTML to markdown by default. Use for documentation, articles, and other external references. If a pasted URL belongs to a host covered by a connected MCP server, route it through that server via tool_search first, extracting the item identifier from the host-plus-path. web_fetch is for public docs, articles, and external references, not authenticated app surfaces. Use web_fetch when no covering MCP server exists, the MCP call fails, or the page is genuinely public.",
   inputSchema: {
     type: "object",
     properties: {
