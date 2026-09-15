@@ -611,13 +611,14 @@ export async function assembleTUISession(
     systemPrompt,
     getDynamicRunner: () => toolset.dynamicRunner,
     computeAdvertised,
-    activateTools: (names) => activatedToolNames.activate(names),
     inactivityTimeoutMs: config.inactivityTimeoutMs ?? 750_000,
     totalTimeoutMs: config.totalTimeoutMs,
-    onTasksChange: (tasks) => emitter.emit("tasks", tasks),
     // CL-7918 seed for the idle-with-fleet allowance (fleet lanes may appear
     // mid-session; CL-7972 keeps it live via the fleet-wake publisher);
     // retry stamping tracks the live source id in-reactor now.
+    // (No onTasksChange: task/tool updates arrive as reactor events consumed
+    // in the stream sink; no getLiveFleetCount: the publisher drives the
+    // allowance through setAllowIdleWithFleet.)
     allowIdleWithFleet: true,
     requestContinuation: () => {
       const targetAgent = liveAgent(state);

@@ -1,5 +1,10 @@
 import { describe, test, expect } from "bun:test";
-import { createChatDirector, askOperatorDefinition } from "./agent/director.js";
+import {
+  createChatDirector,
+  askOperatorDefinition,
+  CHAT_TASKS_CHANGED_EVENT,
+  CHAT_TOOLS_ACTIVATE_EVENT,
+} from "./agent/director.js";
 import { createAgentToolset } from "./agent/tools.js";
 import { createAdvertisedToolset } from "./session/assemble-runtime.js";
 import { createPermissionGate } from "./permission/gate.js";
@@ -129,9 +134,7 @@ describe("operator declined tool calls", () => {
   // reactor and break further sends, and it does not re-infer off a bare
   // decline.
   test("chat director surfaces the decline and waits, keeping the reactor alive", async () => {
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("", [], {});
     const actions = actionsArray(
       await director.decide(
         makeToolErrorEvent("c", declined),
@@ -149,9 +152,7 @@ describe("operator declined tool calls", () => {
   // Reactor path: a reason-bearing approver rejection must re-infer so the
   // model can respond to the reason — never the canned decline.
   test("reason-bearing approver rejection re-infers on the reason", async () => {
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("", [], {});
     const actions = actionsArray(
       await director.decide(
         makeToolErrorEvent("c", "denied by approver: never touch /etc"),
@@ -165,9 +166,7 @@ describe("operator declined tool calls", () => {
   });
 
   test("middleware rejection with a reason re-infers on the reason", async () => {
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("", [], {});
     const actions = actionsArray(
       await director.decide(
         makeToolErrorEvent(
@@ -186,9 +185,7 @@ describe("operator declined tool calls", () => {
   // Reactor path: a reason-less approver rejection has nothing for the model
   // to respond to; the canned reply stands.
   test("reason-less approver rejection takes the canned path", async () => {
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("", [], {});
     const actions = actionsArray(
       await director.decide(
         makeToolErrorEvent("c", "denied by approver"),
@@ -204,9 +201,7 @@ describe("operator declined tool calls", () => {
   // Policy denies and no-grant blocks are not operator decisions: the model
   // adapts to the deny text like any tool error.
   test("policy deny is not classified as an operator decline", async () => {
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("", [], {});
     for (const content of [
       "Denied by policy: tool:run_shell/invoke",
       "No matching grants for tool:run_shell/invoke",
@@ -260,9 +255,7 @@ describe("open-task termination guard", () => {
     a.some((x) => x.type === "reply");
 
   test("re-infers instead of ending the turn while a task is still open", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     await director.decide(
       manageTasksEvent("doing"),
       mockState,
@@ -277,9 +270,7 @@ describe("open-task termination guard", () => {
   });
 
   test("ends the turn normally once every task is terminal", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     await director.decide(
       manageTasksEvent("done"),
       mockState,
@@ -293,10 +284,32 @@ describe("open-task termination guard", () => {
     expect(hasInfer(actions)).toBe(false);
   });
 
+  test("a task change emits the updated task list on the chat event", async () => {
+    const director = createChatDirector("base", [], {});
+    const actions = actionsArray(
+      await director.decide(
+        manageTasksEvent("doing"),
+        mockState,
+        mockCapabilities,
+      ),
+    );
+    expect(
+      actions.filter(
+        (a) =>
+          a.type === "emit" &&
+          (a as { eventType?: string }).eventType === CHAT_TASKS_CHANGED_EVENT,
+      ),
+    ).toEqual([
+      {
+        type: "emit",
+        eventType: CHAT_TASKS_CHANGED_EVENT,
+        data: { tasks: [{ id: "t1", title: "work", status: "doing" }] },
+      },
+    ]);
+  });
+
   test("stops nudging and lets the turn end after the cap of content-free attempts", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     await director.decide(
       manageTasksEvent("doing"),
       mockState,
@@ -318,7 +331,6 @@ describe("open-task termination guard", () => {
 
   test("idle-with-fleet allows terminal wait/reply with open tasks and spends no nudge budget", async () => {
     const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
       allowIdleWithFleet: true,
     });
     await director.decide(
@@ -338,7 +350,6 @@ describe("open-task termination guard", () => {
 
   test("mid-session source switch remaps retry stamping without host closures", async () => {
     const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
       provider: { providerName: "openai" },
     });
     await director.decide(
@@ -408,9 +419,7 @@ describe("open-task termination guard", () => {
   });
 
   test("omitted or false idle-with-fleet still nudges while a task is open", async () => {
-    const omitted = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const omitted = createChatDirector("base", [], {});
     await omitted.decide(
       manageTasksEvent("doing"),
       mockState,
@@ -425,7 +434,6 @@ describe("open-task termination guard", () => {
     ).toBe(true);
 
     const disabled = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
       allowIdleWithFleet: false,
     });
     await disabled.decide(
@@ -444,7 +452,6 @@ describe("open-task termination guard", () => {
 
   test("setAllowIdleWithFleet tracks fleet transitions off the seeded value", async () => {
     const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
       allowIdleWithFleet: true,
     });
     await director.decide(
@@ -480,9 +487,7 @@ describe("open-task termination guard", () => {
   test("empty model turn settles with a valid empty reply", async () => {
     // DefaultDirector ends empty responses with bare wait; without a reply,
     // agent.send hangs and the TUI Working spinner sticks forever.
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     const emptyTurn = {
       type: "inference.done",
       turn: { role: "assistant", model: "test", timestamp: 0, content: [] },
@@ -509,9 +514,7 @@ describe("open-task termination guard", () => {
   });
 
   test("a declined tool with open tasks re-infers, then terminates after its cap", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     await director.decide(
       manageTasksEvent("doing"),
       mockState,
@@ -553,9 +556,7 @@ describe("open-task termination guard", () => {
   // single user turn — the budget is monotonic per inbound message, not per
   // tool call, so it does not matter whether a tool call happens at all.
   test("a no-op tool call between nudges does not reset the idle budget", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     await director.decide(
       manageTasksEvent("doing"),
       mockState,
@@ -601,9 +602,7 @@ describe("open-task termination guard", () => {
   });
 
   test("a new user message resets the idle budget for the next turn", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     await director.decide(
       manageTasksEvent("doing"),
       mockState,
@@ -640,9 +639,7 @@ describe("open-task termination guard", () => {
   });
 
   test("a successful tool call between declines does not reset the declined budget", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     await director.decide(
       manageTasksEvent("doing"),
       mockState,
@@ -696,9 +693,7 @@ describe("open-task termination guard", () => {
   });
 
   test("a declined tool with no open tasks surfaces the decline immediately", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     const actions = actionsArray(
       await director.decide(
         makeToolErrorEvent("c", declined),
@@ -749,7 +744,6 @@ describe("chatDirector compaction", () => {
   test("schedules idle compaction after an over-threshold text-only reply", async () => {
     let continuations = 0;
     const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
       requestContinuation: () => {
         continuations++;
       },
@@ -795,7 +789,6 @@ describe("chatDirector compaction", () => {
 
   test("idle empty compact makes the post-compact estimate authoritative without inferring", async () => {
     const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
       requestContinuation: () => undefined,
     });
     const largeTurns = Array.from(
@@ -888,7 +881,6 @@ describe("chatDirector compaction", () => {
     onContinuation?: () => void,
   ) {
     return createChatDirector(systemPrompt, [], {
-      onTasksChange: () => undefined,
       requestContinuation: onContinuation ?? (() => undefined),
     });
   }
@@ -1065,12 +1057,17 @@ describe("chatDirector compaction", () => {
 });
 
 describe("chatDirector LSP auto-activation", () => {
+  const activateEmits = (
+    actions: ReactorAction | ReactorAction[],
+  ): ReactorAction[] =>
+    actionsArray(actions).filter(
+      (a) =>
+        a.type === "emit" &&
+        (a as { eventType?: string }).eventType === CHAT_TOOLS_ACTIVATE_EVENT,
+    );
+
   test("reading a code file activates the lsp tool on success", async () => {
-    const activated: string[][] = [];
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-      onActivateTools: (names: string[]) => activated.push(names),
-    });
+    const director = createChatDirector("", [], {});
     await director.decide(
       makeInferenceDoneEvent([
         { id: "c", name: "read_file", args: { path: "src/foo.ts" } },
@@ -1078,16 +1075,22 @@ describe("chatDirector LSP auto-activation", () => {
       mockState,
       mockCapabilities,
     );
-    await director.decide(makeToolDoneEvent("c"), mockState, mockCapabilities);
-    expect(activated).toEqual([["lsp"]]);
+    const actions = await director.decide(
+      makeToolDoneEvent("c"),
+      mockState,
+      mockCapabilities,
+    );
+    expect(activateEmits(actions)).toEqual([
+      {
+        type: "emit",
+        eventType: CHAT_TOOLS_ACTIVATE_EVENT,
+        data: { names: ["lsp"] },
+      },
+    ]);
   });
 
   test("editing a code file activates lsp", async () => {
-    const activated: string[][] = [];
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-      onActivateTools: (names: string[]) => activated.push(names),
-    });
+    const director = createChatDirector("", [], {});
     await director.decide(
       makeInferenceDoneEvent([
         { id: "c", name: "edit_file", args: { path: "lib/bar.rs" } },
@@ -1095,16 +1098,22 @@ describe("chatDirector LSP auto-activation", () => {
       mockState,
       mockCapabilities,
     );
-    await director.decide(makeToolDoneEvent("c"), mockState, mockCapabilities);
-    expect(activated).toEqual([["lsp"]]);
+    const actions = await director.decide(
+      makeToolDoneEvent("c"),
+      mockState,
+      mockCapabilities,
+    );
+    expect(activateEmits(actions)).toEqual([
+      {
+        type: "emit",
+        eventType: CHAT_TOOLS_ACTIVATE_EVENT,
+        data: { names: ["lsp"] },
+      },
+    ]);
   });
 
   test("a non-code file does not activate lsp", async () => {
-    const activated: string[][] = [];
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-      onActivateTools: (names: string[]) => activated.push(names),
-    });
+    const director = createChatDirector("", [], {});
     await director.decide(
       makeInferenceDoneEvent([
         { id: "c", name: "read_file", args: { path: "README.md" } },
@@ -1112,16 +1121,16 @@ describe("chatDirector LSP auto-activation", () => {
       mockState,
       mockCapabilities,
     );
-    await director.decide(makeToolDoneEvent("c"), mockState, mockCapabilities);
-    expect(activated).toEqual([]);
+    const actions = await director.decide(
+      makeToolDoneEvent("c"),
+      mockState,
+      mockCapabilities,
+    );
+    expect(activateEmits(actions)).toEqual([]);
   });
 
   test("a failed read does not activate lsp", async () => {
-    const activated: string[][] = [];
-    const director = createChatDirector("", [], {
-      onTasksChange: () => undefined,
-      onActivateTools: (names: string[]) => activated.push(names),
-    });
+    const director = createChatDirector("", [], {});
     await director.decide(
       makeInferenceDoneEvent([
         { id: "c", name: "read_file", args: { path: "src/foo.ts" } },
@@ -1129,12 +1138,12 @@ describe("chatDirector LSP auto-activation", () => {
       mockState,
       mockCapabilities,
     );
-    await director.decide(
+    const actions = await director.decide(
       makeToolErrorEvent("c", "Error: not found"),
       mockState,
       mockCapabilities,
     );
-    expect(activated).toEqual([]);
+    expect(activateEmits(actions)).toEqual([]);
   });
 });
 
@@ -1184,9 +1193,7 @@ describe("updateToolDefinitions rewrites infer tools", () => {
   };
 
   test("a tool registered after construction is advertised on the next inference", async () => {
-    const director = createChatDirector("base-prompt", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base-prompt", [], {});
     director.updateToolDefinitions([lateTool]);
 
     const result = await director.decide(
@@ -1205,9 +1212,7 @@ describe("updateToolDefinitions rewrites infer tools", () => {
   // The provider cache is a prefix cache keyed on the tools array; a tool_search
   // between turns must not reshape it.
   test("wire tools are byte-identical across a turn that ran tool_search", async () => {
-    const director = createChatDirector("base-prompt", [lateTool], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base-prompt", [lateTool], {});
 
     const before = await firstInferTools(
       director,
@@ -1271,7 +1276,7 @@ describe("updateToolDefinitions rewrites infer tools", () => {
     const director = createChatDirector(
       "base-prompt",
       advertised.computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
-      { onTasksChange: () => undefined },
+      {},
     );
 
     const before = await firstInferTools(
@@ -1327,9 +1332,7 @@ describe("updateToolDefinitions rewrites infer tools", () => {
   // submit_output is always on the wire so a workflow going active never grows
   // the array and busts the provider cache prefix.
   test("submit_output is advertised even with no active workflow", async () => {
-    const director = createChatDirector("base-prompt", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base-prompt", [], {});
     director.updateToolDefinitions([lateTool]);
 
     const result = await director.decide(
@@ -1381,7 +1384,7 @@ describe("updateToolDefinitions rewrites infer tools", () => {
     const director = createChatDirector(
       "base-prompt",
       computeAdvertised(toolset.dynamicRunner.currentDefinitions()),
-      { onTasksChange: () => undefined },
+      {},
     );
 
     // Before discovery: the MCP tool is registered (dispatchable) but not wired.
@@ -1452,7 +1455,6 @@ describe("updateToolDefinitions rewrites infer tools", () => {
     const classifier = async (_msg: string, _meta: SessionMetadata) =>
       ({ kind: "new_task" as const, reason: "pivot" }) as TaskBoundary;
     const director = createChatDirector("base-prompt", [], {
-      onTasksChange: () => undefined,
       taskClassifier: classifier,
     });
     director.updateToolDefinitions([lateTool]);
@@ -1634,9 +1636,7 @@ describe("transient nudges", () => {
     }) as unknown as ReactorInboundEvent;
 
   test("open-task nudge uses ephemeralTurns and keeps the stable system prompt", async () => {
-    const director = createChatDirector("stable-base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("stable-base", [], {});
     await director.decide(
       manageTasksEvent("doing"),
       mockState,
@@ -1702,9 +1702,7 @@ describe("chatDirector spacer echo", () => {
 
   test("spacer-only assistant reply is not a finished turn", async () => {
     for (const text of [LEGACY_COMPACT_SPACER_TEXT, COMPACT_SPACER_TEXT]) {
-      const director = createChatDirector("base", [], {
-        onTasksChange: () => undefined,
-      });
+      const director = createChatDirector("base", [], {});
       const actions = actionsArray(
         await director.decide(
           spacerInferenceDone(text),
@@ -1724,7 +1722,6 @@ describe("chatDirector spacer echo", () => {
   test("spacer-echo does not arm idle compact, including after the nudge cap", async () => {
     let continuations = 0;
     const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
       requestContinuation: () => {
         continuations++;
       },
@@ -1757,9 +1754,7 @@ describe("chatDirector spacer echo", () => {
   });
 
   test("echo-nudge cap is two then empty settle, and resets on message.received", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     for (let i = 0; i < 2; i++) {
       const nudged = actionsArray(
         await director.decide(
@@ -1801,9 +1796,7 @@ describe("chatDirector spacer echo", () => {
   });
 
   test("after echo-cap with open tasks, falls through to open-task rails", async () => {
-    const director = createChatDirector("base", [], {
-      onTasksChange: () => undefined,
-    });
+    const director = createChatDirector("base", [], {});
     await director.decide(
       makeInferenceDoneEvent([
         {
@@ -1870,7 +1863,6 @@ describe("chatDirector spacer echo", () => {
 describe("tool-discipline rules on the wire", () => {
   async function promptSentFor(model: string): Promise<string | undefined> {
     const director = createChatDirector("BASE PROMPT", [], {
-      onTasksChange: () => undefined,
       provider: { providerName: "opencode-go", model },
     });
     const event = {
