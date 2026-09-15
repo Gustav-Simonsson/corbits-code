@@ -77,6 +77,7 @@ import {
   type ExpandPluginPathSkip,
 } from "../plugins/loader.js";
 import { consumeStream } from "../session/stream-consumer.js";
+import { COMPACTION_CONTINUATION_EVENT } from "../agent/compaction.js";
 import {
   generateSessionId,
   initSessionDir,
@@ -104,6 +105,7 @@ import {
   buildCompactionContinuationMessage,
   buildShellBackgroundMessage,
   buildSubAgentProvider,
+  createContinuationGate,
   createSessionPruningCompactor,
   loadSessionChatPrompt,
   skillDirsFromEnabledPlugins,
@@ -845,10 +847,6 @@ export async function runExec(config: Config): Promise<ExecResult> {
       computeAdvertised,
       inactivityTimeoutMs: config.inactivityTimeoutMs ?? 750_000,
       totalTimeoutMs: config.totalTimeoutMs,
-      requestContinuation: () => {
-        // Compaction governor self-delivers after compact so the loop re-enters.
-        currentAgent?.deliver(buildCompactionContinuationMessage());
-      },
       getProvider: () => config,
       getWorkdir: () => workdir,
       getSessionId: () => sessionId,
@@ -961,6 +959,9 @@ export async function runExec(config: Config): Promise<ExecResult> {
     await workflowHost.resume();
 
     const textChunks: string[] = [];
+    // Consume-once gate for the compaction continuation emit: a replayed
+    // duplicate of an already-answered emission must not re-deliver.
+    const continuationGate = createContinuationGate();
     // Cycles persist to the context store only on inference.done; the recorder
     // keeps the in-flight cycle's text so an errored or aborted turn leaves
     // its partial output in partial.jsonl instead of vanishing.
@@ -998,6 +999,13 @@ export async function runExec(config: Config): Promise<ExecResult> {
             ? { providerId: error.providerId }
             : {}),
         };
+      } else if (event.type === COMPACTION_CONTINUATION_EVENT) {
+        // Compaction governor self-delivers after compact so the loop re-enters.
+        // Each emission is answered once: a replayed duplicate of an
+        // already-answered emission is ignored instead of re-delivered.
+        if (continuationGate.shouldDeliver(event.seq)) {
+          currentAgent?.deliver(buildCompactionContinuationMessage());
+        }
       }
       liveSink.sink(event);
       cycleRecorder.handleEvent(event);

@@ -8,6 +8,7 @@ import type {
   LastCycleSource,
 } from "@intx/types/runtime";
 import { createChatDirector } from "../../src/agent/director.js";
+import { COMPACTION_CONTINUATION_EVENT } from "../../src/agent/compaction.js";
 
 // ---------------------------------------------------------------------------
 // Minimal stubs
@@ -88,8 +89,9 @@ function makeCapabilities(): ReactorCapabilities & { calls: string[] } {
 
 // ---------------------------------------------------------------------------
 // Chat director compaction: a compact cycle must not strand the reactor loop.
-// The reactor delivers no event after compact, so the director self-delivers an
-// empty message (requestContinuation) and infers on the next message.received.
+// The reactor delivers no event after compact, so the director returns a
+// continuation emit action (the host answers it with a deliver) and infers
+// on the next message.received.
 // ---------------------------------------------------------------------------
 
 function toolDoneTurn(callId: string): ReactorInboundEvent {
@@ -141,17 +143,21 @@ const manyTurnsState: ReactorState = {
   })),
 };
 
-function makeChatDirectorWithContinuation(onContinue: () => void) {
-  return createChatDirector("sys", [], {
-    requestContinuation: onContinue,
-  });
+function makeChatDirector() {
+  return createChatDirector("sys", [], {});
 }
 
-test("current context over threshold emits compact and a continuation request, not a dead loop", async () => {
-  let continuations = 0;
-  const director = makeChatDirectorWithContinuation(() => {
-    continuations++;
-  });
+function hasContinuationEmit(actions: ReactorAction[]): boolean {
+  return actions.some(
+    (a) =>
+      a.type === "emit" &&
+      "eventType" in a &&
+      a.eventType === COMPACTION_CONTINUATION_EVENT,
+  );
+}
+
+test("current context over threshold emits compact and a continuation emit, not a dead loop", async () => {
+  const director = makeChatDirector();
 
   // A cycle whose input usage exceeds ~60% of the default 128k window arms compaction.
   await director.decide(
@@ -172,7 +178,7 @@ test("current context over threshold emits compact and a continuation request, n
 
   expect(arr.some((a) => a.type === "compact")).toBe(true);
   expect(arr.some((a) => a.type === "infer")).toBe(false);
-  expect(continuations).toBe(1);
+  expect(hasContinuationEmit(arr)).toBe(true);
 
   // The self-delivered empty message resumes inference against truncated history.
   const resumeCaps = makeCapabilities();
@@ -186,10 +192,7 @@ test("current context over threshold emits compact and a continuation request, n
 });
 
 test("compaction is self-regulating: a cycle back under threshold does not re-compact", async () => {
-  let continuations = 0;
-  const director = makeChatDirectorWithContinuation(() => {
-    continuations++;
-  });
+  const director = makeChatDirector();
 
   // After a compaction truncates history, the next cycle's input usage falls
   // back under the threshold — so no further compaction is armed. This is the
@@ -208,7 +211,54 @@ test("compaction is self-regulating: a cycle back under threshold does not re-co
 
   expect(arr.some((a) => a.type === "compact")).toBe(false);
   expect(arr.some((a) => a.type === "infer")).toBe(true);
-  expect(continuations).toBe(0);
+  expect(hasContinuationEmit(arr)).toBe(false);
+});
+
+test("a fresh director answers an unsolicited empty continuation without inferring", async () => {
+  const director = makeChatDirector();
+
+  // No compact ever ran, so no continuation is outstanding: a forged or
+  // replayed continuation message must not cost a billable inference.
+  const result = await director.decide(
+    emptyMessageReceived(),
+    state,
+    makeCapabilities(),
+  );
+  const arr = Array.isArray(result) ? result : [result];
+  expect(arr.some((a) => a.type === "infer")).toBe(false);
+});
+
+test("a duplicated continuation resumes inference at most once", async () => {
+  const director = makeChatDirector();
+
+  await director.decide(
+    inferenceDoneWithInput(100_000),
+    manyTurnsState,
+    makeCapabilities(),
+  );
+  await director.decide(
+    toolDoneTurn("call-1"),
+    manyTurnsState,
+    makeCapabilities(),
+  );
+
+  // The first continuation resumes the interrupted loop.
+  const first = await director.decide(
+    emptyMessageReceived(),
+    state,
+    makeCapabilities(),
+  );
+  const firstArr = Array.isArray(first) ? first : [first];
+  expect(firstArr.some((a) => a.type === "infer")).toBe(true);
+
+  // A replayed duplicate of the same continuation must not re-infer.
+  const second = await director.decide(
+    emptyMessageReceived(),
+    state,
+    makeCapabilities(),
+  );
+  const secondArr = Array.isArray(second) ? second : [second];
+  expect(secondArr.some((a) => a.type === "infer")).toBe(false);
 });
 
 // ---------------------------------------------------------------------------

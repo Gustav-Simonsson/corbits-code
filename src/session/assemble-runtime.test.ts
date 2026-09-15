@@ -238,7 +238,6 @@ function stubChatAgentWiring(
     },
     computeAdvertised: () => [],
     inactivityTimeoutMs: 1_000,
-    requestContinuation: () => undefined,
     getProvider: () => ({ providerName: "test", model: "m" }),
     getWorkdir: () => "/build-dir",
     getSessionId: () => "test-session",

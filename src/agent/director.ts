@@ -21,6 +21,7 @@ import {
 } from "../session/compactor.js";
 import type { WorkflowCoordinator } from "../workflows/coordinator.js";
 import {
+  compactionContinuationAction,
   createCompactionGovernor,
   type CompactionGovernor,
 } from "./compaction.js";
@@ -444,7 +445,6 @@ export interface ChatDirectorOptions {
   inactivityTimeoutMs?: number | undefined;
   totalTimeoutMs?: number | undefined;
   workflowCoordinator?: WorkflowCoordinator | undefined;
-  requestContinuation?: (() => void) | undefined;
   provider?: { providerName: string; model?: string } | undefined;
   /**
    * CL-7918 decisions (both former closures removed, no new env key):
@@ -572,8 +572,10 @@ class ChatDirectorImpl extends DefaultDirector {
     this.totalTimeoutMs = options.totalTimeoutMs;
     this.taskClassifier = options.taskClassifier;
     this.workflowCoordinator = options.workflowCoordinator;
+    // The chat path holds no continuation closure: the governor expresses
+    // continuation as an emit action the host answers with a deliver.
     this.compaction = createCompactionGovernor(
-      options.requestContinuation,
+      undefined,
       composedPrompt,
       toolDefinitions,
     );
@@ -768,6 +770,22 @@ class ChatDirectorImpl extends DefaultDirector {
     if (idleCompact !== null) return idleCompact;
     const recovery = this.compaction.interceptOverflow(event, capabilities);
     if (recovery !== null) return recovery;
+
+    // A forged or replayed compaction continuation arrives as an empty
+    // message.received with no outstanding compact state (the legit resume
+    // is consumed above). Answering it with infer would burn a billable
+    // model turn and reset the loop-protection budgets below, so hold the
+    // loop instead.
+    if (event.type === "message.received") {
+      const content =
+        typeof event.message.content === "string" ? event.message.content : "";
+      if (
+        content.length === 0 &&
+        !this.compaction.hasOutstandingContinuation()
+      ) {
+        return capabilities.wait();
+      }
+    }
 
     // Only `aborted` (internal-recovery-abort) lands here: the harness's own
     // retry policy already owns `timeout`/`retryable`/`quota_exhausted` and
@@ -1064,13 +1082,21 @@ class ChatDirectorImpl extends DefaultDirector {
       );
     }
 
-    this.compaction.noteIdleTurn(event, baseActions);
+    // Idle arming returns an emit action (continuation as a ReactorAction)
+    // so the host re-enters the loop and the governor can compact on the
+    // continuation's arrival.
+    const idleContinuationArmed = this.compaction.noteIdleTurn(
+      event,
+      baseActions,
+    );
     const compacted = this.compaction.interceptActions(
       event,
       baseActions,
       capabilities,
     );
     if (compacted !== null) return compacted;
+    if (idleContinuationArmed)
+      return [...baseActions, compactionContinuationAction(capabilities)];
 
     // Loop protection takes precedence over workflow/open-task
     // continuation nudges below: those exist to keep a session moving,

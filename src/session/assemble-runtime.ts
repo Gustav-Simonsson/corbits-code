@@ -477,8 +477,6 @@ export interface ChatAgentWiring {
    * the TUI seeds it (fleet lanes may appear mid-session).
    */
   allowIdleWithFleet?: boolean;
-  /** Compaction governor re-entry (the reactor emits no event after compact). */
-  requestContinuation: () => void;
   getProvider: () => { providerName: string; model: string };
   /** Pre-created holder so the workflow controller can close over it first. */
   directorHolder?: { instance?: ChatDirector };
@@ -529,7 +527,6 @@ export function assembleChatAgent(wiring: ChatAgentWiring): AssembledChatAgent {
         {
           inactivityTimeoutMs: wiring.inactivityTimeoutMs,
           totalTimeoutMs: wiring.totalTimeoutMs,
-          requestContinuation: wiring.requestContinuation,
           provider: { ...wiring.getProvider() },
           // CL-7918: idle-with-fleet seed replaces the former
           // getLiveFleetCount closure (CL-7972 keeps it live via the

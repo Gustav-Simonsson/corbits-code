@@ -60,7 +60,6 @@ import type { CompactionArchive } from "../../session/compaction-archive.js";
 import { createApprovalResume } from "../../session/approval-resume.js";
 import { createReactorAuthorize } from "../../permission/reactor-authorize.js";
 import {
-  buildCompactionContinuationMessage,
   buildShellBackgroundMessage,
   createLiveSubAgentSources,
   createSessionPruningCompactor,
@@ -93,6 +92,7 @@ import type { ToolWatchdogConfig } from "../tool-execution-watchdog.js";
 import {
   deliverAgentMessage,
   deliveryResultNotice,
+  runGenerationGuardedDeliver,
   type AgentDeliveryResult,
 } from "../deliver-agent-message.js";
 import { createProviderFailureAttemptTracker } from "../provider/failure-attempt.js";
@@ -533,20 +533,24 @@ export async function assembleTUISession(
   ): void => {
     const stillCurrent = deliveryGeneration.capture();
     void sessionOps.enqueue(async () => {
-      if (!stillCurrent()) {
-        onSettle?.({
+      // The shell already popped the queue item and painted it as delivered
+      // by the time this runs, so a failed rebuild or closed agent must settle
+      // here — otherwise the message silently never reaches the agent. The
+      // generation is re-checked at execution time (the queue is FIFO with no
+      // preemption), so a reload that lands while this deliver is queued wins
+      // and the stale answer is dropped as superseded.
+      const result = await runGenerationGuardedDeliver({
+        stillCurrent,
+        onStale: () => ({
           status: "not-delivered",
           reason: "superseded",
           detail: "session identity changed before delivery",
-        });
-        return;
-      }
-      // The shell already popped the queue item and painted it as delivered
-      // by the time this runs, so a failed rebuild or closed agent must settle
-      // here — otherwise the message silently never reaches the agent.
-      const result = await deliverAgentMessage({
-        getFatalBuildError: () => state.fatalBuildError,
-        deliverToLiveAgent,
+        }),
+        run: () =>
+          deliverAgentMessage({
+            getFatalBuildError: () => state.fatalBuildError,
+            deliverToLiveAgent,
+          }),
       });
       if (onSettle !== undefined) {
         onSettle(result);
@@ -617,15 +621,11 @@ export async function assembleTUISession(
     // mid-session; CL-7972 keeps it live via the fleet-wake publisher);
     // retry stamping tracks the live source id in-reactor now.
     // (No onTasksChange: task/tool updates arrive as reactor events consumed
-    // in the stream sink; no getLiveFleetCount: the publisher drives the
-    // allowance through setAllowIdleWithFleet.)
+    // in the stream sink; no requestContinuation: compaction re-entry arrives
+    // as the COMPACTION_CONTINUATION_EVENT reactor emission consumed there
+    // instead of a host closure; no getLiveFleetCount: the publisher drives
+    // the allowance through setAllowIdleWithFleet.)
     allowIdleWithFleet: true,
-    requestContinuation: () => {
-      const targetAgent = liveAgent(state);
-      state.enqueueAgentDeliver?.(() =>
-        targetAgent.deliver(buildCompactionContinuationMessage()),
-      );
-    },
     getProvider: () => state.config,
     directorHolder,
     getWorkdir: () => state.workdir,
