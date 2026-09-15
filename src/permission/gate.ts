@@ -988,14 +988,25 @@ export function createPermissionGate(
     const outcome = await resolveInteractiveAsk(decision);
     if (outcome === undefined || !outcome.allow) {
       const reason = declineReason(decision.request, outcome);
-      denialMemory.record(
-        stableRequestId(
-          call,
-          getSubAgentIdentity()?.cwd ?? resolvedCwd,
-          rootsProvider,
-        ),
-        reason,
-      );
+      // Cache operator declines so a same-turn retry (fresh tool_call.id,
+      // same stable fingerprint) denies with the identical reason instead of
+      // re-asking. Timeouts, aborts, and missing outcomes are never cached —
+      // the operator made no decision, so the retry must ask again (mirrors
+      // resolveSuspended).
+      if (
+        outcome !== undefined &&
+        !outcome.allow &&
+        classifyOutcome(outcome) === "deny"
+      ) {
+        denialMemory.record(
+          stableRequestId(
+            call,
+            getSubAgentIdentity()?.cwd ?? resolvedCwd,
+            rootsProvider,
+          ),
+          reason,
+        );
+      }
       return { allowed: false, reason };
     }
     return { allowed: true };

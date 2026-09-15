@@ -40,7 +40,11 @@ import {
   createPathRestriction,
   resolveWorkspacePath,
 } from "./path-restriction.js";
-import type { Approval, PermissionRequest } from "./types.js";
+import type {
+  Approval,
+  ApprovalOutcome,
+  PermissionRequest,
+} from "./types.js";
 import { initTemporaryGitRepo } from "../../tests/helpers/temporary-git-repo.js";
 import { secretGuardPlugin } from "../plugins/secret-guard-plugin.js";
 import { pathEscapePlugin } from "../plugins/path-escape-plugin.js";
@@ -2408,6 +2412,56 @@ describe("createPermissionGate", () => {
     if (retry.effect !== "ask")
       throw new Error("expected the retry to re-ask after a timeout");
     expect(asked).toBe(1);
+  });
+
+  // The middleware path must mirror the reactor-path guard above: only a real
+  // operator decline populates denial memory. Timeouts, aborts, and missing
+  // outcomes are never cached — the operator made no decision, so a same-turn
+  // retry with a fresh tool_call.id must re-ask instead of denying from cache.
+  test("middleware-path timeout/abort/missing outcomes are not cached: retry re-asks", async () => {
+    const args = { url: "https://example.com/docs", format: "markdown" };
+    const outcomes: { name: string; outcome: ApprovalOutcome | undefined }[] = [
+      {
+        name: "timeout",
+        outcome: { allow: false, message: APPROVAL_TIMEOUT_RESULT_TEXT },
+      },
+      {
+        name: "abort",
+        outcome: {
+          allow: false,
+          message: "tool no longer running; permission request denied",
+        },
+      },
+      { name: "missing", outcome: undefined },
+    ];
+    for (const { name, outcome } of outcomes) {
+      let asked = 0;
+      const gate = createPermissionGate({
+        approvals: [],
+        interactive: true,
+        skipPermissions: false,
+        reactorGated: false,
+        requestApproval: async () => {
+          asked++;
+          return outcome as ApprovalOutcome;
+        },
+      });
+      const first = await gate.evaluate({
+        id: "call_0",
+        name: "web_fetch",
+        arguments: args,
+      });
+      if (first.allowed)
+        throw new Error(`expected the first ${name} call denied`);
+      const retry = await gate.evaluate({
+        id: "call_1",
+        name: "web_fetch",
+        arguments: args,
+      });
+      if (retry.allowed)
+        throw new Error(`expected the ${name} retry denied after re-asking`);
+      expect(asked).toBe(2);
+    }
   });
 
   // CL-8002: distinct URLs deny independently, and reset() clears the denial
