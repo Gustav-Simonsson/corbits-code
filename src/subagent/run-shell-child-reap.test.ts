@@ -353,3 +353,54 @@ describe("CL-7990 shell-child reap: sessions holding a live shell child settle",
     { timeout: 60_000 },
   );
 });
+
+/**
+ * CL-7997 kill proof: the tests above prove the run settles under a wedged
+ * child, but none proves a shell-guard-tracked child is actually KILLED on
+ * close/dispose. This drives a real `sleep` through `runGuardedShell` (the
+ * shell-guard tracking primitive) and the exact `reapLiveChildren` call the
+ * plugin dispose runs, then asserts on the ChildProcess handle itself that
+ * the process is dead — not just that the run settled.
+ */
+describe("CL-7997 shell-guard kill proof: dispose leaves the tracked child dead", () => {
+  test(
+    "reapLiveChildren kills a shell-guard-tracked sleep child",
+    async () => {
+      if (process.platform === "win32") return;
+      const { runGuardedShell, reapLiveChildren } =
+        await import("../plugins/shell-guard-plugin.js");
+      const liveChildren = new Set<ChildProcess>();
+      const controller = new AbortController();
+      const running = runGuardedShell(
+        { command: "sleep 60" },
+        controller.signal,
+        liveChildren,
+      );
+      let child: ChildProcess | undefined;
+      try {
+        const started = Date.now();
+        while (liveChildren.size === 0 && Date.now() - started < 5_000) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(liveChildren.size).toBe(1);
+        child = defined([...liveChildren][0]);
+        // Live before the reap, so the death assertion below is not vacuous.
+        expect(child.exitCode).toBeNull();
+        expect(child.signalCode).toBeNull();
+        await reapLiveChildren(liveChildren);
+        await waitForChildExit(child);
+        await running;
+      } finally {
+        controller.abort();
+        if (child !== undefined) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Already dead — best-effort orphan guard.
+          }
+        }
+      }
+    },
+    { timeout: 30_000 },
+  );
+});
