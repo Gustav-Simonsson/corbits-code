@@ -1,14 +1,21 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import type { Agent, SendResult } from "@intx/agent";
 import type {
   ApprovalSnapshot,
+  ContextStore,
+  PendingOperation,
   ConversationTurn,
   InboundMessage,
 } from "@intx/types/runtime";
 
 import { APPROVAL_TIMEOUT_RESULT_TEXT } from "../permission/decline-markers.js";
 import type { PermissionGate } from "../permission/gate.js";
-import { createApprovalResume } from "./approval-resume.js";
+import {
+  APPROVAL_DROPPED_NOTICE,
+  createApprovalResume,
+  resolveParkedCallIdFromStore,
+} from "./approval-resume.js";
+import { createSessionOperationQueue } from "../tui/delivery-queue.js";
 
 function assistantTurn(
   calls: { id: string; name: string; command: string }[],
@@ -77,17 +84,20 @@ function setup(args: {
   const resume = createApprovalResume({
     getAgent: () => agent as Pick<Agent, "deliver" | "history">,
     gate,
-    ...(args.resolveParkedCallId !== undefined
-      ? { resolveParkedCallId: args.resolveParkedCallId }
-      : {}),
+    resolveParkedCallId:
+      args.resolveParkedCallId ??
+      ((correlationId) => (correlationId === "corr-A" ? "call-A" : undefined)),
   });
   return { resume, delivered };
 }
 
-function decisionBody(message: InboundMessage): { outcome: string } {
+function decisionBody(message: InboundMessage): {
+  outcome: string;
+  message?: string;
+} {
   if (message.content === undefined)
     throw new Error("expected a decision body");
-  return JSON.parse(message.content) as { outcome: string };
+  return JSON.parse(message.content) as { outcome: string; message?: string };
 }
 
 function deliveredCorrelationId(message: InboundMessage): string {
@@ -96,6 +106,59 @@ function deliveredCorrelationId(message: InboundMessage): string {
     throw new Error("expected an interchange correlation id");
   return correlationId;
 }
+
+describe("approval decision intent headers", () => {
+  for (const allow of [true, false]) {
+    test(`preserves ${allow ? "granted" : "denied"} intent and correlation through the session queue`, async () => {
+      const delivered: InboundMessage[] = [];
+      const queue = createSessionOperationQueue();
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      queue.enqueue(() => held);
+      const agent = {
+        history: async () => [],
+        deliver: (message: InboundMessage) => {
+          delivered.push(message);
+        },
+      };
+      const gate = {
+        resolveSuspended: async () => ({ allow, message: "decision reason" }),
+      } as unknown as PermissionGate;
+      const resume = createApprovalResume({
+        getAgent: () => agent,
+        gate,
+        resolveParkedCallId: () => "typed-call",
+        deliver: (message) =>
+          queue.enqueue(async () => {
+            agent.deliver(message);
+          }),
+      });
+      const handling = resume.handle(
+        suspension("typed-correlation", "echo alpha"),
+      );
+      expect(delivered).toHaveLength(0);
+      release();
+      expect(await handling).toBe(true);
+      await queue.awaitTail();
+      expect(delivered).toHaveLength(1);
+      const message = delivered[0];
+      if (message === undefined) throw new Error("expected decision");
+      expect(message.headers.interchangeType).toBe(
+        allow ? "approval.granted" : "approval.denied",
+      );
+      expect(deliveredCorrelationId(message)).toBe("typed-correlation");
+      expect(decisionBody(message).outcome).toBe(
+        allow ? "approved" : "rejected",
+      );
+      if (!allow)
+        expect(JSON.parse(message.content ?? "").message).toBe(
+          "decision reason",
+        );
+    });
+  }
+});
 
 describe("approval-resume parallel-parked approvals", () => {
   test("delivers A's decision when a different parked call's approval times out", async () => {
@@ -185,14 +248,13 @@ describe("approval-resume parallel-parked approvals", () => {
     expect(delivered).toHaveLength(1);
   });
 
-  // Known limitation of the exact-one history derivation: with identical
-  // name+args twins, the answered own call drops out of the candidates and
-  // the derivation resolves to the unanswered twin, so the settled check
-  // misses and the genuinely-late decision is delivered. Telling the twins
-  // apart needs the resolveParkedCallId lookup; this test locks the current
-  // shape so a future fix can flip it to a drop.
-  test("identical name+args twin: own timeout with unanswered twin delivers", async () => {
+  test("identical name+args twin: own timeout with unanswered twin drops", async () => {
+    const pending = new Map([
+      ["corr-A", "call-A"],
+      ["corr-B", "call-B"],
+    ]);
     const { resume, delivered } = setup({
+      resolveParkedCallId: (correlationId) => pending.get(correlationId),
       preTurns: [
         assistantTurn([
           { id: "call-A", name: "run_shell", command: "echo same" },
@@ -200,6 +262,7 @@ describe("approval-resume parallel-parked approvals", () => {
         ]),
       ],
       onGate: (turns) => {
+        pending.delete("corr-A");
         turns.push(timeoutTurn("call-A"));
       },
     });
@@ -207,6 +270,436 @@ describe("approval-resume parallel-parked approvals", () => {
     const handled = await resume.handle(suspension("corr-A", "echo same"));
 
     expect(handled).toBe(true);
+    expect(delivered).toHaveLength(0);
+    expect(await resume.handle(suspension("corr-B", "echo same"))).toBe(true);
+    expect(delivered).toHaveLength(1);
+    const message = delivered[0];
+    if (message === undefined) throw new Error("expected B decision");
+    expect(deliveredCorrelationId(message)).toBe("corr-B");
+  });
+});
+
+function storeWith(
+  pendingOperations: PendingOperation[],
+): Pick<ContextStore, "load"> {
+  return {
+    load: async () => ({
+      turns: [],
+      pendingOperations,
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        thinking: 0,
+      },
+      connectorState: null,
+    }),
+  };
+}
+
+const operation: PendingOperation = {
+  correlationId: "corr-A",
+  kind: "approval",
+  registeredAt: 1,
+  gateId: "gate-A",
+  suspendedCall: {
+    id: "call-A",
+    name: "run_shell",
+    arguments: { command: "echo same" },
+  },
+};
+
+describe("persisted approval identity", () => {
+  test("requires exactly one matching approval with a suspended call", async () => {
+    expect(
+      await resolveParkedCallIdFromStore(storeWith([operation]), "corr-A"),
+    ).toBe("call-A");
+    expect(
+      await resolveParkedCallIdFromStore(storeWith([operation]), "corr-B"),
+    ).toBeUndefined();
+    expect(
+      await resolveParkedCallIdFromStore(storeWith([]), "corr-A"),
+    ).toBeUndefined();
+    expect(
+      await resolveParkedCallIdFromStore(
+        storeWith([operation, operation]),
+        "corr-A",
+      ),
+    ).toBeUndefined();
+    const { suspendedCall: _call, ...withoutCall } = operation;
+    expect(
+      await resolveParkedCallIdFromStore(storeWith([withoutCall]), "corr-A"),
+    ).toBeUndefined();
+    expect(
+      await resolveParkedCallIdFromStore(
+        storeWith([operation, withoutCall]),
+        "corr-A",
+      ),
+    ).toBeUndefined();
+  });
+});
+
+test("missing or ambiguous stored identity never falls back to an identical history call", async () => {
+  for (const pending of [[], [operation, operation]]) {
+    const deliver = mock((_message: InboundMessage): void => undefined);
+    const resolveSuspended = mock(async () => ({ allow: true }));
+    const resume = createApprovalResume({
+      getAgent: () => ({
+        deliver,
+        history: async () => [
+          assistantTurn([
+            { id: "call-B", name: "run_shell", command: "echo same" },
+          ]),
+        ],
+      }),
+      resolveParkedCallId: (id) =>
+        resolveParkedCallIdFromStore(storeWith(pending), id),
+      gate: { resolveSuspended } as unknown as PermissionGate,
+    });
+    expect(await resume.handle(suspension("corr-A", "echo same"))).toBe(true);
+    expect(resolveSuspended).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+  }
+});
+
+function deferredResume() {
+  const lookup = Promise.withResolvers<string | undefined>();
+  const deliver = mock((_message: InboundMessage): void => undefined);
+  const history = mock(async (): Promise<ConversationTurn[]> => []);
+  const resolveSuspended = mock(async () => ({ allow: true }));
+  const resolveParkedCallId = mock(() => lookup.promise);
+  const onDropped = mock((_text: string): void => undefined);
+  let cancel: (() => void) | undefined;
+  let current = true;
+  const resume = createApprovalResume({
+    getAgent: () => ({ deliver, history }),
+    resolveParkedCallId,
+    gate: { resolveSuspended } as unknown as PermissionGate,
+    captureGeneration: () => () => current,
+    onDropped,
+    registerParkedCancel: (registered) => {
+      cancel = registered;
+    },
+  });
+  return {
+    lookup,
+    deliver,
+    onDropped,
+    history,
+    resolveSuspended,
+    resolveParkedCallId,
+    resume,
+    cancel: () => cancel?.(),
+    registered: () => cancel,
+    invalidate: () => {
+      current = false;
+    },
+  };
+}
+
+describe("approval identity ordering", () => {
+  test("resolves once before opening the gate", async () => {
+    const ctx = deferredResume();
+    const handling = ctx.resume.handle(suspension("corr-A", "echo same"));
+    expect(ctx.resolveSuspended).not.toHaveBeenCalled();
+    expect(ctx.history).not.toHaveBeenCalled();
+    ctx.lookup.resolve("call-A");
+    expect(await handling).toBe(true);
+    expect(ctx.resolveParkedCallId).toHaveBeenCalledTimes(1);
+    expect(ctx.resolveSuspended).toHaveBeenCalledTimes(1);
+    expect(ctx.deliver).toHaveBeenCalledTimes(1);
+    expect(ctx.registered()).toBeUndefined();
+  });
+
+  for (const cancel of [true, false]) {
+    test(`${cancel ? "registered cancellation" : "generation change"} during lookup never delivers or opens gate`, async () => {
+      const ctx = deferredResume();
+      const handling = ctx.resume.handle(suspension("corr-A", "echo same"));
+      expect(ctx.registered()).toBeDefined();
+      if (cancel) ctx.cancel();
+      else ctx.invalidate();
+      expect(ctx.deliver).not.toHaveBeenCalled();
+      ctx.lookup.resolve("call-A");
+      expect(await handling).toBe(true);
+      expect(ctx.deliver).not.toHaveBeenCalled();
+      expect(ctx.resolveSuspended).not.toHaveBeenCalled();
+      expect(ctx.registered()).toBeUndefined();
+    });
+  }
+
+  test("generation change during initial history never delivers", async () => {
+    const ctx = deferredResume();
+    ctx.history.mockImplementation(async () => {
+      ctx.invalidate();
+      return [];
+    });
+    const handling = ctx.resume.handle(suspension("corr-A", "echo same"));
+    ctx.lookup.resolve("call-A");
+    expect(await handling).toBe(true);
+    expect(ctx.resolveSuspended).not.toHaveBeenCalled();
+    expect(ctx.deliver).not.toHaveBeenCalled();
+  });
+
+  test("generation change during post-gate history cannot deliver an approval", async () => {
+    const ctx = deferredResume();
+    ctx.history.mockResolvedValueOnce([]).mockImplementationOnce(async () => {
+      ctx.invalidate();
+      return [];
+    });
+    const handling = ctx.resume.handle(suspension("corr-A", "echo same"));
+    ctx.lookup.resolve("call-A");
+    expect(await handling).toBe(true);
+    expect(ctx.deliver).toHaveBeenCalledTimes(1);
+    const message = ctx.deliver.mock.calls[0]?.[0];
+    if (message === undefined)
+      throw new Error("expected cancellation rejection");
+    expect(decisionBody(message).outcome).toBe("rejected");
+  });
+
+  for (const timedOutCallId of ["call-A", "call-B"]) {
+    test(`generation change during post-gate history with ${timedOutCallId} timeout preserves exact-call cancellation`, async () => {
+      const ctx = deferredResume();
+      const reading = Promise.withResolvers<undefined>();
+      const history = Promise.withResolvers<ConversationTurn[]>();
+      ctx.history.mockResolvedValueOnce([]).mockImplementationOnce(() => {
+        reading.resolve(undefined);
+        return history.promise;
+      });
+      const handling = ctx.resume.handle(suspension("corr-A", "echo same"));
+      ctx.lookup.resolve("call-A");
+      await reading.promise;
+      expect(ctx.resolveSuspended).toHaveBeenCalledTimes(1);
+      expect(ctx.registered()).toBeUndefined();
+      ctx.invalidate();
+      history.resolve([timeoutTurn(timedOutCallId)]);
+      expect(await handling).toBe(true);
+      expect(ctx.onDropped).toHaveBeenCalledTimes(1);
+      expect(ctx.onDropped).toHaveBeenCalledWith(APPROVAL_DROPPED_NOTICE);
+      expect(ctx.registered()).toBeUndefined();
+      if (timedOutCallId === "call-A") {
+        expect(ctx.deliver).not.toHaveBeenCalled();
+      } else {
+        expect(ctx.deliver).toHaveBeenCalledTimes(1);
+        const message = ctx.deliver.mock.calls[0]?.[0];
+        if (message === undefined)
+          throw new Error("expected live-call cancellation rejection");
+        expect(deliveredCorrelationId(message)).toBe("corr-A");
+        expect(decisionBody(message)).toEqual({
+          outcome: "rejected",
+          message: APPROVAL_DROPPED_NOTICE,
+        });
+      }
+    });
+  }
+
+  test("uses the captured agent for both history reads and direct delivery", async () => {
+    const agent = {
+      deliver: mock((_message: InboundMessage): void => undefined),
+      history: mock(async () => []),
+    };
+    const other = {
+      deliver: mock((_message: InboundMessage): void => undefined),
+      history: mock(async () => []),
+    };
+    const getAgent = mock(() => agent)
+      .mockReturnValueOnce(agent)
+      .mockReturnValue(other);
+    const resume = createApprovalResume({
+      getAgent,
+      resolveParkedCallId: () => "call-A",
+      gate: {
+        resolveSuspended: async () => ({ allow: true }),
+      } as unknown as PermissionGate,
+    });
+    expect(await resume.handle(suspension("corr-A", "echo same"))).toBe(true);
+    expect(getAgent).toHaveBeenCalledTimes(1);
+    expect(agent.history).toHaveBeenCalledTimes(2);
+    expect(agent.deliver).toHaveBeenCalledTimes(1);
+    expect(other.history).not.toHaveBeenCalled();
+    expect(other.deliver).not.toHaveBeenCalled();
+  });
+
+  test("does not claim atomic expiry detection before a timeout result is observed", async () => {
+    const pending = new Map([["corr-A", "call-A"]]);
+    const { resume, delivered } = setup({
+      preTurns: [],
+      resolveParkedCallId: (id) => pending.get(id),
+      onGate: () => {
+        pending.clear();
+      },
+    });
+    // Reactor correlation removal precedes queued timeout publication. History
+    // alone cannot close this interval; atomic admission belongs to the reactor.
+    expect(await resume.handle(suspension("corr-A", "echo same"))).toBe(true);
+    expect(delivered).toHaveLength(1);
+  });
+
+  test("load errors propagate and clear registration without rejection delivery", async () => {
+    const ctx = deferredResume();
+    const error = new Error("store unavailable");
+    const handling = ctx.resume.handle(suspension("corr-A", "echo same"));
+    ctx.lookup.reject(error);
+    await expect(handling).rejects.toBe(error);
+    expect(ctx.registered()).toBeUndefined();
+    expect(ctx.deliver).not.toHaveBeenCalled();
+    expect(ctx.resolveSuspended).not.toHaveBeenCalled();
+    await expect(
+      resolveParkedCallIdFromStore(
+        {
+          load: async () => {
+            throw error;
+          },
+        },
+        "corr-A",
+      ),
+    ).rejects.toBe(error);
+  });
+
+  for (const snapshot of [
+    undefined,
+    { name: 42 },
+    { name: "run_shell", arguments: { command: 42 } },
+  ]) {
+    for (const identity of ["missing", "expired", "live"] as const) {
+      test(`invalid snapshot ${JSON.stringify(snapshot)} with ${identity} identity`, async () => {
+        const ctx = deferredResume();
+        if (identity === "expired")
+          ctx.history.mockResolvedValue([timeoutTurn("call-A")]);
+        const result = {
+          type: "suspended",
+          correlationId: "corr-A",
+          approvalSnapshot: snapshot,
+        } as unknown as SendResult;
+        const handling = ctx.resume.handle(result);
+        ctx.lookup.resolve(identity === "missing" ? undefined : "call-A");
+        expect(await handling).toBe(true);
+        expect(ctx.resolveSuspended).not.toHaveBeenCalled();
+        expect(ctx.deliver).toHaveBeenCalledTimes(identity === "live" ? 1 : 0);
+        if (identity === "live") {
+          const message = ctx.deliver.mock.calls[0]?.[0];
+          if (message === undefined) throw new Error("expected rejection");
+          expect(decisionBody(message).outcome).toBe("rejected");
+        }
+      });
+    }
+  }
+
+  test("observed exact timeout during lookup prevents the gate and delivery", async () => {
+    const ctx = deferredResume();
+    const handling = ctx.resume.handle(suspension("corr-A", "echo same"));
+    ctx.history.mockResolvedValue([timeoutTurn("call-A")]);
+    ctx.lookup.resolve("call-A");
+    expect(await handling).toBe(true);
+    expect(ctx.resolveSuspended).not.toHaveBeenCalled();
+    expect(ctx.deliver).not.toHaveBeenCalled();
+  });
+});
+
+describe("approval resume retry re-await", () => {
+  function retryHarness(outcome: { allow: boolean; message?: string }) {
+    const delivered: InboundMessage[] = [];
+    const deliver = mock((message: InboundMessage): void => {
+      delivered.push(message);
+    });
+    const resolveSuspended = mock(async () => outcome);
+    const resume = createApprovalResume({
+      getAgent: () => ({
+        deliver,
+        history: async () => [],
+      }),
+      resolveParkedCallId: () => "call-A",
+      gate: { resolveSuspended } as unknown as PermissionGate,
+    });
+    return { resume, delivered, deliver, resolveSuspended };
+  }
+
+  function onlyDecision(delivered: InboundMessage[]): InboundMessage {
+    const message = delivered[0];
+    if (message === undefined) throw new Error("expected a delivered decision");
+    return message;
+  }
+
+  test("retry after a delivered acceptance reuses it exactly once", async () => {
+    const { resume, delivered, resolveSuspended } = retryHarness({
+      allow: true,
+    });
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(resolveSuspended).toHaveBeenCalledTimes(1);
+    expect(delivered).toHaveLength(1);
+    expect(decisionBody(onlyDecision(delivered)).outcome).toBe("approved");
+
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(resolveSuspended).toHaveBeenCalledTimes(1);
+    expect(delivered).toHaveLength(1);
+  });
+
+  test("late duplicate acceptance after a rejected decision is a no-op", async () => {
+    const { resume, delivered, resolveSuspended } = retryHarness({
+      allow: false,
+      message: "not today",
+    });
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(delivered).toHaveLength(1);
+    expect(decisionBody(onlyDecision(delivered)).outcome).toBe("rejected");
+
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(resolveSuspended).toHaveBeenCalledTimes(1);
+    expect(delivered).toHaveLength(1);
+  });
+
+  test("retry without acceptance still gates", async () => {
+    const delivered: InboundMessage[] = [];
+    const deliver = mock((message: InboundMessage): void => {
+      delivered.push(message);
+    });
+    deliver.mockImplementationOnce(() => {
+      throw new Error("agent is done");
+    });
+    const resolveSuspended = mock(async () => ({ allow: true }));
+    const resume = createApprovalResume({
+      getAgent: () => ({
+        deliver,
+        history: async () => [],
+      }),
+      resolveParkedCallId: () => "call-A",
+      gate: { resolveSuspended } as unknown as PermissionGate,
+    });
+    await expect(
+      resume.handle(suspension("corr-A", "echo alpha")),
+    ).rejects.toThrow("agent is done");
+    expect(delivered).toHaveLength(0);
+    expect(resolveSuspended).toHaveBeenCalledTimes(1);
+
+    expect(await resume.handle(suspension("corr-A", "echo alpha"))).toBe(true);
+    expect(resolveSuspended).toHaveBeenCalledTimes(2);
+    expect(delivered).toHaveLength(1);
+  });
+
+  test("concurrent duplicate handles share one gate and one deliver", async () => {
+    const gate = Promise.withResolvers<{ allow: boolean }>();
+    const delivered: InboundMessage[] = [];
+    const deliver = mock((message: InboundMessage): void => {
+      delivered.push(message);
+    });
+    const resolveSuspended = mock(() => gate.promise);
+    const resume = createApprovalResume({
+      getAgent: () => ({
+        deliver,
+        history: async () => [],
+      }),
+      resolveParkedCallId: () => "call-A",
+      gate: { resolveSuspended } as unknown as PermissionGate,
+    });
+    const first = resume.handle(suspension("corr-A", "echo alpha"));
+    const second = resume.handle(suspension("corr-A", "echo alpha"));
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(resolveSuspended).toHaveBeenCalledTimes(1);
+    gate.resolve({ allow: true });
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    expect(resolveSuspended).toHaveBeenCalledTimes(1);
     expect(delivered).toHaveLength(1);
   });
 });

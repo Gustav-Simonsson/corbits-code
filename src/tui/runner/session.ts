@@ -57,7 +57,10 @@ import {
   type LiveSessionSources,
 } from "../../session/assemble-runtime.js";
 import type { CompactionArchive } from "../../session/compaction-archive.js";
-import { createApprovalResume } from "../../session/approval-resume.js";
+import {
+  createApprovalResume,
+  resolveParkedCallIdFromStore,
+} from "../../session/approval-resume.js";
 import { createReactorAuthorize } from "../../permission/reactor-authorize.js";
 import {
   buildShellBackgroundMessage,
@@ -76,6 +79,10 @@ import { createSessionCostAccumulator } from "../../cost/session-cost.js";
 import {
   createDeliveryGeneration,
   createSessionOperationQueue,
+  deliverAgentMessage,
+  deliveryResultNotice,
+  runGenerationGuardedDeliver,
+  type AgentDeliveryResult,
 } from "../delivery-queue.js";
 import { createCorrelationAcceptance } from "../correlation-acceptance.js";
 import { createApprovalDeliverer } from "../approval-delivery.js";
@@ -89,12 +96,6 @@ import { detectLanguageServerAvailable } from "../../agent/lsp-availability.js";
 import type { SessionMode } from "../../config/session-mode.js";
 import { WorkflowHost, type WorkflowHostState } from "../../workflows/host.js";
 import type { ToolWatchdogConfig } from "../tool-execution-watchdog.js";
-import {
-  deliverAgentMessage,
-  deliveryResultNotice,
-  runGenerationGuardedDeliver,
-  type AgentDeliveryResult,
-} from "../deliver-agent-message.js";
 import { createProviderFailureAttemptTracker } from "../provider/failure-attempt.js";
 import { getTelemetry, liveTelemetry } from "../../telemetry/singleton.js";
 import {
@@ -502,8 +503,6 @@ export async function assembleTUISession(
   // Reload, interrupt, compaction continuation, and proxy deliver share one queue
   // so a rebuild never races an in-flight deliver.
   const sessionOps = createSessionOperationQueue();
-  // No resolveParkedCallId: the vendored reactor exposes no
-  // correlationId-to-call lookup, so the history heuristic is the path.
   // The deliverer bounds the acceptance wait so one stuck delivery fails fast
   // with diagnostics instead of wedging the sessionOps tail for every later
   // approval (send_input answers, interrupt_agent releases, ask_operator).
@@ -513,6 +512,12 @@ export async function assembleTUISession(
   });
   const approvalResume = createApprovalResume({
     getAgent: () => state.currentAgent,
+    resolveParkedCallId: (correlationId) => {
+      const storage = state.currentStorage;
+      if (storage === null)
+        throw new Error("approval resume: no context store");
+      return resolveParkedCallIdFromStore(storage, correlationId);
+    },
     captureGeneration: deliveryGeneration.capture,
     onDropped: (text) => state.systemNotice?.(text),
     registerParkedCancel: (cancel) => {
