@@ -14,11 +14,7 @@ import type {
   ConversationTurn,
   RetryPolicy,
 } from "@intx/types/runtime";
-import {
-  type SessionMetadata,
-  type TaskBoundary,
-  isCompactSpacerEchoTurn,
-} from "../session/compactor.js";
+import { isCompactSpacerEchoTurn } from "../session/compactor.js";
 import type { WorkflowCoordinator } from "../workflows/coordinator.js";
 import {
   compactionContinuationAction,
@@ -152,6 +148,30 @@ const MAX_INFERENCE_RECOVERIES = 2;
 const MAX_SPACER_ECHO_NUDGES = 2;
 
 const SPACER_ECHO_NUDGE = "Continue the task. Do not repeat internal markers.";
+
+// Upper bound for a coordinator directive injected into the next infer.
+// Directives are small step blocks; anything beyond this is a runaway prompt
+// or a misbehaving host object. Capped with a marker (never dropped) and
+// logged so the workflow owner can see the trim.
+export const MAX_WORKFLOW_DIRECTIVE_CHARS = 8_000;
+
+// Runtime shape guard for the host-owned live object. TypeScript covers
+// in-repo callers; this covers JS hosts handing back a lookalike with a
+// missing or non-function member, which would otherwise reject decide()
+// a turn later at the first consult site.
+function isWorkflowCoordinatorLike(
+  value: unknown,
+): value is WorkflowCoordinator {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.directive === "function" &&
+    typeof candidate.isActive === "function" &&
+    typeof candidate.currentStepIsGate === "function" &&
+    typeof candidate.currentStepId === "function" &&
+    typeof candidate.handleToolDone === "function"
+  );
+}
 
 const IDLE_OPEN_TASK_NUDGE =
   "\n\nYou are ending your turn while tasks are still open (todo/doing). " +
@@ -439,12 +459,22 @@ export const ChatToolsActivateDataSchema = type({
 });
 
 export interface ChatDirectorOptions {
-  taskClassifier?:
-    | ((message: string, metadata: SessionMetadata) => Promise<TaskBoundary>)
-    | undefined;
+  // CL-7919: task-boundary classification and workflow coordination are not
+  // host-injected closures. Classification's pure core lives in
+  // session/compactor.ts (classifyTaskBoundary); the director runs no
+  // decide()-time classification — the taskClassifier seam had zero
+  // production suppliers, and a native heuristics-only hook would newly arm
+  // new-task envelopes in the TUI. Coordination is host-owned (WorkflowHost
+  // owns the runtime lifecycle: start/resume/reset/persist) and reaches the
+  // director only through setWorkflowCoordinator, the narrow live-object
+  // seam below — never through options. Rejected: tools the director calls
+  // (loop-internal automation must not mount model-visible surface),
+  // BaseEnv handles (live non-serializable objects are not config), moving
+  // decide()-time directive/idle/gate rails out of the director (they are
+  // the loop), and keeping the constructor option (dead duplicate of the
+  // setter that keeps a host closure in options).
   inactivityTimeoutMs?: number | undefined;
   totalTimeoutMs?: number | undefined;
-  workflowCoordinator?: WorkflowCoordinator | undefined;
   provider?: { providerName: string; model?: string } | undefined;
   /**
    * CL-7918 decisions (both former closures removed, no new env key):
@@ -499,13 +529,13 @@ class ChatDirectorImpl extends DefaultDirector {
   >();
   private readonly lspTriggerCalls = new Set<string>();
   private readonly askOperatorCalls = new Set<string>();
-  private readonly taskClassifier:
-    | ((message: string, metadata: SessionMetadata) => Promise<TaskBoundary>)
-    | undefined;
   private readonly _systemPrompt: string;
   private _toolDefinitions: ToolDefinition[];
   private inactivityTimeoutMs: number | undefined;
   private totalTimeoutMs: number | undefined;
+  // CL-7919: host-owned live object, attached via setWorkflowCoordinator
+  // (WorkflowHost owns the runtime lifecycle). Consulted, never constructed
+  // here; deliberately not a constructor option.
   private workflowCoordinator: WorkflowCoordinator | undefined;
   private workflowIdleTurns = 0;
   private idleTerminationNudges = 0;
@@ -544,6 +574,12 @@ class ChatDirectorImpl extends DefaultDirector {
   // notifications ride along with every terminal action list (emit is
   // composable with all other actions).
   private pendingEmits: ReactorAction[] = [];
+  // Set when an inference-turn coordinator helper rethrows (the only path
+  // whose queued emits are stale by construction). decide()'s catch consults
+  // it so only that path drops the queue; any other mid-turn failure
+  // preserves the queue for the next successful turn instead of desyncing
+  // the host from already-mutated director state.
+  private coordinatorRethrowNoted = false;
 
   constructor(
     systemPrompt: string,
@@ -570,8 +606,6 @@ class ChatDirectorImpl extends DefaultDirector {
     this._toolDefinitions = toolDefinitions;
     this.inactivityTimeoutMs = options.inactivityTimeoutMs;
     this.totalTimeoutMs = options.totalTimeoutMs;
-    this.taskClassifier = options.taskClassifier;
-    this.workflowCoordinator = options.workflowCoordinator;
     // The chat path holds no continuation closure: the governor expresses
     // continuation as an emit action the host answers with a deliver.
     this.compaction = createCompactionGovernor(
@@ -592,7 +626,120 @@ class ChatDirectorImpl extends DefaultDirector {
   }
 
   setWorkflowCoordinator(coordinator: WorkflowCoordinator | undefined): void {
+    if (coordinator !== undefined && !isWorkflowCoordinatorLike(coordinator)) {
+      throw new Error(
+        "setWorkflowCoordinator: invalid coordinator — expected a WorkflowCoordinator " +
+          "with directive(), isActive(), currentStepIsGate(), currentStepId(), " +
+          "and handleToolDone() functions.",
+      );
+    }
     this.workflowCoordinator = coordinator;
+  }
+
+  // Coordinator consults degrade to plain inference on non-inference events:
+  // a throwing host object must not take down the session before inference
+  // has produced a turn. On an inference turn (inference.done) throw
+  // semantics are preserved instead — the turn cannot be faithfully
+  // assembled, so the error rejects decide() (which drops the turn's queued
+  // task/tool notifications rather than flushing them stale) instead of
+  // resolving a silent plain-inference batch. Shape fallbacks below (a
+  // non-string directive or step id, an empty directive, truncation) never
+  // throw and apply on every event. Each inference-turn helper takes
+  // rethrowCoordinatorError (onTurnBoundary of the current event at every
+  // call site) to select between the two behaviors. coordinatorHandleToolDone
+  // is the exception: its sole call site runs mid-turn (tool.done, never the
+  // turn boundary), so it always degrades to plain inference on a
+  // coordinator throw and takes no rethrow parameter.
+  private coordinatorIsActive(rethrowCoordinatorError: boolean): boolean {
+    try {
+      return this.workflowCoordinator?.isActive() === true;
+    } catch (err) {
+      if (rethrowCoordinatorError) {
+        this.coordinatorRethrowNoted = true;
+        throw err;
+      }
+      logger.warn`workflow-coordinator-isActive-threw error=${err instanceof Error ? err.message : String(err)}`;
+      return false;
+    }
+  }
+
+  private coordinatorDirective(
+    rethrowCoordinatorError: boolean,
+  ): string | null {
+    try {
+      const directive = this.workflowCoordinator?.directive() ?? null;
+      if (directive === null) return null;
+      if (typeof directive !== "string") {
+        logger.warn`workflow-coordinator-directive-not-string`;
+        return null;
+      }
+      if (directive.length === 0) return null;
+      if (directive.length > MAX_WORKFLOW_DIRECTIVE_CHARS) {
+        logger.warn`workflow-coordinator-directive-truncated chars=${String(directive.length)} max=${String(MAX_WORKFLOW_DIRECTIVE_CHARS)}`;
+        return `${directive.slice(0, MAX_WORKFLOW_DIRECTIVE_CHARS)}\n…[truncated]`;
+      }
+      return directive;
+    } catch (err) {
+      if (rethrowCoordinatorError) {
+        this.coordinatorRethrowNoted = true;
+        throw err;
+      }
+      logger.warn`workflow-coordinator-directive-threw error=${err instanceof Error ? err.message : String(err)}`;
+      return null;
+    }
+  }
+
+  private coordinatorCurrentStepIsGate(
+    rethrowCoordinatorError: boolean,
+  ): boolean {
+    try {
+      return this.workflowCoordinator?.currentStepIsGate() === true;
+    } catch (err) {
+      if (rethrowCoordinatorError) {
+        this.coordinatorRethrowNoted = true;
+        throw err;
+      }
+      logger.warn`workflow-coordinator-gate-threw error=${err instanceof Error ? err.message : String(err)}`;
+      return false;
+    }
+  }
+
+  private coordinatorCurrentStepId(
+    rethrowCoordinatorError: boolean,
+  ): string | null {
+    try {
+      const stepId = this.workflowCoordinator?.currentStepId() ?? null;
+      if (stepId === null) return null;
+      if (typeof stepId !== "string") {
+        logger.warn`workflow-coordinator-step-id-not-string`;
+        return null;
+      }
+      return stepId;
+    } catch (err) {
+      if (rethrowCoordinatorError) {
+        this.coordinatorRethrowNoted = true;
+        throw err;
+      }
+      logger.warn`workflow-coordinator-step-id-threw error=${err instanceof Error ? err.message : String(err)}`;
+      return null;
+    }
+  }
+
+  private coordinatorHandleToolDone(
+    name: string | undefined,
+    args: unknown,
+    isError: boolean,
+  ): boolean {
+    try {
+      return (
+        this.workflowCoordinator?.handleToolDone(name, args, isError) === true
+      );
+    } catch (err) {
+      // Mid-turn only (tool.done): a throwing coordinator degrades to plain
+      // inference rather than failing the turn.
+      logger.warn`workflow-coordinator-handleToolDone-threw error=${err instanceof Error ? err.message : String(err)}`;
+      return false;
+    }
   }
 
   // Narrow live setter for the idle-with-fleet allowance (CL-7972): the
@@ -682,8 +829,9 @@ class ChatDirectorImpl extends DefaultDirector {
 
   private withCurrentTools(
     result: ReactorAction | ReactorAction[],
+    rethrowCoordinatorError: boolean,
   ): ReactorAction | ReactorAction[] {
-    const active = this.workflowCoordinator?.isActive() === true;
+    const active = this.coordinatorIsActive(rethrowCoordinatorError);
     // submit_output rides on the wire every turn, workflow or not, so
     // activating a workflow never grows the tools array and busts the cache
     // prefix. Outside a workflow it is a harmless no-op the director ignores
@@ -695,7 +843,7 @@ class ChatDirectorImpl extends DefaultDirector {
       : [...this._toolDefinitions, submitOutputDefinition];
 
     const directive = active
-      ? (this.workflowCoordinator?.directive() ?? null)
+      ? this.coordinatorDirective(rethrowCoordinatorError)
       : null;
 
     const rewrite = (action: ReactorAction): ReactorAction => {
@@ -726,12 +874,13 @@ class ChatDirectorImpl extends DefaultDirector {
     state: ReactorState,
     capabilities: ReactorCapabilities,
   ): Promise<ReactorAction | ReactorAction[]> {
+    this.coordinatorRethrowNoted = false;
     try {
       const settled = ensureCycleSettlesWithReply(
         await this.decideInner(event, state, capabilities),
         capabilities,
       );
-      const withTools = this.withCurrentTools(settled);
+      const withTools = this.withCurrentTools(settled, onTurnBoundary(event));
       if (this.pendingEmits.length === 0) return withTools;
       const emits = this.pendingEmits;
       this.pendingEmits = [];
@@ -740,10 +889,15 @@ class ChatDirectorImpl extends DefaultDirector {
         ...emits,
       ];
     } catch (err) {
-      // A failed turn must not leak its queued task/tool notifications into
-      // the next turn — drop them so the next turn starts clean instead of
-      // flushing stale updates.
-      this.pendingEmits = [];
+      // Only a coordinator rethrow on the turn boundary leaves queued
+      // task/tool notifications stale by construction (the turn cannot be
+      // faithfully assembled, so the queue is dropped and the next turn
+      // starts clean). Any other mid-turn failure preserves the queue: the
+      // turn's state mutations (tasks, LSP triggers) already persist, so
+      // dropping the queue would desync the host until the next
+      // task/tool-changing turn. The error still propagates either way.
+      if (this.coordinatorRethrowNoted) this.pendingEmits = [];
+      this.coordinatorRethrowNoted = false;
       throw err;
     }
   }
@@ -861,52 +1015,7 @@ class ChatDirectorImpl extends DefaultDirector {
     }
     if (onTurnBoundary(event)) this.inferenceRecoveries = 0;
 
-    if (
-      event.type === "message.received" &&
-      this.taskClassifier !== undefined
-    ) {
-      const message = event.message;
-      const content =
-        typeof message.content === "string" ? message.content : "";
-      const metadata: SessionMetadata = {
-        turnCount: this.turnCount,
-        currentTaskLabel: this.currentTaskLabel,
-        lastTaskSummary: this.lastTaskSummary,
-        minutesElapsed: Math.floor((Date.now() - this.startedAt) / 60000),
-        toolCallCount: 0,
-      };
-
-      try {
-        const boundary = await this.taskClassifier(content, metadata);
-        if (boundary.kind === "new_task") {
-          this.currentTaskLabel = undefined;
-
-          const envelope =
-            this.lastTaskSummary !== undefined
-              ? `\n--- Compacted prior context ---\n${this.lastTaskSummary}\n---` +
-                `\n\nNew task starting now. Prior context summarized above.\n`
-              : "\n--- Context cleared for new task ---\n";
-
-          return [
-            capabilities.checkpoint(`new-task: ${boundary.reason}`),
-            capabilities.infer(
-              withEphemeralNudge(
-                {
-                  systemPrompt: this._systemPrompt,
-                  tools: this._toolDefinitions,
-                },
-                envelope,
-              ),
-            ),
-          ];
-        }
-      } catch {
-        // Classifier failure should not break the session. Fall through to infer.
-      }
-    }
-
     if (onTurnBoundary(event)) {
-      this.turnCount++;
       const hasToolCalls = event.turn.content.some(
         (b) => b.type === "tool_call",
       );
@@ -938,7 +1047,7 @@ class ChatDirectorImpl extends DefaultDirector {
         this.pendingToolOnlyNudge = true;
       }
 
-      if (this.workflowCoordinator?.isActive()) {
+      if (this.coordinatorIsActive(onTurnBoundary(event))) {
         if (hasToolCalls) {
           this.workflowIdleTurns = 0;
         } else {
@@ -986,7 +1095,7 @@ class ChatDirectorImpl extends DefaultDirector {
     ) {
       const call = this.workflowCalls.get(event.result.callId);
       this.workflowCalls.delete(event.result.callId);
-      const advanced = this.workflowCoordinator?.handleToolDone(
+      const advanced = this.coordinatorHandleToolDone(
         call?.name,
         call?.args,
         event.result.isError === true,
@@ -1113,8 +1222,11 @@ class ChatDirectorImpl extends DefaultDirector {
     );
     if (toolOnlyRewrite !== null) return toolOnlyRewrite;
 
-    const coordinator = this.workflowCoordinator;
-    if (coordinator?.isActive() && !coordinator.currentStepIsGate()) {
+    const coordinatorActive = this.coordinatorIsActive(onTurnBoundary(event));
+    if (
+      coordinatorActive &&
+      !this.coordinatorCurrentStepIsGate(onTurnBoundary(event))
+    ) {
       const hasTerminal = baseActions.some(
         (a) => a.type === "wait" || a.type === "reply",
       );
@@ -1135,7 +1247,7 @@ class ChatDirectorImpl extends DefaultDirector {
             ),
           ];
         }
-        const stepId = coordinator.currentStepId();
+        const stepId = this.coordinatorCurrentStepId(onTurnBoundary(event));
         const stepClause =
           stepId !== null
             ? `call submit_output with { "step": "${stepId}" } now`
@@ -1160,7 +1272,8 @@ class ChatDirectorImpl extends DefaultDirector {
     // yielding there with open tasks is not an invariant breach — leave it to
     // the workflow runtime and do not nudge.
     const atWorkflowGate =
-      coordinator?.isActive() === true && coordinator.currentStepIsGate();
+      coordinatorActive &&
+      this.coordinatorCurrentStepIsGate(onTurnBoundary(event));
     if (!atWorkflowGate && hasActiveTasks(this.tasks)) {
       const hasTerminal = baseActions.some(
         (a) => a.type === "wait" || a.type === "reply",
@@ -1186,10 +1299,9 @@ class ChatDirectorImpl extends DefaultDirector {
           // Inside a workflow the terminal action is submit_output with the
           // current step id, so point the nudge at it rather than the general
           // manage_tasks guidance.
-          const nudge =
-            coordinator?.isActive() === true
-              ? WORKFLOW_OPEN_TASK_NUDGE
-              : IDLE_OPEN_TASK_NUDGE;
+          const nudge = coordinatorActive
+            ? WORKFLOW_OPEN_TASK_NUDGE
+            : IDLE_OPEN_TASK_NUDGE;
           return [...passThrough, inferWithNudge(capabilities, nudge)];
         }
         this.logTerminationWithOpenTasks("idle-stall");

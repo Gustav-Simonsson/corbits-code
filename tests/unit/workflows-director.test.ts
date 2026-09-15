@@ -107,9 +107,8 @@ test("the active step directive is injected into the inferred system prompt", as
   );
   runtime.start(flow);
   const coordinator = new WorkflowCoordinator(runtime);
-  const director = createChatDirector("BASE PROMPT", [], {
-    workflowCoordinator: coordinator,
-  });
+  const director = createChatDirector("BASE PROMPT", [], {});
+  director.setWorkflowCoordinator(coordinator);
 
   const event: ReactorInboundEvent = {
     type: "message.received",
@@ -144,9 +143,8 @@ test("a submit_output tool call with the current step id advances the runtime th
   );
   runtime.start(flow);
   const coordinator = new WorkflowCoordinator(runtime);
-  const director = createChatDirector("BASE", [], {
-    workflowCoordinator: coordinator,
-  });
+  const director = createChatDirector("BASE", [], {});
+  director.setWorkflowCoordinator(coordinator);
   const caps = makeCapabilities();
 
   const turn: ReactorInboundEvent = {
@@ -185,9 +183,8 @@ test("a stale submit_output does not skip ahead through the director", async () 
   );
   runtime.start(flow);
   const coordinator = new WorkflowCoordinator(runtime);
-  const director = createChatDirector("BASE", [], {
-    workflowCoordinator: coordinator,
-  });
+  const director = createChatDirector("BASE", [], {});
+  director.setWorkflowCoordinator(coordinator);
   const caps = makeCapabilities();
 
   const turn: ReactorInboundEvent = {
@@ -275,9 +272,8 @@ test("auto-continuation fires on reply() as well as wait() after a text turn", a
   );
   runtime.start(flow);
   const coordinator = new WorkflowCoordinator(runtime);
-  const director = createChatDirector("BASE", [], {
-    workflowCoordinator: coordinator,
-  });
+  const director = createChatDirector("BASE", [], {});
+  director.setWorkflowCoordinator(coordinator);
   const caps = makeCapabilities();
 
   // Simulate a text-only inference turn (no tool calls).
@@ -350,9 +346,8 @@ test("a content-free workflow turn with open tasks nudges toward submit_output",
   );
   runtime.start(flow);
   const coordinator = new WorkflowCoordinator(runtime);
-  const director = createChatDirector("BASE", [], {
-    workflowCoordinator: coordinator,
-  });
+  const director = createChatDirector("BASE", [], {});
+  director.setWorkflowCoordinator(coordinator);
   const caps = makeCapabilities();
 
   await director.decide(manageTasksTurn("doing"), state, caps);
@@ -379,9 +374,8 @@ test("open tasks do not defeat the workflow stuck-cutoff after 3 idle turns", as
   );
   runtime.start(flow);
   const coordinator = new WorkflowCoordinator(runtime);
-  const director = createChatDirector("BASE", [], {
-    workflowCoordinator: coordinator,
-  });
+  const director = createChatDirector("BASE", [], {});
+  director.setWorkflowCoordinator(coordinator);
   const caps = makeCapabilities();
 
   await director.decide(manageTasksTurn("doing"), state, caps);
@@ -403,9 +397,8 @@ test("auto-continuation falls back after 3 consecutive text-only turns", async (
   );
   runtime.start(flow);
   const coordinator = new WorkflowCoordinator(runtime);
-  const director = createChatDirector("BASE", [], {
-    workflowCoordinator: coordinator,
-  });
+  const director = createChatDirector("BASE", [], {});
+  director.setWorkflowCoordinator(coordinator);
   const caps = makeCapabilities();
 
   await director.decide(textTurn("text 1"), state, caps);
@@ -427,9 +420,8 @@ test("after spacer echo-cap a non-gate workflow step does not empty-settle", asy
   );
   runtime.start(flow);
   const coordinator = new WorkflowCoordinator(runtime);
-  const director = createChatDirector("BASE", [], {
-    workflowCoordinator: coordinator,
-  });
+  const director = createChatDirector("BASE", [], {});
+  director.setWorkflowCoordinator(coordinator);
   const caps = makeCapabilities();
 
   for (let i = 0; i < 2; i++) {

@@ -374,9 +374,8 @@ describe("ChatDirector inference-error recovery (CL-6910)", () => {
       },
       handleToolDone: () => false,
     } as unknown as WorkflowCoordinator;
-    const director = createChatDirector("system", [], {
-      workflowCoordinator: throwingCoordinator,
-    });
+    const director = createChatDirector("system", [], {});
+    director.setWorkflowCoordinator(throwingCoordinator);
     const capabilities = makeCapabilities();
 
     const manageTasksTurn = {
