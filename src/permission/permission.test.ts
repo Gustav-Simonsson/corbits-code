@@ -40,11 +40,7 @@ import {
   createPathRestriction,
   resolveWorkspacePath,
 } from "./path-restriction.js";
-import type {
-  Approval,
-  ApprovalOutcome,
-  PermissionRequest,
-} from "./types.js";
+import type { Approval, ApprovalOutcome, PermissionRequest } from "./types.js";
 import { initTemporaryGitRepo } from "../../tests/helpers/temporary-git-repo.js";
 import { secretGuardPlugin } from "../plugins/secret-guard-plugin.js";
 import { pathEscapePlugin } from "../plugins/path-escape-plugin.js";
