@@ -36,7 +36,6 @@ export {
   platformUrlCommand,
   resetUrlOpener,
   setUrlOpener,
-  type UrlOpener,
 } from "./link-open.js";
 export { findLinks, splitLinkSpans, type LinkSpan } from "./link-spans.js";
 export { splitWrappedLinkSpans } from "./link-wrap.js";

@@ -6,19 +6,13 @@ import {
   ZEN_DEFAULT_BASE_URL,
   ZEN_MODEL_IDS,
 } from "../../packages/zen/src/index.js";
-import {
-  createBoundedModelCatalog,
-  type CatalogDiscoveryState,
-} from "./bounded-model-catalog.js";
+import { createBoundedModelCatalog } from "./bounded-model-catalog.js";
 
 // Bound live /models so a huge or hostile catalog cannot blow process memory.
 export const MAX_GO_CATALOG_BYTES = 256 * 1024;
 export const MAX_GO_CATALOG_MODELS = 1024;
 export const MAX_ZEN_CATALOG_BYTES = 256 * 1024;
 export const MAX_ZEN_CATALOG_MODELS = 1024;
-
-export type GoDiscoveryState = CatalogDiscoveryState;
-export type ZenDiscoveryState = CatalogDiscoveryState;
 
 const goCatalog = createBoundedModelCatalog({
   baseURL: OPENCODE_GO_BASE_URL,
