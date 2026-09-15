@@ -303,6 +303,10 @@ describe("CL-7782: project approvals require grant trust", () => {
         )
       ).allowed,
     ).toBe(false);
-    expect(asked).toEqual(["run_shell:npm test", "run_shell:npm test"]);
+    // CL-8002: the second evaluate is a same-turn retry of the already-declined
+    // request (same stable fingerprint), so the gate returns the cached decline
+    // instead of re-prompting. Both requests are still denied — nothing here
+    // auto-allows — but the operator is asked only once.
+    expect(asked).toEqual(["run_shell:npm test"]);
   });
 });

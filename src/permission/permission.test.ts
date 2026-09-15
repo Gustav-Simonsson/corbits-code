@@ -27,6 +27,7 @@ import {
   isAutoAllowedShellCall,
 } from "./classify.js";
 import { createPermissionGate } from "./gate.js";
+import { APPROVAL_TIMEOUT_RESULT_TEXT } from "./decline-markers.js";
 import {
   createMcpToolPermissionRegistry,
   registerMcpClientTools,
@@ -2284,6 +2285,154 @@ describe("createPermissionGate", () => {
     });
     expect(verdict.allowed).toBe(false);
     expect("reason" in verdict && verdict.reason.length > 0).toBe(true);
+  });
+
+  // CL-8002: the reactor retries a denied ask-tier call with a fresh
+  // tool_call.id. The retry must deny with the identical cached reason
+  // instead of re-evaluating, or the loop never settles.
+  test("headless denies a same-URL web_fetch retry with the identical reason", async () => {
+    const gate = createPermissionGate({
+      approvals: [],
+      interactive: false,
+      skipPermissions: false,
+      reactorGated: false,
+    });
+    const fetch = (id: string, url: string) =>
+      gate.evaluate({
+        id,
+        name: "web_fetch",
+        arguments: { url, format: "markdown" },
+      });
+    const first = await fetch("call_0", "https://example.com/docs");
+    const retry = await fetch("call_1", "https://example.com/docs");
+    if (first.allowed || retry.allowed)
+      throw new Error("expected both web_fetch calls denied");
+    expect(retry.reason).toBe(first.reason);
+  });
+
+  // CL-8002: the reactor path suspends an ask-tier call, resolves the operator
+  // decline via resolveSuspended, then retries same-turn with a fresh
+  // tool_call.id. The retry must deny with the identical cached reason (the
+  // same text the middleware path records) and the operator is asked once.
+  test("reactor-path decline is cached: fresh-id retry denies without re-asking", async () => {
+    let asked = 0;
+    const gate = createPermissionGate({
+      approvals: [],
+      interactive: true,
+      skipPermissions: false,
+      reactorGated: true,
+      requestApproval: async () => {
+        asked++;
+        return { allow: false };
+      },
+    });
+    const args = { url: "https://example.com/docs", format: "markdown" };
+    const first = await gate.authorizeCall({
+      id: "call_0",
+      name: "web_fetch",
+      arguments: args,
+    });
+    if (first.effect !== "ask")
+      throw new Error("expected the first call to suspend for approval");
+    const outcome = await gate.resolveSuspended(first.request);
+    expect(outcome?.allow).toBe(false);
+    expect(asked).toBe(1);
+    const retry = await gate.authorizeCall({
+      id: "call_1",
+      name: "web_fetch",
+      arguments: args,
+    });
+    if (retry.effect !== "deny")
+      throw new Error("expected the retry denied from denial memory");
+    let middlewareAsked = 0;
+    const middleware = createPermissionGate({
+      approvals: [],
+      interactive: true,
+      skipPermissions: false,
+      reactorGated: false,
+      requestApproval: async () => {
+        middlewareAsked++;
+        return { allow: false };
+      },
+    });
+    const verdict = await middleware.evaluate({
+      id: "call_0",
+      name: "web_fetch",
+      arguments: args,
+    });
+    if (verdict.allowed)
+      throw new Error("expected the middleware call declined");
+    expect(middlewareAsked).toBe(1);
+    expect(retry.reason).toBe(verdict.reason);
+    const retryAgain = await gate.authorizeCall({
+      id: "call_2",
+      name: "web_fetch",
+      arguments: args,
+    });
+    if (retryAgain.effect !== "deny")
+      throw new Error("expected the second retry denied");
+    expect(retryAgain.reason).toBe(retry.reason);
+    expect(asked).toBe(1);
+  });
+
+  // CL-8002: a reactor-path timeout is not an operator decision, so
+  // resolveSuspended must not cache it — the retry re-asks the operator.
+  test("reactor-path timeout is not cached: retry re-asks", async () => {
+    let asked = 0;
+    const gate = createPermissionGate({
+      approvals: [],
+      interactive: true,
+      skipPermissions: false,
+      reactorGated: true,
+      requestApproval: async () => {
+        asked++;
+        return { allow: false, message: APPROVAL_TIMEOUT_RESULT_TEXT };
+      },
+    });
+    const args = { url: "https://example.com/docs", format: "markdown" };
+    const first = await gate.authorizeCall({
+      id: "call_0",
+      name: "web_fetch",
+      arguments: args,
+    });
+    if (first.effect !== "ask")
+      throw new Error("expected the first call to suspend for approval");
+    const outcome = await gate.resolveSuspended(first.request);
+    expect(outcome?.allow).toBe(false);
+    expect(asked).toBe(1);
+    const retry = await gate.authorizeCall({
+      id: "call_1",
+      name: "web_fetch",
+      arguments: args,
+    });
+    if (retry.effect !== "ask")
+      throw new Error("expected the retry to re-ask after a timeout");
+    expect(asked).toBe(1);
+  });
+
+  // CL-8002: distinct URLs deny independently, and reset() clears the denial
+  // memory so the next turn re-denies cleanly with no stale state.
+  test("headless denies distinct web_fetch URLs independently; reset clears denials", async () => {
+    const gate = createPermissionGate({
+      approvals: [],
+      interactive: false,
+      skipPermissions: false,
+      reactorGated: false,
+    });
+    const fetch = (id: string, url: string) =>
+      gate.evaluate({
+        id,
+        name: "web_fetch",
+        arguments: { url, format: "markdown" },
+      });
+    const first = await fetch("call_0", "https://example.com/first");
+    const other = await fetch("call_1", "https://example.com/second");
+    if (first.allowed || other.allowed)
+      throw new Error("expected both web_fetch calls denied");
+    gate.reset();
+    const again = await fetch("call_2", "https://example.com/first");
+    if (again.allowed) throw new Error("expected the re-fetch denied");
+    expect(again.reason).toBe(first.reason);
   });
 
   // SECURITY: headless with requestApproval present but interactive=false must
