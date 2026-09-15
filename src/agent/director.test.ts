@@ -426,6 +426,195 @@ describe("ChatDirector inference-error recovery (CL-6910)", () => {
     );
     expect(stale).toEqual([]);
   });
+
+  function keeperManageTasksTurn(): ReactorInboundEvent {
+    return {
+      type: "inference.done",
+      turn: {
+        role: "assistant",
+        model: "test",
+        timestamp: 0,
+        content: [
+          {
+            type: "tool_call",
+            id: "manage-tasks",
+            name: "manage_tasks",
+            arguments: {
+              action: "create",
+              tasks: [{ id: "t1", title: "work", status: "doing" }],
+            },
+          },
+        ],
+      },
+      usage: { input: 0, output: 0 },
+      source: "test",
+    } as unknown as ReactorInboundEvent;
+  }
+
+  function keeperManageTasksPlusSubmitTurn(): ReactorInboundEvent {
+    return {
+      type: "inference.done",
+      turn: {
+        role: "assistant",
+        model: "test",
+        timestamp: 0,
+        content: [
+          {
+            type: "tool_call",
+            id: "manage-tasks",
+            name: "manage_tasks",
+            arguments: {
+              action: "create",
+              tasks: [{ id: "t1", title: "work", status: "doing" }],
+            },
+          },
+          {
+            type: "tool_call",
+            id: "submit-1",
+            name: "submit_output",
+            arguments: { step: "step-1" },
+          },
+        ],
+      },
+      usage: { input: 0, output: 0 },
+      source: "test",
+    } as unknown as ReactorInboundEvent;
+  }
+
+  function keeperTextTurn(): ReactorInboundEvent {
+    return {
+      type: "inference.done",
+      turn: {
+        role: "assistant",
+        model: "test",
+        timestamp: 0,
+        content: [{ type: "text", text: "all set" }],
+      },
+      usage: { input: 0, output: 0 },
+      source: "test",
+    } as unknown as ReactorInboundEvent;
+  }
+
+  function keeperTasksChanged(actions: ReactorAction[]): ReactorAction[] {
+    return actions.filter(
+      (a) =>
+        a.type === "emit" &&
+        (a as { eventType?: string }).eventType === CHAT_TASKS_CHANGED_EVENT,
+    );
+  }
+
+  // CL-7992 K1: every coordinator rail consulted on the turn boundary
+  // rethrows instead of degrading — a throwing rail rejects decide() and
+  // the next turn carries no stale task-change notifications.
+  test.each(["isActive", "currentStepIsGate", "currentStepId"] as const)(
+    "a throwing %s rail rejects the inference turn without leaking task-change emits",
+    async (rail) => {
+      const failure = new Error(`${rail} exploded`);
+      const coordinator = {
+        isActive: () => {
+          if (rail === "isActive") throw failure;
+          return true;
+        },
+        currentStepIsGate: () => {
+          if (rail === "currentStepIsGate") throw failure;
+          return false;
+        },
+        currentStepId: () => {
+          if (rail === "currentStepId") throw failure;
+          return null;
+        },
+        directive: () => null,
+        handleToolDone: () => false,
+      } as unknown as WorkflowCoordinator;
+      const director = createChatDirector("system", [], {});
+      director.setWorkflowCoordinator(coordinator);
+      const capabilities = makeCapabilities();
+
+      // The step-id rail only runs past a terminal base action, so it
+      // throws on a text turn; the earlier rails throw on a manage_tasks
+      // turn after it queues its task-change notification.
+      const triggering =
+        rail === "currentStepId" ? keeperTextTurn() : keeperManageTasksTurn();
+      await expect(
+        director.decide(triggering, mockState, capabilities),
+      ).rejects.toBe(failure);
+
+      director.setWorkflowCoordinator(undefined);
+      const actions = actionsArray(
+        await director.decide(keeperTextTurn(), mockState, capabilities),
+      );
+      expect(keeperTasksChanged(actions)).toEqual([]);
+    },
+  );
+
+  // CL-7992 K2: a mid-turn failure outside the coordinator still rejects
+  // the turn, but already-queued notifications survive for the next turn.
+  test("a non-coordinator mid-turn failure preserves queued task-change emits for the next turn", async () => {
+    const failure = new Error("tool execution exploded");
+    const director = createChatDirector("system", [], {});
+    const capabilities = makeCapabilities();
+    const executing: ReactorCapabilities = {
+      ...capabilities,
+      executeTools: (): ReactorAction => {
+        throw failure;
+      },
+    };
+
+    await expect(
+      director.decide(keeperManageTasksTurn(), mockState, executing),
+    ).rejects.toBe(failure);
+
+    const actions = actionsArray(
+      await director.decide(keeperTextTurn(), mockState, capabilities),
+    );
+    expect(keeperTasksChanged(actions)).toHaveLength(1);
+  });
+
+  // CL-7992 K2 variant: a throwing handleToolDone degrades (it takes no
+  // rethrow parameter) instead of marking the turn stale, so a later
+  // non-coordinator failure still preserves the queued notifications.
+  test("a throwing handleToolDone degrades without dropping preserved task-change emits", async () => {
+    let handleToolDoneSeen = false;
+    const coordinator = {
+      isActive: () => false,
+      currentStepIsGate: () => false,
+      currentStepId: () => null,
+      directive: () => null,
+      handleToolDone: (): boolean => {
+        handleToolDoneSeen = true;
+        throw new Error("coordinator completion exploded");
+      },
+    } as unknown as WorkflowCoordinator;
+    const director = createChatDirector("system", [], {});
+    director.setWorkflowCoordinator(coordinator);
+    const capabilities = makeCapabilities();
+    const executing: ReactorCapabilities = {
+      ...capabilities,
+      executeTools: (): ReactorAction => {
+        throw new Error("tool execution exploded");
+      },
+    };
+
+    await expect(
+      director.decide(keeperManageTasksPlusSubmitTurn(), mockState, executing),
+    ).rejects.toThrow("tool execution exploded");
+
+    const brokenState = {
+      get turns(): never {
+        throw new Error("history unavailable");
+      },
+    } as unknown as ReactorState;
+    await expect(
+      director.decide(toolDoneEvent("submit-1"), brokenState, capabilities),
+    ).rejects.toThrow("history unavailable");
+    expect(handleToolDoneSeen).toBe(true);
+
+    director.setWorkflowCoordinator(undefined);
+    const actions = actionsArray(
+      await director.decide(keeperTextTurn(), mockState, capabilities),
+    );
+    expect(keeperTasksChanged(actions)).toHaveLength(1);
+  });
 });
 
 // CL-7973: the director's live source id (which stamps retry decisions so a
