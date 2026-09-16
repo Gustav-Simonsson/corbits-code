@@ -180,6 +180,140 @@ describe("mangled dispatch names", () => {
   });
 });
 
+describe("activated-but-unmounted registry miss", () => {
+  test("a gate-activated name missing from the registry reports reconnecting, not unknown tool", async () => {
+    const runner = createDynamicToolRunner([
+      stringTool("read_file", "core"),
+      stringTool("mcp__acme__do", "blind-result"),
+    ]);
+    const activated = new Set(["mcp__acme__do"]);
+    runner.setCallGate((name) => name === "read_file" || activated.has(name), {
+      isActivated: (name) => activated.has(name),
+    });
+
+    // The tool was promoted (gate open) but its server disconnected before the
+    // call, so removeTools dropped it from the registry mid-window.
+    runner.removeTools(["mcp__acme__do"]);
+    const result = await runner.run(
+      { id: "1", name: "mcp__acme__do", arguments: {} },
+      new AbortController().signal,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("mcp__acme__do");
+    expect(result.content).toContain("reconnecting");
+    expect(result.content).toContain("Retry the call shortly");
+    expect(result.content).not.toBe("unknown tool: mcp__acme__do");
+  });
+
+  test("a never-activated miss keeps the exact unknown tool string", async () => {
+    const runner = createDynamicToolRunner([stringTool("read_file", "core")]);
+    runner.setCallGate((name) => name === "read_file", {
+      isActivated: () => false,
+    });
+
+    const result = await runner.run(
+      { id: "1", name: "mcp__gone__tool", arguments: {} },
+      new AbortController().signal,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toBe("unknown tool: mcp__gone__tool");
+  });
+});
+
+describe("harness namespace prefix", () => {
+  test("a default.-prefixed call dispatches the registered bare tool", async () => {
+    const runner = createDynamicToolRunner([
+      stringTool("read_file", "core"),
+      stringTool("mcp__acme__do", "blind-result"),
+    ]);
+    const advertised = new Set(["read_file", "mcp__acme__do"]);
+    runner.setCallGate((name) => advertised.has(name));
+
+    const result = await runner.run(
+      { id: "1", name: "default.mcp__acme__do", arguments: {} },
+      new AbortController().signal,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toBe("blind-result");
+  });
+
+  test("a prefixed miss keeps the exact unknown tool string with the original name", async () => {
+    const runner = createDynamicToolRunner([stringTool("read_file", "core")]);
+    runner.setCallGate((name) => name === "read_file", {
+      isActivated: () => false,
+    });
+
+    const result = await runner.run(
+      { id: "1", name: "default.mcp__gone__tool", arguments: {} },
+      new AbortController().signal,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toBe("unknown tool: default.mcp__gone__tool");
+  });
+
+  test("an exact dotted registration wins over the bare suffix (anti-misrouting)", async () => {
+    const runner = createDynamicToolRunner([
+      stringTool("mcp__acme__do", "bare"),
+      stringTool("default.mcp__acme__do", "dotted"),
+    ]);
+    runner.setCallGate(() => true);
+
+    const result = await runner.run(
+      { id: "1", name: "default.mcp__acme__do", arguments: {} },
+      new AbortController().signal,
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toBe("dotted");
+  });
+
+  test("a prefixed miss for an activated-but-unmounted stripped tool reports reconnecting under the original name", async () => {
+    const runner = createDynamicToolRunner([
+      stringTool("read_file", "core"),
+      stringTool("mcp__acme__do", "blind-result"),
+    ]);
+    const activated = new Set(["mcp__acme__do"]);
+    runner.setCallGate((name) => name === "read_file" || activated.has(name), {
+      isActivated: (name) => activated.has(name),
+    });
+
+    // The server dropped between search and call, so the bare tool left the
+    // registry; the model still emits the harness-namespaced form.
+    runner.removeTools(["mcp__acme__do"]);
+    const result = await runner.run(
+      { id: "1", name: "default.mcp__acme__do", arguments: {} },
+      new AbortController().signal,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("default.mcp__acme__do");
+    expect(result.content).toContain("reconnecting");
+    expect(result.content).toContain("Retry the call shortly");
+  });
+
+  test("a normalized call rejected by the gate reports the stripped name", async () => {
+    const runner = createDynamicToolRunner([
+      stringTool("read_file", "core"),
+      stringTool("mcp__acme__do", "blind-result"),
+    ]);
+    runner.setCallGate((name) => name === "read_file");
+
+    const result = await runner.run(
+      { id: "1", name: "default.mcp__acme__do", arguments: {} },
+      new AbortController().signal,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("mcp__acme__do");
+    expect(result.content).toContain("tool_search");
+    expect(result.content).not.toContain("default.mcp__acme__do");
+  });
+});
+
 describe("terminal control stripping", () => {
   test("strips escape sequences from any tool's result, including MCP", async () => {
     const payload = "before\x1b]52;c;ZXZpbA==\x07\x1b[31mred\x1b[0m\x07after";
