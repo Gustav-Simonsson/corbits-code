@@ -32,6 +32,7 @@ import { type } from "arktype";
 
 import { createAgentWithLiveToolDispatch } from "../../src/agent/live-tool-dispatch.js";
 import { createChatDirector } from "../../src/agent/director.js";
+import { OPERATOR_ORIGINATED_FLAG } from "../../src/agent/message-provenance.js";
 import {
   readSourceCredentialMaterial,
   registerSourceCredential,
@@ -129,10 +130,17 @@ export async function openIntegrationSession(
   const chatDirectorDef = defineDirector({
     id: `${ID_PREFIX}/chat`,
     configSchema: type({}),
-    factory: (_config, _env, agentCtx) =>
-      createChatDirector(agentCtx.systemPrompt, [...agentCtx.toolDefinitions], {
-        inactivityTimeoutMs: 750_000,
-      }),
+    factory: (_config, _env, agentCtx) => {
+      const d = createChatDirector(
+        agentCtx.systemPrompt,
+        [...agentCtx.toolDefinitions],
+        {
+          inactivityTimeoutMs: 750_000,
+        },
+      );
+      d.setClearDenials(() => opts.permissionGate.clearDenials());
+      return d;
+    },
   });
 
   const toolsFactory = defineTool({
@@ -297,10 +305,24 @@ export async function runUntilDone(
 
   const collectTask = collect;
   const sendResult = await Promise.all([
-    session.agent.send(message).then((result) => {
-      turnComplete = true;
-      return result;
-    }),
+    session.agent
+      .send({
+        ref: { uid: 1, mailbox: "INBOX" },
+        headers: {
+          from: "user@local",
+          to: ["agent@local"],
+          date: new Date().toISOString(),
+          messageId: `<${crypto.randomUUID()}@local>`,
+          interchangeType: "conversation.message",
+        },
+        flags: [OPERATOR_ORIGINATED_FLAG],
+        content: message,
+        signatureStatus: "missing",
+      })
+      .then((result) => {
+        turnComplete = true;
+        return result;
+      }),
     session.harness.run({ wallClockBudgetMs: Infinity }),
     collectTask,
   ]).then(([result]) => result);
