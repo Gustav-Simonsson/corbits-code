@@ -344,6 +344,9 @@ export async function assembleTUISession(
     skillDirs,
     telemetry: liveTelemetry,
     isCodex: isCodexProviderName(config.providerName),
+    // CL-9386: the active settings source (including a --config override)
+    // is model-unreadable/unwritable, like the default settings file.
+    secretGuardExtraDeniedPaths: [config.globalSettingsPath],
     ...(shellTimeout !== undefined ? { shellTimeout } : {}),
     ...(localSettingsForEnv?.env !== undefined
       ? { shellEnv: localSettingsForEnv.env }
@@ -538,6 +541,8 @@ export async function assembleTUISession(
       });
     },
     gate: permissionGate,
+    cwd: config.cwd,
+    extraDeniedPaths: [config.globalSettingsPath],
   });
   state.enqueueAgentDeliver = (
     deliverToLiveAgent: () => void,
