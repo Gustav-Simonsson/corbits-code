@@ -29,7 +29,12 @@ export interface AuthStore<TTokens extends BaseTokens> {
     home?: string,
   ) => Promise<AuthProfile<TTokens> | undefined>;
   saveProfile: (profile: AuthProfile<TTokens>, home?: string) => Promise<void>;
-  updateTokens: (name: string, tokens: TTokens, home?: string) => Promise<void>;
+  updateTokens: (
+    name: string,
+    tokens: TTokens,
+    home?: string,
+    expectedRefreshToken?: string,
+  ) => Promise<AuthProfile<TTokens> | undefined>;
   // Remove one profile, or all profiles when `name` is undefined. Returns the
   // names removed.
   removeProfile: (name: string | undefined, home?: string) => Promise<string[]>;
@@ -221,19 +226,28 @@ export function createAuthStore<TTokens extends BaseTokens>(
         await writeAuthFile(file, home);
       });
     },
-    // Persist refreshed tokens for an existing profile, preserving createdAt. A
-    // no-op if the profile no longer exists (e.g. removed in another session).
+    // Persist refreshed tokens for an existing profile, preserving createdAt.
+    // The returned profile is the authoritative value observed under the lock:
+    // either this update, a concurrent winner, or undefined after removal.
     async updateTokens(
       name: string,
       tokens: TTokens,
       home: string = homedir(),
-    ): Promise<void> {
-      await enqueueAuthFileOp(home, async () => {
+      expectedRefreshToken?: string,
+    ): Promise<AuthProfile<TTokens> | undefined> {
+      return enqueueAuthFileOp(home, async () => {
         const file = await readAuthFile(home);
         const existing = file.profiles[name];
-        if (existing === undefined) return;
-        file.profiles[name] = { ...existing, tokens };
+        if (existing === undefined) return undefined;
+        if (
+          expectedRefreshToken !== undefined &&
+          existing.tokens.refresh !== expectedRefreshToken
+        )
+          return existing;
+        const updated = { ...existing, tokens };
+        file.profiles[name] = updated;
         await writeAuthFile(file, home);
+        return updated;
       });
     },
     async removeProfile(

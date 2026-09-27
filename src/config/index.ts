@@ -29,7 +29,10 @@ import {
 import type { CodexProfile } from "../auth/codex/store.js";
 import type { XaiProfile } from "../auth/xai/store.js";
 import { listCodexProfiles, listXaiProfiles } from "./oauth-stores.js";
-import { registerSourceCredential } from "./source-credentials.js";
+import {
+  registerSourceCredentialRecord,
+  type SourceCredentialProvenance,
+} from "./source-credentials.js";
 import {
   codexProfilesToCatalogEntries,
   codexProvidersAsSettings,
@@ -47,13 +50,11 @@ import { CODEX_BASE_URL } from "../auth/codex/constants.js";
 import { XAI_BASE_URL } from "../auth/xai/constants.js";
 import {
   CODEX_RESPONSES_PROVIDER,
-  CODEX_ACCOUNT_ID_OPTION,
   CODEX_SESSION_ID_OPTION,
 } from "../provider/codex-responses.js";
 import {
   GROK_RESPONSES_PROVIDER,
   GROK_SESSION_ID_OPTION,
-  GROK_USER_ID_OPTION,
 } from "../provider/grok-responses.js";
 import { BIFROST_PROVIDER } from "../provider/bifrost-adapter.js";
 import { isOllamaProviderId, ollamaOpenAIBaseURL } from "../provider/ollama.js";
@@ -117,11 +118,21 @@ export const KEYLESS_API_KEY = "keyless";
 // ./source-credentials.ts), falling back to the keyless sentinel when no key
 // was configured. Every buildXSource below calls this so the vendored
 // credentialId auth model resolves the secret at send time.
-function registerSourceSecret(id: string, apiKey: string | undefined): void {
-  registerSourceCredential(
-    id,
-    apiKey !== undefined && apiKey.length > 0 ? apiKey : KEYLESS_API_KEY,
-  );
+function registerSourceSecret(
+  id: string,
+  apiKey: string | undefined,
+  provenance?: SourceCredentialProvenance,
+  headers?: Readonly<Record<string, string>>,
+): void {
+  const hasSecret = apiKey !== undefined && apiKey.length > 0;
+  registerSourceCredentialRecord(id, {
+    provenance:
+      provenance ?? (hasSecret ? { kind: "api-key" } : { kind: "keyless" }),
+    material: {
+      secret: hasSecret ? apiKey : KEYLESS_API_KEY,
+      ...(headers !== undefined ? { headers } : {}),
+    },
+  });
 }
 
 function applyPersistedOAuthDefaults(
@@ -327,12 +338,12 @@ export type ProviderCatalogEntry = Omit<
 
 // Build the InferenceSource for a Codex OAuth profile. Routes to the
 // "codex-responses" adapter (the Codex backend speaks the Responses API, not
-// Chat Completions) and carries the account id + a session id through
-// providerOptions, where the adapter lifts them into request headers. The
-// access token is registered in the credential cell under the source id; the
-// harness resolves it as the bearer credential at send time.
+// Chat Completions) and carries the session id through providerOptions. The
+// access token and account id are registered together in the credential cell;
+// the harness resolves both at send time.
 export function buildCodexSource(fields: {
   id: string;
+  profile: string;
   apiKey: string;
   model: string;
   sessionId: string;
@@ -342,11 +353,16 @@ export function buildCodexSource(fields: {
   const providerOptions: Record<string, unknown> = {
     [CODEX_SESSION_ID_OPTION]: fields.sessionId,
   };
-  if (fields.accountId !== undefined)
-    providerOptions[CODEX_ACCOUNT_ID_OPTION] = fields.accountId;
   if (fields.reasoningEffort !== undefined)
     providerOptions["reasoning_effort"] = fields.reasoningEffort;
-  registerSourceSecret(fields.id, fields.apiKey);
+  registerSourceSecret(
+    fields.id,
+    fields.apiKey,
+    { kind: "oauth", provider: "codex", profile: fields.profile },
+    fields.accountId !== undefined
+      ? { "chatgpt-account-id": fields.accountId }
+      : undefined,
+  );
   return {
     id: fields.id,
     provider: CODEX_RESPONSES_PROVIDER,
@@ -366,6 +382,7 @@ export function buildCodexSource(fields: {
 // thread routes to the same cache shard (store:false has no other signal).
 export function buildXaiSource(fields: {
   id: string;
+  profile: string;
   apiKey: string;
   model: string;
   sessionId: string;
@@ -375,10 +392,14 @@ export function buildXaiSource(fields: {
   const providerOptions: Record<string, unknown> = {
     [GROK_SESSION_ID_OPTION]: fields.sessionId,
   };
-  if (userId !== undefined) providerOptions[GROK_USER_ID_OPTION] = userId;
   if (fields.reasoningEffort !== undefined)
     providerOptions["reasoning_effort"] = fields.reasoningEffort;
-  registerSourceSecret(fields.id, fields.apiKey);
+  registerSourceSecret(
+    fields.id,
+    fields.apiKey,
+    { kind: "oauth", provider: "xai", profile: fields.profile },
+    userId !== undefined ? { "x-grok-user-id": userId } : undefined,
+  );
   return {
     id: fields.id,
     provider: GROK_RESPONSES_PROVIDER,

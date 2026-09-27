@@ -2563,7 +2563,7 @@ export function applyInferenceSourceFields(
  * (INFERENCE.md § Providers › Streaming Harness)
  */
 export type RetryDecision =
-  | { kind: "abort" }
+  | { kind: "abort"; error?: InferenceError }
   | { kind: "retry"; delayMs: number };
 
 /**
@@ -2589,6 +2589,12 @@ export type RetrySituation = {
    * against integer thresholds should `Math.floor` if they need that.
    */
   readonly elapsedMs: number;
+  /** Immutable shallow snapshot of the source selected when this call began. */
+  readonly source?: Readonly<InferenceSource>;
+  /** 1-indexed within credential failures only; zero for other categories. */
+  readonly credentialFailureOrdinal?: number;
+  /** Credential failures observed earlier in this call. */
+  readonly credentialFailureHistory?: readonly InferenceError[];
 };
 
 /**
@@ -2604,9 +2610,14 @@ export type RetrySituation = {
  *
  * (INFERENCE.md § Providers › Streaming Harness)
  */
-export type RetryPolicy = (
+export type RetryPolicy = ((
   situation: RetrySituation,
-) => RetryDecision | Promise<RetryDecision>;
+) => RetryDecision | Promise<RetryDecision>) & {
+  readonly normalizeError?: (
+    error: InferenceError,
+    source?: Readonly<InferenceSource>,
+  ) => InferenceError;
+};
 
 /**
  * Options for a single inference call. Override the defaults from the agent

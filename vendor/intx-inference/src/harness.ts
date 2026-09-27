@@ -37,7 +37,10 @@ import type {
   ContentBlock,
 } from "@intx/types/runtime";
 
-import type { CredentialMaterialResolver } from "@intx/types";
+import type {
+  CredentialMaterial,
+  CredentialMaterialResolver,
+} from "@intx/types";
 
 import { getLogger } from "@intx/log";
 
@@ -252,6 +255,31 @@ const unconfiguredCredentialResolver: CredentialMaterialResolver = (
     `no credential resolver supplied to the inference harness, but a request needs the secret for credential ${credentialId}`,
   );
 };
+
+function sanitizeCredentialDiagnostic(
+  value: unknown,
+  secrets: ReadonlySet<string>,
+): unknown {
+  if (typeof value === "string") {
+    let sanitized = value;
+    for (const secret of secrets) {
+      if (secret.length > 0)
+        sanitized = sanitized
+          .split(secret)
+          .join("[redacted: configured credential]");
+    }
+    return sanitized;
+  }
+  if (Array.isArray(value))
+    return value.map((item) => sanitizeCredentialDiagnostic(item, secrets));
+  if (value !== null && typeof value === "object") {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value))
+      sanitized[key] = sanitizeCredentialDiagnostic(child, secrets);
+    return sanitized;
+  }
+  return value;
+}
 
 /**
  * Run one fetch lifecycle and yield its events. Ends on the first
@@ -1575,6 +1603,26 @@ export async function* runInference(
   const scheduler = opts.deps.scheduler;
   const startedAtMs = scheduler.now();
   const signal = opts.signal;
+  // Locally patched — see vendor/intx-inference/PATCHES.md#harness-ts-auth-recovery
+  const callStartSource = Object.freeze({ ...opts.source });
+  const credentialFailureHistory: InferenceError[] = [];
+  const diagnosticSecrets = new Set<string>();
+  const captureCredentialMaterial = (
+    credentialId: string,
+  ): CredentialMaterial | undefined => {
+    const material = opts.readMaterial?.(credentialId);
+    if (material?.secret !== undefined) diagnosticSecrets.add(material.secret);
+    return material;
+  };
+  const readCallMaterial: CredentialMaterialResolver | undefined =
+    opts.readMaterial === undefined
+      ? undefined
+      : (credentialId) => {
+          const material = captureCredentialMaterial(credentialId);
+          if (material === undefined)
+            throw new Error(`Unknown inference credential "${credentialId}".`);
+          return material;
+        };
 
   for (let attempt = 1; ; attempt++) {
     // Metadata an attempt emits before it commits (see `isCommitting`):
@@ -1587,7 +1635,12 @@ export async function* runInference(
     // Locally patched — see vendor/intx-inference/PATCHES.md#harness-ts-commitment-boundary-streaming
     const preCommit: InferenceEvent[] = [];
     let committed = false;
-    let failure: { event: InferenceEvent; error: InferenceError } | undefined;
+    let failure:
+      | {
+          event: Extract<InferenceEvent, { type: "inference.error" }>;
+          error: InferenceError;
+        }
+      | undefined;
 
     // Per-attempt private allocator. `runSingleAttempt` allocates a
     // seq for every event it yields; if the attempt is discarded on
@@ -1599,6 +1652,10 @@ export async function* runInference(
     let attemptSeq = 0;
     const attemptOpts: InferenceHarnessOptions = {
       ...opts,
+      ...(readCallMaterial !== undefined
+        ? { readMaterial: readCallMaterial }
+        : {}),
+      source: callStartSource,
       nextSeq: () => attemptSeq++,
     };
     for await (const event of runSingleAttempt(attemptOpts)) {
@@ -1619,7 +1676,13 @@ export async function* runInference(
           // Failure after visible output began. The deltas already
           // delivered cannot be retracted, so retry is off the table:
           // surface the error on the single live stream and stop.
-          yield { ...event, seq: opts.nextSeq() };
+          yield {
+            ...(sanitizeCredentialDiagnostic(
+              event,
+              diagnosticSecrets,
+            ) as typeof event),
+            seq: opts.nextSeq(),
+          };
           return;
         }
         failure = { event, error: event.data.error };
@@ -1653,7 +1716,14 @@ export async function* runInference(
       return;
     }
 
-    const terminalError = failure.error;
+    let terminalError = sanitizeCredentialDiagnostic(
+      policy.normalizeError?.(failure.error, callStartSource) ?? failure.error,
+      diagnosticSecrets,
+    ) as InferenceError;
+    const credentialFailureOrdinal =
+      terminalError.category === "credential_failure"
+        ? credentialFailureHistory.length + 1
+        : 0;
 
     // Consult the policy. Sync throws and Promise rejections both
     // resolve to an abort decision; the original inference.error
@@ -1668,11 +1738,36 @@ export async function* runInference(
           error: terminalError,
           attempt,
           elapsedMs: scheduler.now() - startedAtMs,
+          source: callStartSource,
+          credentialFailureOrdinal,
+          credentialFailureHistory: Object.freeze([
+            ...credentialFailureHistory,
+          ]),
         }),
       );
     } catch (cause) {
       logger.warn`Retry policy threw at attempt ${String(attempt)}; treating as abort. error=${cause instanceof Error ? cause.message : String(cause)}`;
       decision = { kind: "abort" };
+    }
+
+    if (
+      terminalError.category === "credential_failure" &&
+      opts.readMaterial !== undefined
+    ) {
+      try {
+        captureCredentialMaterial(callStartSource.credentialId);
+      } catch {
+        // The policy owns missing-credential handling; history capture must not
+        // replace its decision with a second resolver error.
+      }
+      terminalError = sanitizeCredentialDiagnostic(
+        terminalError,
+        diagnosticSecrets,
+      ) as InferenceError;
+    }
+
+    if (terminalError.category === "credential_failure") {
+      credentialFailureHistory.push(terminalError);
     }
 
     if (decision.kind === "abort") {
@@ -1682,7 +1777,34 @@ export async function* runInference(
       for (const buffered of preCommit) {
         yield { ...buffered, seq: opts.nextSeq() };
       }
-      yield { ...failure.event, seq: opts.nextSeq() };
+      if (decision.error !== undefined) {
+        yield {
+          type: "inference.error",
+          seq: opts.nextSeq(),
+          data: {
+            error: sanitizeCredentialDiagnostic(
+              decision.error,
+              diagnosticSecrets,
+            ) as InferenceError,
+            partial: sanitizeCredentialDiagnostic(
+              failure.event.data.partial,
+              diagnosticSecrets,
+            ) as PartialMessage,
+          },
+        };
+      } else {
+        yield {
+          type: "inference.error",
+          seq: opts.nextSeq(),
+          data: {
+            error: terminalError,
+            partial: sanitizeCredentialDiagnostic(
+              failure.event.data.partial,
+              diagnosticSecrets,
+            ) as PartialMessage,
+          },
+        };
+      }
       return;
     }
 

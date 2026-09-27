@@ -1,5 +1,6 @@
 import { createDefaultRetryPolicy } from "@intx/inference";
 import type {
+  InferenceError,
   RetryDecision,
   RetryPolicy,
   RetrySituation,
@@ -12,6 +13,12 @@ import {
   getProcessAdmissionQueue,
   type AdmissionQueue,
 } from "../subagent/admission.js";
+import { refreshSourceCredentialByProvenance } from "../auth/refresh-source-credential.js";
+import {
+  readSourceCredentialRecord,
+  type SourceCredentialProvenance,
+} from "../config/source-credentials.js";
+import type { InferenceSource } from "@intx/types/runtime";
 
 // Providers that enforce long-window quotas (e.g. monthly limits) set
 // Retry-After to days or weeks. The default policy trusts that value and
@@ -24,14 +31,17 @@ const RATE_LIMIT_HANG_MS = 86_400_000;
 
 export interface CorbitsRetryPolicyOptions {
   /**
-   * Catalog provider id (e.g. xai/thegreataxios) stamped onto errors before
-   * normalize. Pass a getter when the live provider can change mid-session
-   * (e.g. `/model`); it is resolved on each retry decision.
+   * Fallback catalog provider id for callers that do not supply a source in
+   * RetrySituation. Harness calls use the frozen call-start source instead.
    */
   providerId?: string | (() => string | undefined);
   /** Process admission controller. Tests inject a stub; production omits. */
   admission?: AdmissionQueue;
   now?: () => number;
+  refreshCredential?: (
+    source: Readonly<InferenceSource>,
+    provenance: Extract<SourceCredentialProvenance, { kind: "oauth" }>,
+  ) => Promise<void>;
 }
 
 /**
@@ -46,24 +56,74 @@ export function createCorbitsRetryPolicy(
   const defaultPolicy = createDefaultRetryPolicy();
   const admission = options?.admission ?? getProcessAdmissionQueue();
   const now = options?.now ?? Date.now;
-  return (
+  const normalizeError = (
+    incoming: InferenceError,
+    source?: Readonly<InferenceSource>,
+  ): InferenceError => {
+    const configuredProvider = options?.providerId;
+    const stampedProviderId =
+      source?.id ??
+      (typeof configuredProvider === "function"
+        ? configuredProvider()
+        : configuredProvider);
+    const contextual = incoming as InferenceErrorWithGoContext;
+    const withProvider: InferenceErrorWithGoContext =
+      stampedProviderId !== undefined && contextual.providerId === undefined
+        ? { ...contextual, providerId: stampedProviderId }
+        : contextual;
+    return normalizeInferenceErrorForRetry(withProvider);
+  };
+  const policy = (
     situation: RetrySituation,
   ): RetryDecision | Promise<RetryDecision> => {
-    const raw = options?.providerId;
-    const stampedProviderId = typeof raw === "function" ? raw() : raw;
-    const incoming = situation.error as InferenceErrorWithGoContext;
-    const withProvider: InferenceErrorWithGoContext =
-      stampedProviderId !== undefined && incoming.providerId === undefined
-        ? { ...incoming, providerId: stampedProviderId }
-        : incoming;
-    const error = normalizeInferenceErrorForRetry(withProvider);
+    const error = normalizeError(situation.error, situation.source);
+    if (
+      error.category === "credential_failure" &&
+      situation.credentialFailureOrdinal === 1 &&
+      situation.source !== undefined
+    ) {
+      let provenance: SourceCredentialProvenance;
+      try {
+        provenance = readSourceCredentialRecord(
+          situation.source.credentialId,
+        ).provenance;
+      } catch {
+        return { kind: "abort" };
+      }
+      if (provenance.kind === "oauth") {
+        const refresh = options?.refreshCredential;
+        const pending =
+          refresh !== undefined
+            ? refresh(situation.source, provenance)
+            : refreshSourceCredentialByProvenance(
+                situation.source.credentialId,
+              ).then(() => undefined);
+        return pending.then(
+          () => ({ kind: "retry", delayMs: 0 }),
+          (cause: unknown) => ({
+            kind: "abort",
+            error: {
+              category: "credential_failure",
+              providerId: situation.source?.id,
+              message: `${provenance.provider} profile "${provenance.profile}" could not be refreshed${cause instanceof Error ? `: ${cause.message}` : ""}. Run /connect, choose ${provenance.provider}, and reconnect profile "${provenance.profile}".`,
+            },
+          }),
+        );
+      }
+    }
     if (error.category === "retryable" && error.statusCode === 429) {
       const pauseMs = Math.min(
         error.retryAfterMs ?? DEFAULT_PRESSURE_PAUSE_MS,
         MAX_BLIND_WAIT_MS,
       );
+      const configuredProvider = options?.providerId;
       const provider =
-        withProvider.providerId ?? stampedProviderId ?? "unknown";
+        (situation.error as InferenceErrorWithGoContext).providerId ??
+        situation.source?.id ??
+        (typeof configuredProvider === "function"
+          ? configuredProvider()
+          : configuredProvider) ??
+        "unknown";
       admission.notePressure(provider, now() + pauseMs);
       // The vendored default retries `retryable` on a fixed 500/1000ms
       // schedule and ignores Retry-After. A 429 carries the server's pacing
@@ -93,4 +153,5 @@ export function createCorbitsRetryPolicy(
     }
     return defaultPolicy({ ...situation, error });
   };
+  return Object.assign(policy, { normalizeError });
 }

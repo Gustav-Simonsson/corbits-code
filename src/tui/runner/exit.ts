@@ -11,7 +11,6 @@ import {
   type Agent,
 } from "@intx/agent";
 import { getLogger } from "@intx/log";
-import type { InferenceSource } from "@intx/types/runtime";
 import { consumeStream } from "../../session/stream-consumer.js";
 import { COMPACTION_CONTINUATION_EVENT } from "../../agent/compaction.js";
 import {
@@ -42,16 +41,11 @@ import { printResumeHint } from "../../session/resume-hint.js";
 import { clearActiveDisposeHost } from "../../session/active-host.js";
 import { syncRunStateHandle } from "../../session/active-run.js";
 import { startRunHeartbeat } from "../../session/run-liveness.js";
-import { getValidCodexToken } from "../../auth/codex/session.js";
-import { getValidXaiToken } from "../../auth/xai/session.js";
 import { suppressProviderFailurePresentation } from "../provider/failure-attempt.js";
 import { normalizeInferenceErrorForTerminal } from "../../inference-gateway-error.js";
-import { codexProfileFromProviderName } from "../../config/codex-providers.js";
-import { xaiProfileFromProviderName } from "../../config/xai-providers.js";
-import {
-  peekSourceCredentialSecret,
-  registerSourceCredential,
-} from "../../config/source-credentials.js";
+import { ensureFreshInferenceSource } from "../../subagent/refresh-inference-source.js";
+import { peekSourceCredentialSecret } from "../../config/source-credentials.js";
+import { sanitizeDiagnosticValue } from "../../diagnostic-sanitize.js";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
 import { cancelFeedbackCapture } from "../../telemetry/feedback.js";
 import {
@@ -316,6 +310,14 @@ export async function createRunLifecycle(
       providerFailureAttempts.advanceToNextMessage();
     }
     services.correlationAcceptance.observe(event);
+    const providerAttempt = providerFailureAttempts.current();
+    const recoveryAttempt =
+      providerAttempt === undefined
+        ? undefined
+        : state.credentialRecoveryAttempts.get(providerAttempt);
+    if (recoveryAttempt !== undefined) {
+      state.credentialRecovery.observe(recoveryAttempt, event);
+    }
     if (event.type === "inference.start" || event.type === "inference.done") {
       providerFailureAttempts.reset();
     } else if (event.type === "inference.error") {
@@ -361,8 +363,17 @@ export async function createRunLifecycle(
       },
       (message, fields) => tuiLogger.debug(message, fields),
     );
-    services.runSink.sink(eventForSink);
-    services.cycleRecorder.handleEvent(event);
+    const configuredSecret = peekSourceCredentialSecret(
+      state.liveSource.credentialId,
+    );
+    const sanitizedEventForSink = sanitizeDiagnosticValue(eventForSink, [
+      configuredSecret,
+    ]) as typeof eventForSink;
+    const sanitizedEvent = sanitizeDiagnosticValue(event, [
+      configuredSecret,
+    ]) as typeof event;
+    services.runSink.sink(sanitizedEventForSink);
+    services.cycleRecorder.handleEvent(sanitizedEvent);
     if (onTurnBoundary(event)) {
       services.sessionCost.addTurn(
         event.data.usage,
@@ -438,51 +449,11 @@ export async function createRunLifecycle(
   };
   services.toolset.setToolPromoter(promoteTools);
 
-  // The active Codex source, tracked whenever a "codex/<profile>" source is
-  // selected so its access token can be refreshed before each send. Seeded from
-  // config when the session starts on a Codex profile (buildAgent sets that
-  // source directly, not through the proxy's setSource).
-  state.activeCodexSource =
-    state.initialCodexProfile !== undefined
-      ? { profile: state.initialCodexProfile, source: state.liveSource }
-      : undefined;
-  state.activeXaiSource =
-    state.initialXaiProfile !== undefined
-      ? { profile: state.initialXaiProfile, source: state.liveSource }
-      : undefined;
-
-  // Refresh the active Codex access token (if any) and push it onto the live
-  // agent before a send. getValidCodexToken returns the stored token when still
-  // valid and refreshes transparently otherwise, so this satisfies "check
-  // before each inference call" without crashing the loop: a failure surfaces
-  // as a CodexAuthError naming the profile and rejects the send.
-  //
-  // The source is pushed on every send, not only when the token changed: an
-  // agent rebuild (interrupt, /clear) reseeds the source from
-  // the original login-time token, so unconditionally re-pushing the live token
-  // is what keeps the rebuilt agent from sending a stale credential.
-  const refreshCodexBeforeSend = async (): Promise<void> => {
-    const active = state.activeCodexSource;
-    if (active === undefined) return;
-    const { access } = await getValidCodexToken(active.profile);
-    const source: InferenceSource = active.source;
-    if (access !== peekSourceCredentialSecret(source.credentialId)) {
-      registerSourceCredential(source.credentialId, access);
-    }
-    state.activeCodexSource = { profile: active.profile, source };
-    state.liveSource = source;
-    setAgentSourceUnlessClosed(liveAgent(state), source);
-  };
-
-  const refreshXaiBeforeSend = async (): Promise<void> => {
-    const active = state.activeXaiSource;
-    if (active === undefined) return;
-    const { access } = await getValidXaiToken(active.profile);
-    const source: InferenceSource = active.source;
-    if (access !== peekSourceCredentialSecret(source.credentialId)) {
-      registerSourceCredential(source.credentialId, access);
-    }
-    state.activeXaiSource = { profile: active.profile, source };
+  const refreshBeforeSend = async (): Promise<void> => {
+    const source = await ensureFreshInferenceSource(
+      state.liveSource,
+      state.config.providers,
+    );
     state.liveSource = source;
     setAgentSourceUnlessClosed(liveAgent(state), source);
   };
@@ -512,8 +483,7 @@ export async function createRunLifecycle(
         void persistRunSnapshot("running");
       }
       return await runWhileAgentBusy(state, async () => {
-        await refreshCodexBeforeSend();
-        await refreshXaiBeforeSend();
+        await refreshBeforeSend();
         dropIfRotated();
         return await liveAgent(state).send(content, opts);
       });
@@ -525,14 +495,6 @@ export async function createRunLifecycle(
     },
     close: () => liveAgent(state).close(),
     setSource: (source) => {
-      const codexProfile = codexProfileFromProviderName(source.id);
-      const xaiProfile = xaiProfileFromProviderName(source.id);
-      state.activeCodexSource =
-        codexProfile !== undefined
-          ? { profile: codexProfile, source }
-          : undefined;
-      state.activeXaiSource =
-        xaiProfile !== undefined ? { profile: xaiProfile, source } : undefined;
       state.liveSource = source;
       state.liveSources = [source];
       state.liveDefaultSource = source.id;
@@ -546,16 +508,6 @@ export async function createRunLifecycle(
       state.liveDefaultSource = defaultSource;
       const head = sources.find((s) => s.id === defaultSource) ?? sources[0];
       if (head !== undefined) {
-        const codexProfile = codexProfileFromProviderName(head.id);
-        const xaiProfile = xaiProfileFromProviderName(head.id);
-        state.activeCodexSource =
-          codexProfile !== undefined
-            ? { profile: codexProfile, source: head }
-            : undefined;
-        state.activeXaiSource =
-          xaiProfile !== undefined
-            ? { profile: xaiProfile, source: head }
-            : undefined;
         state.liveSource = head;
         state.stampProvider.fn?.(head.id);
       }
@@ -580,6 +532,7 @@ export async function createRunLifecycle(
   // Close it, drain the old stream, and rebuild a fresh agent so the next send
   // works.
   const interrupt = (): void => {
+    state.credentialRecovery?.clear();
     // CL-8220 gate: an in-flight compact runs inline on the vendored reactor
     // with no abort hop of its own, so an interrupt that merely queues behind
     // it parks until the summary call returns. Abort the compact first — the
@@ -651,6 +604,7 @@ export async function createRunLifecycle(
   // abort handles → child agent.close) before clearing the session store so
   // /clear does not leave orphaned child reactors burning tokens.
   const newSession = (): void => {
+    state.credentialRecovery?.clear();
     // CL-8220: rotation must not park behind an in-flight compact either.
     state.compactionLifecycle?.abortCompaction("session rotation");
     const cancelledWorkers = resetSessionForRotation(state, services);

@@ -447,6 +447,15 @@ export function buildSkillsSection(skills: readonly SkillSummary[]): string {
   ].join("\n");
 }
 
+export function buildCorbitsRecoveryCommands(): string {
+  return [
+    "Corbits recovery commands:",
+    "- For provider authentication, login, reauthentication, or credential failures, recommend /connect and name the provider/profile.",
+    "- To switch the active provider or model, recommend /model.",
+    "- For OAuth profiles, never recommend Codex CLI login or API-key setup, and never request or expose secrets.",
+  ].join("\n");
+}
+
 export function buildChatSystemPrompt(
   extensions?: string[],
   env?: EnvironmentInfo,
@@ -474,6 +483,7 @@ export function buildChatSystemPrompt(
       coreToolNamesForSessionMode(sessionMode, toolAvailability),
       { advertiseArchive: true },
     ),
+    buildCorbitsRecoveryCommands(),
   ];
   if (skills.length > 0) sections.push(buildSkillsSection(skills));
   sections.push(contextSection(env));

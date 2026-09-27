@@ -6,6 +6,7 @@ import type { KeyEvent } from "@opentui/core";
 import type { CostSummary } from "../cost/cost-summary.js";
 import type { SubAgentSession } from "../subagent/session-store.js";
 import { createHarness } from "./harness.js";
+import { modelOptionId, modelOptionRef } from "./model-catalog.js";
 import {
   acceptOverlaySelection,
   closeInsetOverlay,
@@ -15,6 +16,7 @@ import {
   runOverlayAction,
 } from "./shell/overlay-list.js";
 import { resolvePaletteCatalog } from "./shell/palette.js";
+import { setShellRunState } from "./shell/chrome.js";
 import {
   mountRunnerHost,
   observeSessionFromSubAgents,
@@ -181,6 +183,53 @@ describe("mountRunnerHost session bridge", () => {
         "The fleet has gone dry. Remaining open tasks:\n- t1: keep going (todo)",
       );
       expect(host.shell.session.run).toBe("busy");
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("opens credential recovery only after the shell is idle", async () => {
+    const harness = await createHarness({ width: 80, height: 24 });
+    const host = await mountRunnerHost({
+      title: "test",
+      eventEmitter: new EventEmitter(),
+      send: () => undefined,
+      interrupt: () => undefined,
+      deliver: () => undefined,
+      providers: {},
+      onModelSelect: () => undefined,
+      commands: [],
+      onCommand: () => undefined,
+      chrome: () => ({ agents: [] }),
+      subscribeChrome: () => () => undefined,
+      subAgentSessions: () => [],
+      createRenderer: async () => harness.renderer,
+    });
+    const accepted: string[] = [];
+    const args = {
+      alternatives: [
+        {
+          id: modelOptionId("backup", "model-a"),
+          label: "model-a * [backup]",
+          provider: "backup",
+          model: "model-a",
+        },
+      ],
+      onAccept: (id: string) => accepted.push(id),
+      onCancel: () => undefined,
+    };
+    try {
+      host.bridge.beginSystemContinuation("busy");
+      expect(host.openCredentialRecovery(args)).toBe(false);
+      expect(host.shell.overlayKind).toBeNull();
+
+      setShellRunState(host.shell, "idle");
+      expect(host.openCredentialRecovery(args)).toBe(true);
+      expect(host.shell.overlayKind).toBe("model_picker");
+      expect(host.shell.overlayItems).toEqual(["model-a * [backup]"]);
+      acceptOverlaySelection(host.shell);
+      expect(accepted).toEqual([modelOptionId("backup", "model-a")]);
     } finally {
       host.dispose();
       harness.destroy();
@@ -419,7 +468,7 @@ describe("mountRunnerHost model picker", () => {
         option: true,
       } as KeyEvent;
       expect(runOverlayAction(host.shell, fKey)).toBe(true);
-      expect(toggled).toEqual(["xai:grok-4"]);
+      expect(toggled).toEqual([modelOptionId("xai", "grok-4")]);
     } finally {
       host.dispose();
       harness.destroy();
@@ -454,7 +503,7 @@ describe("mountRunnerHost model picker", () => {
         option: true,
       } as KeyEvent;
       expect(runOverlayAction(host.shell, dKey)).toBe(true);
-      expect(setDefault).toEqual(["xai:grok-4"]);
+      expect(setDefault).toEqual([modelOptionId("xai", "grok-4")]);
     } finally {
       host.dispose();
       harness.destroy();
@@ -644,9 +693,8 @@ describe("bottom border cost run", () => {
         "codex/abk-labs": { models: ["gpt-5.5"] },
       },
       onModelSelect: (id) => {
-        const sep = id.indexOf(":");
-        if (sep <= 0) return;
-        provider = id.slice(0, sep);
+        const identity = modelOptionRef(id);
+        if (identity !== null) provider = identity.provider;
       },
       commands: [],
       onCommand: () => undefined,
@@ -698,9 +746,8 @@ describe("bottom border cost run", () => {
         xai: { models: ["grok-4"] },
       },
       onModelSelect: (id) => {
-        const sep = id.indexOf(":");
-        if (sep <= 0) return;
-        provider = id.slice(0, sep);
+        const identity = modelOptionRef(id);
+        if (identity !== null) provider = identity.provider;
       },
       commands: [],
       onCommand: () => undefined,

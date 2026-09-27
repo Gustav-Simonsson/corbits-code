@@ -46,11 +46,14 @@ import { MAILBOX_MAIL_WAKE_PREFIX } from "../../subagent/mailbox-mail-drive.js";
 import {
   hostOf,
   liveAgent,
+  recordRunError,
   runWhileAgentBusy,
+  sanitizeRunnerDiagnostic,
   type RunnerServices,
   type RunnerState,
 } from "./state.js";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
+import { buildCredentialRecoveryAlternatives } from "./credential-recovery.js";
 
 const tuiLogger = getLogger([LOG_NAMESPACE_ROOT, "tui"]);
 
@@ -267,15 +270,18 @@ export function createSubmitPath(
     captureAuthFailure(getTelemetry(), failure);
     if (!shouldSettleUiAfterSendFailure(failure.kind)) return;
     if (failure.kind === "abort") return;
-    state.runError = err instanceof Error ? err.message : String(err);
+    recordRunError(state, err);
     if (presentNotice && !providerFailure.presented) {
       systemNotice(
-        tuiSendFailureMessage(
-          err,
-          failure.kind,
-          providerFailure.observed,
-          attempt,
-          providerFailure.error,
+        sanitizeRunnerDiagnostic(
+          state,
+          tuiSendFailureMessage(
+            err,
+            failure.kind,
+            providerFailure.observed,
+            attempt,
+            providerFailure.error,
+          ),
         ),
       );
       services.providerFailureAttempts.markPresented(providerFailure);
@@ -292,6 +298,11 @@ export function createSubmitPath(
   ): Promise<AgentDeliveryResult> => {
     const attempt = live.attemptIdentity();
     const providerFailure = services.providerFailureAttempts.begin(attempt);
+    const recoveryAttempt = state.credentialRecovery.begin(
+      message,
+      attempt.providerId,
+    );
+    state.credentialRecoveryAttempts.set(providerFailure, recoveryAttempt);
     try {
       await runWhileAgentBusy(state, async () => {
         const result = await send(message);
@@ -316,6 +327,15 @@ export function createSubmitPath(
         detail: error instanceof Error ? error.message : String(error),
       };
     } finally {
+      const pending = state.credentialRecovery.settle(
+        recoveryAttempt,
+        buildCredentialRecoveryAlternatives(
+          state.config,
+          state.sessionId,
+          recoveryAttempt.failedProvider,
+        ),
+      );
+      if (pending !== null) state.presentCredentialRecovery?.(pending);
       services.providerFailureAttempts.sendSettled(providerFailure);
     }
   };

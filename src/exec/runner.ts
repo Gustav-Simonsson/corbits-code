@@ -10,14 +10,10 @@ import {
   toolWatchdogFromSettings,
   type MCPServerConfig,
 } from "../config/settings.js";
+import { isCodexProviderName } from "../config/codex-providers.js";
 import {
-  codexProfileFromProviderName,
-  isCodexProviderName,
-} from "../config/codex-providers.js";
-import { xaiProfileFromProviderName } from "../config/xai-providers.js";
-import {
+  findSourceCredentialRecord,
   peekSourceCredentialSecret,
-  registerSourceCredential,
 } from "../config/source-credentials.js";
 import { formatDirectorSystemPrompt } from "../agent/directors/identity.js";
 import { formatMcpTrustQuestion } from "../trust/project-trust.js";
@@ -28,9 +24,7 @@ import { handleChatDirectorEvent } from "../agent/chat-event-subscribers.js";
 import {
   CodexRefreshLockError,
   codexAuthFailureDiagnostic,
-  getValidCodexToken,
 } from "../auth/codex/session.js";
-import { getValidXaiToken } from "../auth/xai/session.js";
 import {
   type ActivatedToolTracker,
   type ToolAvailability,
@@ -148,6 +142,10 @@ import {
 import type { ReactorEmittedEvent } from "@intx/inference";
 import { setAgentSourceUnlessClosed } from "../tui/agent-source-sync.js";
 import { ensureFreshInferenceSource } from "../subagent/refresh-inference-source.js";
+import {
+  sanitizeDiagnosticText,
+  sanitizeDiagnosticValue,
+} from "../diagnostic-sanitize.js";
 import {
   MAX_TOOL_APPROVAL_PAUSE_MS,
   getToolApprovalBudget,
@@ -451,6 +449,13 @@ export async function runExec(config: Config): Promise<ExecResult> {
   let providerFailureObserved = false;
   let providerError: InferenceErrorLike | undefined;
   let result: ExecResult | undefined;
+  let liveCredentialId: string | undefined;
+  const sanitizeExecDiagnostic = (text: string): string =>
+    sanitizeDiagnosticText(text, [
+      liveCredentialId === undefined
+        ? undefined
+        : peekSourceCredentialSecret(liveCredentialId),
+    ]);
   // Assigned once the advertised toolset exists (below); persist reads it live
   // so a snapshot taken before that point still writes, just without the field.
   const activatedToolsRef: { current?: ActivatedToolTracker } = {};
@@ -503,7 +508,9 @@ export async function runExec(config: Config): Promise<ExecResult> {
         ? { lastCacheWriteAt: activeRunHandle.lastCacheWriteAt }
         : {}),
       ...(status !== "running" ? { finishedAt: Date.now() } : {}),
-      ...(extra?.error !== undefined ? { error: extra.error } : {}),
+      ...(extra?.error !== undefined
+        ? { error: sanitizeExecDiagnostic(extra.error) }
+        : {}),
     };
     const write =
       status === "running"
@@ -521,7 +528,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
         {
           sessionId,
           status,
-          error: formatCaughtError(err),
+          error: sanitizeExecDiagnostic(formatCaughtError(err)),
         },
       );
     });
@@ -537,7 +544,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
     // Pricing seed is optional for exec; continue without rates rather than fail the run.
     const inferenceDeps = await assembleInferenceBase((err: unknown) => {
       logger.debug("seedPricingMetadataFromCache failed: {error}", {
-        error: formatCaughtError(err),
+        error: sanitizeExecDiagnostic(formatCaughtError(err)),
       });
     });
 
@@ -582,7 +589,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
       globalSettingsPath: config.globalSettingsPath,
       onError: (err: unknown) => {
         logger.warn("Failed to load local settings: {error}", {
-          error: formatCaughtError(err),
+          error: sanitizeExecDiagnostic(formatCaughtError(err)),
         });
       },
     });
@@ -727,7 +734,12 @@ export async function runExec(config: Config): Promise<ExecResult> {
     });
     toolset = agentToolset;
     setActiveDisposeHost(() =>
-      disposeExecRuntime({ agent, toolset, subAgentSessions }),
+      disposeExecRuntime({
+        agent,
+        toolset,
+        subAgentSessions,
+        sanitizeDiagnostic: sanitizeExecDiagnostic,
+      }),
     );
 
     const systemPrompt =
@@ -750,35 +762,25 @@ export async function runExec(config: Config): Promise<ExecResult> {
         })
       ).systemPrompt;
 
-    const initialCodexProfile = codexProfileFromProviderName(
-      config.providerName,
-    );
-    const initialXaiProfile = xaiProfileFromProviderName(config.providerName);
     const initialBundle = resolveLiveSessionSources(config, sessionId);
     const liveSources = initialBundle.sources;
     const liveDefaultSource = initialBundle.defaultSource;
     const selectedSource = initialBundle.selected;
+    liveCredentialId = selectedSource.credentialId;
+    const initialProvenance = findSourceCredentialRecord(
+      selectedSource.credentialId,
+    )?.provenance;
     let liveSource: InferenceSource = selectedSource;
 
     // Refresh OAuth tokens before first inference when starting on codex/xai.
-    if (initialCodexProfile !== undefined) {
-      const { access } = await refreshSelectedProviderCredential(() =>
-        getValidCodexToken(initialCodexProfile),
+    if (initialProvenance?.kind === "oauth") {
+      await refreshSelectedProviderCredential(() =>
+        ensureFreshInferenceSource(liveSource, config.providers),
       );
-      registerSourceCredential(liveSource.credentialId, access);
+      const access = peekSourceCredentialSecret(liveSource.credentialId);
       liveSubAgentProvider.current = {
         ...liveSubAgentProvider.current,
-        apiKey: access,
-      };
-    }
-    if (initialXaiProfile !== undefined) {
-      const { access } = await refreshSelectedProviderCredential(() =>
-        getValidXaiToken(initialXaiProfile),
-      );
-      registerSourceCredential(liveSource.credentialId, access);
-      liveSubAgentProvider.current = {
-        ...liveSubAgentProvider.current,
-        apiKey: access,
+        ...(access !== undefined ? { apiKey: access } : {}),
       };
     }
 
@@ -976,7 +978,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
         handshake,
       ).catch((err: unknown) => {
         logger.warn("MCP connect failed: {error}", {
-          error: formatCaughtError(err),
+          error: sanitizeExecDiagnostic(formatCaughtError(err)),
         });
       });
       await awaitExecMcpThenResume(connecting, () => workflowHost.resume(), {
@@ -1011,13 +1013,16 @@ export async function runExec(config: Config): Promise<ExecResult> {
     // its partial output in partial.jsonl instead of vanishing.
     const sink = (event: ReactorEmittedEvent): void => {
       approvalAcceptance.observe(event);
+      const sanitizedEvent = sanitizeDiagnosticValue(event, [
+        peekSourceCredentialSecret(liveSource.credentialId),
+      ]) as ReactorEmittedEvent;
       // Chat-director reactor events (replacing the former onTasksChange /
       // onActivateTools closures). Exec mode has no live task panel or task
       // stdout output today (unlike the TUI's chrome zone) — debug logging
       // is the closest match to how this mode already surfaces other
       // in-session state changes.
       handleChatDirectorEvent(
-        event,
+        sanitizedEvent,
         {
           onTasksChanged: (tasks) => {
             logger.debug("tasks updated: {tasks}", {
@@ -1028,12 +1033,15 @@ export async function runExec(config: Config): Promise<ExecResult> {
         },
         (message, fields) => logger.debug(message, fields),
       );
-      if (event.type === "inference.start" || event.type === "inference.done") {
+      if (
+        sanitizedEvent.type === "inference.start" ||
+        sanitizedEvent.type === "inference.done"
+      ) {
         providerFailureObserved = false;
         providerError = undefined;
-      } else if (event.type === "inference.error") {
+      } else if (sanitizedEvent.type === "inference.error") {
         providerFailureObserved = true;
-        const error = event.data.error;
+        const error = sanitizedEvent.data.error;
         providerError = {
           category: error.category,
           ...(error.message !== undefined ? { message: error.message } : {}),
@@ -1044,18 +1052,18 @@ export async function runExec(config: Config): Promise<ExecResult> {
             ? { providerId: error.providerId }
             : {}),
         };
-      } else if (event.type === COMPACTION_CONTINUATION_EVENT) {
+      } else if (sanitizedEvent.type === COMPACTION_CONTINUATION_EVENT) {
         // Compaction governor self-delivers after compact so the loop re-enters.
         // Each emission is answered once: a replayed duplicate of an
         // already-answered emission is ignored instead of re-delivered.
-        if (continuationGate.shouldDeliver(event.seq)) {
+        if (continuationGate.shouldDeliver(sanitizedEvent.seq)) {
           currentAgent?.deliver(buildCompactionContinuationMessage());
         }
       }
-      liveSink.sink(event);
-      cycleRecorder.handleEvent(event);
-      if (event.type === "inference.text.delta") {
-        const token = (event.data as { token?: string }).token;
+      liveSink.sink(sanitizedEvent);
+      cycleRecorder.handleEvent(sanitizedEvent);
+      if (sanitizedEvent.type === "inference.text.delta") {
+        const token = (sanitizedEvent.data as { token?: string }).token;
         if (typeof token === "string" && token.length > 0) {
           textChunks.push(token);
           output.write(token);
@@ -1076,17 +1084,10 @@ export async function runExec(config: Config): Promise<ExecResult> {
     let sinkStatus: ReturnType<typeof liveSink.getStatus> = "cancelled";
     try {
       // Final OAuth refresh immediately before send (token may have aged during MCP).
-      if (initialCodexProfile !== undefined) {
-        const { access } = await getValidCodexToken(initialCodexProfile);
-        if (access !== peekSourceCredentialSecret(liveSource.credentialId)) {
-          registerSourceCredential(liveSource.credentialId, access);
-          setAgentSourceUnlessClosed(activeAgent, liveSource);
-        }
-      }
-      if (initialXaiProfile !== undefined) {
-        const { access } = await getValidXaiToken(initialXaiProfile);
-        if (access !== peekSourceCredentialSecret(liveSource.credentialId)) {
-          registerSourceCredential(liveSource.credentialId, access);
+      if (initialProvenance?.kind === "oauth") {
+        const before = peekSourceCredentialSecret(liveSource.credentialId);
+        await ensureFreshInferenceSource(liveSource, config.providers);
+        if (peekSourceCredentialSecret(liveSource.credentialId) !== before) {
           setAgentSourceUnlessClosed(activeAgent, liveSource);
         }
       }
@@ -1122,7 +1123,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
           logger.debug(
             "agent.close during successful-send teardown failed: {error}",
             {
-              error: formatCaughtError(err),
+              error: sanitizeExecDiagnostic(formatCaughtError(err)),
             },
           );
         });
@@ -1130,7 +1131,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
           logger.debug(
             "stream drain during successful-send teardown failed: {error}",
             {
-              error: formatCaughtError(err),
+              error: sanitizeExecDiagnostic(formatCaughtError(err)),
             },
           );
         });
@@ -1147,7 +1148,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
           logger.debug(
             "agent.close during failed-send teardown failed: {error}",
             {
-              error: formatCaughtError(err),
+              error: sanitizeExecDiagnostic(formatCaughtError(err)),
             },
           );
         });
@@ -1155,7 +1156,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
           logger.debug(
             "stream drain during failed-send teardown failed: {error}",
             {
-              error: formatCaughtError(err),
+              error: sanitizeExecDiagnostic(formatCaughtError(err)),
             },
           );
         });
@@ -1191,7 +1192,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
     await hookManager.dispatchPostRun(runSummary).catch((err: unknown) => {
       // Post-run hooks are best-effort; keep the exec exit path intact but
       // surface the failure so operators can see hook/script problems.
-      const message = formatCaughtError(err);
+      const message = sanitizeExecDiagnostic(formatCaughtError(err));
       logger.warn("dispatchPostRun failed: {error}", { error: message });
       stderr.write(`Warning: post-run hook failed: ${message}\n`);
     });
@@ -1251,13 +1252,15 @@ export async function runExec(config: Config): Promise<ExecResult> {
     };
     return result;
   } catch (err) {
-    const diagnosticMessage = formatCaughtError(err);
+    const diagnosticMessage = sanitizeExecDiagnostic(formatCaughtError(err));
     logger.error("exec failed: {error}", { error: diagnosticMessage });
-    const userMessage = execUserFailureMessage(
-      config,
-      err,
-      providerFailureObserved,
-      providerError,
+    const userMessage = sanitizeExecDiagnostic(
+      execUserFailureMessage(
+        config,
+        err,
+        providerFailureObserved,
+        providerError,
+      ),
     );
     stderr.write(`Error: ${userMessage}\n`);
     await persist("failed", { error: diagnosticMessage });
@@ -1283,9 +1286,14 @@ export async function runExec(config: Config): Promise<ExecResult> {
     return result;
   } finally {
     try {
-      await disposeExecRuntime({ agent, toolset, subAgentSessions });
+      await disposeExecRuntime({
+        agent,
+        toolset,
+        subAgentSessions,
+        sanitizeDiagnostic: sanitizeExecDiagnostic,
+      });
     } catch (err: unknown) {
-      const message = formatCaughtError(err);
+      const message = sanitizeExecDiagnostic(formatCaughtError(err));
       logger.error("runtime dispose failed: {error}", { error: message });
       stderr.write(`Error: runtime dispose failed: ${message}\n`);
       if (result !== undefined) {

@@ -209,7 +209,11 @@ describe("createAuthStore", () => {
         "Timed out waiting for OAuth credential lock",
       );
       await rm(lockPath, { force: true });
-      await expect(second).resolves.toBeUndefined();
+      await expect(second).resolves.toEqual({
+        name: "work",
+        tokens: { access: "second", refresh: "r2", expiresAt: 3 },
+        createdAt: 1,
+      });
 
       expect((await store.loadProfile("work", home))?.tokens.access).toBe(
         "second",
@@ -248,6 +252,30 @@ describe("createAuthStore", () => {
       const updated = await store.loadProfile("work", home);
       expect(updated?.tokens.access).toBe("a2");
       expect(updated?.createdAt).toBe(10);
+
+      await store.saveProfile(
+        {
+          name: "work",
+          tokens: {
+            access: "replacement",
+            refresh: "new-refresh",
+            expiresAt: 3,
+          },
+          createdAt: 20,
+        },
+        home,
+      );
+      await store.updateTokens(
+        "work",
+        { access: "stale-refresh", refresh: "rotated-old", expiresAt: 4 },
+        home,
+        "r2",
+      );
+      expect(await store.loadProfile("work", home)).toEqual({
+        name: "work",
+        tokens: { access: "replacement", refresh: "new-refresh", expiresAt: 3 },
+        createdAt: 20,
+      });
 
       await store.updateTokens(
         "gone",
@@ -294,7 +322,7 @@ describe("createAuthStore", () => {
 
       await expect(
         store.updateTokens("work", profile.tokens, home),
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual(profile);
     } finally {
       await rm(home, { recursive: true, force: true });
     }

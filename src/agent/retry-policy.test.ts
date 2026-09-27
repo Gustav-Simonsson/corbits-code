@@ -1,9 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import { createDefaultScheduler, runInference } from "@intx/inference";
+import { createInferenceDependencies } from "../provider/inference-dependencies.js";
+import type {
+  ConversationTurn,
+  InferenceEvent,
+  InferenceSource,
+} from "@intx/types/runtime";
 import type { AdmissionQueue } from "../subagent/admission.js";
 import {
   createCorbitsRetryPolicy,
   type CorbitsRetryPolicyOptions,
 } from "./retry-policy.js";
+import {
+  clearSourceCredentials,
+  registerSourceCredentialRecord,
+} from "../config/source-credentials.js";
 
 const HTML_503 = `<!DOCTYPE html><html><body>503 Service Unavailable Cloudflare</body></html>`;
 
@@ -21,6 +32,180 @@ function policy(opts: CorbitsRetryPolicyOptions = {}) {
 }
 
 describe("createCorbitsRetryPolicy", () => {
+  test("refreshes the first credential failure after a transient retry", async () => {
+    registerSourceCredentialRecord("codex/work", {
+      provenance: { kind: "oauth", provider: "codex", profile: "work" },
+      material: {
+        secret: "old",
+        headers: { "chatgpt-account-id": "old-account" },
+      },
+    });
+    try {
+      let refreshes = 0;
+      const decide = policy({
+        refreshCredential: async () => {
+          refreshes++;
+        },
+      });
+      const source = {
+        id: "codex/work",
+        provider: "codex-responses",
+        baseURL: "https://chatgpt.com/backend-api/codex",
+        credentialId: "codex/work",
+        model: "gpt-5",
+      };
+
+      expect(
+        await decide({
+          attempt: 1,
+          elapsedMs: 0,
+          source,
+          credentialFailureOrdinal: 0,
+          credentialFailureHistory: [],
+          error: { category: "retryable", message: "gateway unavailable" },
+        }),
+      ).toEqual({ kind: "retry", delayMs: 500 });
+      expect(
+        await decide({
+          attempt: 2,
+          elapsedMs: 500,
+          source,
+          credentialFailureOrdinal: 1,
+          credentialFailureHistory: [],
+          error: { category: "credential_failure", message: "expired" },
+        }),
+      ).toEqual({ kind: "retry", delayMs: 0 });
+      expect(refreshes).toBe(1);
+    } finally {
+      clearSourceCredentials();
+    }
+  });
+
+  test("raw Codex 404 invalid_token refreshes once and surfaces normalized credential failure", async () => {
+    const source: InferenceSource = {
+      id: "codex/work",
+      provider: "codex-responses",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      credentialId: "codex/work",
+      model: "gpt-5",
+    };
+    registerSourceCredentialRecord(source.credentialId, {
+      provenance: { kind: "oauth", provider: "codex", profile: "work" },
+      material: { secret: "access-token" },
+    });
+    const oldSecret = "opaque old credential with spaces";
+    const replacementSecret = "opaque replacement credential with spaces";
+    let liveSecret = oldSecret;
+    let sends = 0;
+    let refreshes = 0;
+    const retryPolicy = policy({
+      providerId: () => "xai/previous",
+      refreshCredential: async (refreshedSource, provenance) => {
+        refreshes++;
+        liveSecret = replacementSecret;
+        expect(refreshedSource.id).toBe(source.id);
+        expect(provenance).toEqual({
+          kind: "oauth",
+          provider: "codex",
+          profile: "work",
+        });
+      },
+    });
+    const baseDeps = await createInferenceDependencies();
+    const deps = {
+      ...baseDeps,
+      scheduler: createDefaultScheduler(),
+      fetch: async (_input: string | URL | Request, init?: RequestInit) => {
+        sends++;
+        const authorization = new Headers(init?.headers).get("authorization");
+        return Response.json(
+          {
+            error: {
+              code: "invalid_token",
+              message: `The access token ${authorization} has been revoked`,
+              type: "invalid_request_error",
+            },
+          },
+          { status: 404 },
+        );
+      },
+    };
+    const turns: ConversationTurn[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: 0,
+      },
+    ];
+    const events: InferenceEvent[] = [];
+    let seq = 0;
+    try {
+      for await (const event of runInference({
+        turns,
+        source,
+        nextSeq: () => ++seq,
+        deps,
+        readMaterial: () => ({ secret: liveSecret }),
+        inferenceOptions: { retryPolicy },
+      }))
+        events.push(event);
+
+      expect(JSON.stringify(events)).not.toContain(oldSecret);
+      expect(JSON.stringify(events)).not.toContain(replacementSecret);
+      expect(sends).toBe(2);
+      expect(refreshes).toBe(1);
+      const retries = events.filter(
+        (event) => event.type === "inference.retry",
+      );
+      expect(retries).toHaveLength(1);
+      if (retries[0]?.type !== "inference.retry")
+        throw new Error("expected inference.retry");
+      expect(retries[0].data.previousError.category).toBe("credential_failure");
+      const terminal = events.findLast(
+        (event) => event.type === "inference.error",
+      );
+      if (terminal?.type !== "inference.error")
+        throw new Error("expected terminal inference.error");
+      expect(terminal.data.error.category).toBe("credential_failure");
+      expect(terminal.data.error.message).toContain('Codex profile "work"');
+      expect(terminal.data.error.message).toContain("/connect");
+    } finally {
+      clearSourceCredentials();
+    }
+  });
+
+  test("does not recover namespaced API-key credentials", async () => {
+    registerSourceCredentialRecord("xai/shadow", {
+      provenance: { kind: "api-key" },
+      material: { secret: "explicit-key" },
+    });
+    try {
+      let refreshes = 0;
+      const decision = await policy({
+        refreshCredential: async () => {
+          refreshes++;
+        },
+      })({
+        attempt: 1,
+        elapsedMs: 0,
+        source: {
+          id: "xai/shadow",
+          provider: "openai-compatible",
+          baseURL: "https://relay.example/v1",
+          credentialId: "xai/shadow",
+          model: "relay-model",
+        },
+        credentialFailureOrdinal: 1,
+        credentialFailureHistory: [],
+        error: { category: "credential_failure", message: "bad key" },
+      });
+      expect(decision).toEqual({ kind: "abort" });
+      expect(refreshes).toBe(0);
+    } finally {
+      clearSourceCredentials();
+    }
+  });
+
   test("retries protocol_mismatch when the body is an HTML 503 gateway page", async () => {
     const decision = await policy()({
       attempt: 1,
