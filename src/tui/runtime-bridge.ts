@@ -599,6 +599,16 @@ export interface BridgeBag {
    */
   toolCallStartedAt: Map<string, number>;
   /**
+   * In-flight ordinary calls waiting on a decision gate. `gateClosed` re-syncs
+   * their elapsed clocks to the settle so post-grant stats read
+   * time-since-grant, not time-since-announcement. Auto-allowed siblings that
+   * already carry a live elapsed clock are executing, not waiting, and stay
+   * out of the set. `spawn_agent` ids are never rebased — the session clock
+   * owns those rows. Results and rollbacks drop their ids so the set cannot
+   * leak.
+   */
+  gatedToolCalls: Set<string>;
+  /**
    * Last live shell tail painted per in-flight call, so an unchanged feed
    * snapshot applies no row update.
    */
@@ -1027,6 +1037,9 @@ function applyToolCall(
     // their own) pick up the live timer.
     if (row.stat === undefined) {
       bag.toolCallStartedAt.set(event.callId, bag.now());
+      // Announced while a gate stands open: the wait belongs to the gate, so
+      // the settle re-syncs this clock (see gateClosed).
+      if (bag.turn.blockedGateCount > 0) bag.gatedToolCalls.add(event.callId);
     }
   }
   if (event.callId !== undefined && event.name === SPAWN_AGENT_TOOL_NAME) {
@@ -1064,6 +1077,7 @@ function applyToolResult(
   if (event.callId !== undefined) {
     bag.toolRows.delete(event.callId);
     bag.toolCallStartedAt.delete(event.callId);
+    bag.gatedToolCalls.delete(event.callId);
     bag.shellSnapshots.delete(event.callId);
     // spawn_agent's immediate running JSON is not the end of the worker —
     // keep the row in taskCallIds / spawnProgressRows until the session
@@ -1219,6 +1233,56 @@ function syncToolElapsed(shell: AppShell, bag: BridgeBag, nowMs: number): void {
 }
 
 /**
+ * Re-sync every gate-waited call's elapsed clock to the settle: execution
+ * starts at the grant, not at the announcement that preceded the approval
+ * wait. Later ticks read time-since-grant through the same syncToolElapsed
+ * path an ungated row uses. Fires on every settled gate — allow and deny
+ * alike, the only settle signal the gate wiring reports (see gate-wire
+ * `onceClosed`) — so deny needs no special case: the result merge already
+ * drops the clock-owned stat for the answer's own addendum. Nested gates
+ * rebase uniformly at each settle rather than per gate/call pair: the bridge
+ * sees gate lifecycles but not which grant covers which call. `shell`
+ * keeps its announcement-stamped `inFlightTool.startedAt` on purpose: the
+ * only reader (`resolveWaitingOn`) uses it as a steer-wait threshold, not an
+ * execution clock, and a steer queued mid-gate has still been waiting.
+ */
+function rebaseGatedElapsed(
+  shell: AppShell,
+  bag: BridgeBag,
+  nowMs: number,
+): void {
+  if (bag.gatedToolCalls.size === 0) return;
+  const grant = clockLabel(0);
+  for (const callId of bag.gatedToolCalls) {
+    bag.gatedToolCalls.delete(callId);
+    // The session clock owns spawn_agent rows; diff rows never enter the
+    // gated set (they carry no elapsed clock to rebase).
+    if (bag.taskCallIds.has(callId)) continue;
+    if (!bag.toolCallStartedAt.has(callId)) continue;
+    bag.toolCallStartedAt.set(callId, nowMs);
+    const index = bag.toolRows.get(callId);
+    if (index === undefined) continue;
+    const row = bag.pendingRowUpdates.get(index) ?? streamRowAt(shell, index);
+    if (row === undefined || row.pending !== true) continue;
+    if (row.stat === grant) continue;
+    rowUpdates.scheduleRowUpdate(bag, index, { ...row, stat: grant });
+  }
+}
+
+/** `clockLabel` trailer already painted on an in-flight ordinary-tool row. */
+function hasPaintedElapsedClock(
+  shell: AppShell,
+  bag: BridgeBag,
+  callId: string,
+): boolean {
+  const index = bag.toolRows.get(callId);
+  if (index === undefined) return false;
+  const row = bag.pendingRowUpdates.get(index) ?? streamRowAt(shell, index);
+  const stat = row?.stat;
+  return typeof stat === "string" && /^\d+:\d{2}$/.test(stat);
+}
+
+/**
  * User rows the shell paints ahead of the runtime's own inbound copy: a
  * reinject, which lands before the restarted run reports it, and a row the
  * bridge delivered at a tool boundary (it carries its queueItemId). A
@@ -1256,6 +1320,7 @@ function rollbackAttempt(shell: AppShell, bag: BridgeBag): void {
     if (index >= boundary) {
       bag.toolRows.delete(callId);
       bag.toolCallStartedAt.delete(callId);
+      bag.gatedToolCalls.delete(callId);
       bag.taskCallIds.delete(callId);
       bag.spawnProgressRows.delete(callId);
       bag.shellSnapshots.delete(callId);
@@ -1533,6 +1598,7 @@ export function attachSessionBridge(
     now,
     toolRows: new Map(),
     toolCallStartedAt: new Map(),
+    gatedToolCalls: new Set(),
     shellSnapshots: new Map(),
     lastToolRow: -1,
     taskCallIds: new Set(),
@@ -2052,12 +2118,22 @@ export function attachSessionBridge(
   const gateOpened = (): void => {
     if (bag.disposed) return;
     bag.turn = turnStateGateOpened(bag.turn);
+    // Snapshot calls waiting on this gate. An auto-allowed sibling that
+    // already carries a live elapsed clock is executing, not waiting — leave
+    // its startedAt at announcement so post-grant stats stay honest.
+    for (const callId of bag.toolCallStartedAt.keys()) {
+      if (hasPaintedElapsedClock(shell, bag, callId)) continue;
+      bag.gatedToolCalls.add(callId);
+    }
     paintPhase();
   };
 
   const gateClosed = (): void => {
     if (bag.disposed) return;
     bag.turn = turnStateGateClosed(bag.turn, now());
+    // The grant is execution start: waited clocks re-sync here so post-grant
+    // stats read time-since-grant (see rebaseGatedElapsed).
+    rebaseGatedElapsed(shell, bag, now());
     paintPhase();
     flushOccupancyThenWake();
   };
