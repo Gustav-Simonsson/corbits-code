@@ -244,6 +244,42 @@ describe("exec director allowlist", () => {
     expect(names).not.toContain(OUTSIDE_ALLOW);
   });
 
+  test("the promoter does not commit list_dir onto the advertised wire", () => {
+    const { activated, computeAdvertised, flushPromotions } =
+      createAdvertisedToolset({
+        sessionMode: "orchestrator",
+        toolAvailability: { languageServerAvailable: true },
+        getProvider: () => ({ providerName: "test", model: "test-model" }),
+      });
+    let committed = 0;
+    const promote = createExecToolPromoter({
+      activate: (names) => activated.activate(names),
+      isAllowed: () => true,
+      commitWire: () => {
+        if (flushPromotions()) committed += 1;
+      },
+    });
+    const registry = [
+      {
+        name: "list_dir",
+        description: "list a directory",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "mcp__acme__do",
+        description: "do a thing",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ];
+    promote(["list_dir", "mcp__acme__do"]);
+    expect(activated.has("list_dir")).toBe(false);
+    expect(activated.has("mcp__acme__do")).toBe(true);
+    expect(committed).toBe(1);
+    const names = computeAdvertised(registry).map((d) => d.name);
+    expect(names).not.toContain("list_dir");
+    expect(names).toContain("mcp__acme__do");
+  });
+
   test("skywalker overlay leaves every tool allowed", () => {
     const overlay = resolveExecDirectorOverlay("skywalker");
     expect(isExecOverlayToolAllowed(overlay, OUTSIDE_ALLOW)).toBe(true);
@@ -652,6 +688,7 @@ describe("exec tool call gate and promoter", () => {
         "search and render layout primitives for pages",
       ),
       stringTool("plugin__notes__save", "noted", "Save granola notes"),
+      stringTool("list_dir", "listed", "list a directory's entries"),
       stringTool(submitOutputDefinition.name, "submitted", "submit output"),
     ]);
     const { activated, isAdvertised, computeAdvertised, flushPromotions } =
@@ -672,12 +709,12 @@ describe("exec tool call gate and promoter", () => {
         flushPromotions();
       },
     });
+    runner.setOnUndeclaredCall((name) => promote([name]));
     const search = createToolSearchTool({
       search: (query) =>
         createToolIndex(() => runner.currentDefinitions()).search(query),
       lookup: (name) =>
         runner.currentDefinitions().find((d) => d.name === name),
-      promote,
     });
     return {
       runner,
@@ -698,41 +735,57 @@ describe("exec tool call gate and promoter", () => {
     );
   }
 
-  test("tool_search then MCP dispatch with the gate on", async () => {
+  test("search does not change the advertised set", async () => {
     const { runner, search, persistCount, computeAdvertised } =
       wireExecDiscovery();
-    const blocked = await dispatch(runner, "mcp__linear__save_issue");
-    expect(blocked.isError).toBe(true);
-    expect(blocked.content).toContain("tool_search");
+    const before = computeAdvertised(runner.currentDefinitions()).map(
+      (d) => d.name,
+    );
+    expect(before).not.toContain("mcp__linear__save_issue");
 
     if (search.kind !== "string") throw new Error("expected string tool");
     await search.handler({ query: "linear" }, new AbortController().signal);
-    expect(persistCount()).toBe(1);
-
-    const allowed = await dispatch(runner, "mcp__linear__save_issue");
-    expect(allowed.content).toBe("saved");
-    expect(allowed.isError).toBeUndefined();
+    expect(persistCount()).toBe(0);
     expect(
       computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
-    ).toContain("mcp__linear__save_issue");
+    ).toEqual(before);
   });
 
-  test("present and plugin names pass the gate after tool_search promote", async () => {
-    const { runner, search } = wireExecDiscovery();
-    expect((await dispatch(runner, "present")).isError).toBe(true);
-    expect((await dispatch(runner, "plugin__notes__save")).isError).toBe(true);
-
+  test("a subsequent call to a searched-but-not-yet-declared name promotes only that name", async () => {
+    const { runner, search, computeAdvertised } = wireExecDiscovery();
     if (search.kind !== "string") throw new Error("expected string tool");
+    await search.handler({ query: "linear" }, new AbortController().signal);
     await search.handler(
       { query: "render layout" },
       new AbortController().signal,
     );
-    await search.handler(
-      { query: "granola notes" },
-      new AbortController().signal,
+    const afterSearch = computeAdvertised(runner.currentDefinitions()).map(
+      (d) => d.name,
     );
+    expect(afterSearch).not.toContain("mcp__linear__save_issue");
+    expect(afterSearch).not.toContain("present");
 
+    const allowed = await dispatch(runner, "mcp__linear__save_issue");
+    expect(allowed.content).toBe("saved");
+    expect(allowed.isError).toBeUndefined();
+    const names = computeAdvertised(runner.currentDefinitions()).map(
+      (d) => d.name,
+    );
+    expect(names).toContain("mcp__linear__save_issue");
+    expect(names).not.toContain("present");
+    expect(names).not.toContain("plugin__notes__save");
+  });
+
+  test("present and plugin names promote only the called name", async () => {
+    const { runner, computeAdvertised } = wireExecDiscovery();
     expect((await dispatch(runner, "present")).content).toBe("view");
+    expect(
+      computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
+    ).toContain("present");
+    expect(
+      computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
+    ).not.toContain("plugin__notes__save");
+
     expect((await dispatch(runner, "plugin__notes__save")).content).toBe(
       "noted",
     );
@@ -743,5 +796,22 @@ describe("exec tool call gate and promoter", () => {
     const result = await dispatch(runner, submitOutputDefinition.name);
     expect(result.content).toBe("submitted");
     expect(result.isError).toBeUndefined();
+  });
+
+  test("executing list_dir does not add it to computeAdvertised", async () => {
+    const { runner, computeAdvertised } = wireExecDiscovery();
+    const before = computeAdvertised(runner.currentDefinitions()).map(
+      (d) => d.name,
+    );
+    expect(before).not.toContain("list_dir");
+    const result = await dispatch(runner, "list_dir");
+    expect(result.content).toBe("listed");
+    expect(result.isError).toBeUndefined();
+    expect(
+      computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
+    ).toEqual(before);
+    expect(
+      computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
+    ).not.toContain("list_dir");
   });
 });
