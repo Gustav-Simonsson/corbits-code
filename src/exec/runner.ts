@@ -103,6 +103,7 @@ import {
   loadState,
   saveState,
   type ConnectedMcpServer,
+  type RunState,
 } from "../session/state.js";
 import { resolveExecRunStatus, type RunSink } from "../session/run-sink.js";
 import { createRunSummary } from "../session/hooks.js";
@@ -371,6 +372,33 @@ export interface ExecResult {
   model?: string;
 }
 
+/**
+ * Builds the `session_end` payload for exec runs, mirroring the TUI exit
+ * reporter's status/exit_reason contract. Falls back to the live turn count
+ * and wall clock when the run never produced a result.
+ */
+export function execSessionEndProperties(
+  result: ExecResult | undefined,
+  startedAt: number,
+  sinkTurns: number,
+): {
+  status: "done" | "failed" | "cancelled";
+  turn_count: number;
+  duration_ms: number;
+  session_mode: "exec";
+  exit_reason: "done" | "error" | "cancelled";
+} {
+  const status = result?.status ?? "failed";
+  return {
+    status,
+    turn_count: result?.turnsUsed ?? sinkTurns,
+    duration_ms: result?.durationMs ?? Date.now() - startedAt,
+    session_mode: "exec",
+    exit_reason:
+      status === "done" ? "done" : status === "failed" ? "error" : "cancelled",
+  };
+}
+
 export function createExecToolCallGate(
   isAdvertised: (name: string) => boolean,
 ): (name: string) => boolean {
@@ -406,7 +434,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
   const task = config.task.trim();
   if (task.length === 0) {
     stderr.write('Usage: corbits exec "<prompt>"\n');
-    return {
+    const result: ExecResult = {
       exitCode: 2,
       sessionId: config.sessionId,
       text: "",
@@ -425,18 +453,57 @@ export async function runExec(config: Config): Promise<ExecResult> {
       provider: config.providerName,
       model: config.model,
     };
+    // Deliberate funnel gap: a missing prompt is a usage error (exit 2) and
+    // no run ever started, so there is no session to close. Emitting a
+    // failed session_end here would pollute failed counts with invocations
+    // that never ran.
+    return result;
   }
 
   const sessionId =
     config.sessionId.length > 0 ? config.sessionId : generateSessionId();
   const startedAt = Date.now();
   const workdir = sessionContextDir(config.cwd, sessionId);
-  await initSessionDir(config.cwd, sessionId);
-  const prior =
-    config.sessionId.length > 0
-      ? await loadState(config.cwd, config.sessionId)
-      : undefined;
-  const priorState = prior?.kind === "ok" ? prior.state : undefined;
+  // Setup runs before the main try below: initSessionDir/loadState hit disk
+  // before any session_end coverage exists, so an EACCES/EROFS here would
+  // reject with zero session_end and orphan the cli_start funnel. Emit a
+  // minimal failed session_end on this window instead of letting it throw.
+  let priorState: RunState | undefined;
+  try {
+    await initSessionDir(config.cwd, sessionId);
+    const prior =
+      config.sessionId.length > 0
+        ? await loadState(config.cwd, config.sessionId)
+        : undefined;
+    priorState = prior?.kind === "ok" ? prior.state : undefined;
+  } catch (err) {
+    const message = formatCaughtError(err);
+    logger.error("exec setup failed: {error}", { error: message });
+    stderr.write(`Error: ${message}\n`);
+    liveTelemetry.capture(
+      "session_end",
+      execSessionEndProperties(undefined, startedAt, 0),
+    );
+    return {
+      exitCode: 1,
+      sessionId,
+      text: "",
+      error: message,
+      status: "failed",
+      durationMs: Date.now() - startedAt,
+      turnsUsed: 0,
+      toolCallCount: 0,
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        thinking: 0,
+      },
+      provider: config.providerName,
+      model: config.model,
+    };
+  }
 
   let connectedMcp: ConnectedMcpServer[] = [];
   let agent: Agent | null = null;
@@ -1307,6 +1374,14 @@ export async function runExec(config: Config): Promise<ExecResult> {
         result.error = `runtime dispose failed: ${message}`;
       }
     }
+    liveTelemetry.capture(
+      "session_end",
+      execSessionEndProperties(
+        result,
+        startedAt,
+        runSink?.getTurnCount() ?? turnsUsed,
+      ),
+    );
     clearActiveDisposeHost();
   }
 }

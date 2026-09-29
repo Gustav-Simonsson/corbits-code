@@ -79,7 +79,9 @@ export async function mainWithRunners(
     if (settings?.telemetry?.noticeShown === true) {
       const telemetry = createTelemetry({ settings });
       setTelemetry(telemetry);
-      telemetry.capture("cli_start");
+      telemetry.capture("cli_start", {
+        surface: config.command === "exec" ? "exec" : "tui",
+      });
     }
   }
 
@@ -91,6 +93,14 @@ export async function mainWithRunners(
       process.stderr.write(
         "No provider configured. Run `corbits` (interactive) once to complete setup, " +
           "or pass --provider / --model with credentials.\n",
+      );
+      // cli_start (surface exec) already emitted above while runExec never
+      // runs on this branch — emit a minimal failed session_end so the
+      // funnel stays paired instead of orphaning the start.
+      const { execSessionEndProperties } = await import("./exec/runner.js");
+      getTelemetry().capture(
+        "session_end",
+        execSessionEndProperties(undefined, Date.now(), 0),
       );
       exitCode = 2;
     } else {
