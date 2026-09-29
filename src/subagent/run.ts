@@ -68,6 +68,10 @@ import {
 import { normalizeToolDefinitionsForProvider } from "../agent/tool-schema-normalize.js";
 import { canonicalToolName } from "../agent/canonical-tool-name.js";
 import {
+  checkMountedRequiresTools,
+  formatCapabilityUnavailable,
+} from "./capability-preflight.js";
+import {
   advertisedToolName,
   projectToolDefinitions,
 } from "../agent/tool-aliases.js";
@@ -993,6 +997,32 @@ async function runSubAgentInner(
           authority: lifecycleAuthority,
         }),
       ];
+    }
+
+    // CL-9476 mount echo: dispatch verified requires_tools pre-spawn, but the
+    // filter or mount may have shifted since — a stamped tool missing here is
+    // a stale snapshot, a setup_error that never retries (non-continuable).
+    // Dispatch-side rejection is the normal path. This check runs after ALL
+    // mounts (manage_tasks, leaf submit_result/ask_director, fleet verbs), so
+    // a dispatch that passed preflight against the same mount never throws.
+    if (params.requiresTools !== undefined && params.requiresTools.length > 0) {
+      const mountedNames = tools.map((tool) => tool.definition.name);
+      const mountedCheck = checkMountedRequiresTools(
+        params.requiresTools,
+        mountedNames,
+      );
+      if (!mountedCheck.ok) {
+        throw new Error(
+          formatCapabilityUnavailable(
+            {
+              code: "stale_snapshot",
+              tool: mountedCheck.missing[0] ?? "unknown",
+              tools: mountedCheck.missing,
+            },
+            params.directorId ?? params.description,
+          ),
+        );
+      }
     }
 
     tools = wrapAgentToolsWithResultTruncation(tools, {

@@ -150,6 +150,12 @@ export interface SubAgentSession {
   // Once close_agent runs, this flips back to false and the session is a
   // normal finished record subject to `maxCompleted` like any other.
   retained?: boolean;
+  /**
+   * Canonical tool names this worker hard-required at dispatch (CL-9476).
+   * Verified pre-spawn; the mount re-checks them and fails the run as a
+   * stale snapshot when one went missing in between.
+   */
+  requiresTools?: readonly string[];
 }
 
 export interface StartSessionInput {
@@ -166,6 +172,8 @@ export interface StartSessionInput {
   retained?: boolean;
   /** Catalog provider id for followup admission. */
   provider?: string;
+  /** Canonical tool names this worker hard-required at dispatch (CL-9476). */
+  requiresTools?: readonly string[];
 }
 
 export interface SubAgentSessionStoreOptions {
@@ -1297,6 +1305,9 @@ export function createSubAgentSessionStore(
           ? { parentSessionId: input.parentSessionId }
           : {}),
         ...(input.provider !== undefined ? { provider: input.provider } : {}),
+        ...(input.requiresTools !== undefined
+          ? { requiresTools: [...input.requiresTools] }
+          : {}),
       };
       sessions.set(id, session);
       bumpRevision(id);
@@ -2317,6 +2328,9 @@ function cloneSession(
       ? { parentSessionId: session.parentSessionId }
       : {}),
     ...(session.provider !== undefined ? { provider: session.provider } : {}),
+    ...(session.requiresTools !== undefined
+      ? { requiresTools: [...session.requiresTools] }
+      : {}),
   };
 }
 

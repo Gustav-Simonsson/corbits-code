@@ -67,6 +67,14 @@ import {
   type ReasoningEffort,
 } from "../provider/reasoning-effort.js";
 import type { AgentProfile, CapabilityFilter } from "../agent/profiles.js";
+import {
+  DEFAULT_KNOWN_ENGINES,
+  formatCapabilityUnavailable,
+  leafTierAlternatives,
+  preflightCapabilities,
+  rerouteAlternatives,
+  type CapabilityUnavailable,
+} from "./capability-preflight.js";
 import { isCodexProviderName } from "../config/codex-providers.js";
 import { buildDispatchBrief, type TaskIntent } from "./report.js";
 import {
@@ -101,6 +109,7 @@ import type { DirectorPackage, ModelRole } from "../agent/directors/types.js";
 import { SPAWN_AGENT_TOOL_NAME } from "./tool-taxonomy.js";
 import {
   assertCanTargetAgent,
+  assertTierMayMountFleetVerb,
   FleetAuthorityError,
   type FleetNode,
   type SubagentTier,
@@ -543,12 +552,13 @@ const SpawnAgentArgs = type({
   "success_criteria?": "string[]",
   "do_not?": "string[]",
   "report_focus?": "string",
+  "requires_tools?": "string[]",
 });
 
 export const spawnAgentToolDefinition: ToolDefinition = {
   name: SPAWN_AGENT_TOOL_NAME,
   description:
-    "Start a worker agent and return IMMEDIATELY with its agent_id — this never blocks on the worker's completion. Pass agent= a director/profile id returned by search_agents, or intent= (one of explore|implement|review|plan|general). The child starts blank. One focused task per worker. success_criteria is required for implement/review (and their default directors). Fire several spawn_agent calls in one turn to start independent lanes in parallel, then reply and end the turn — workers keep running while you are idle. Reports arrive as mailbox mail where mailbox delivery is mounted; where wait_agents is mounted (exec primary), collect with it instead. Do not poll. Excess fan-out is queued rather than refused.",
+    "Start a worker agent and return IMMEDIATELY with its agent_id — this never blocks on the worker's completion. Pass agent= a director/profile id returned by search_agents, or intent= (one of explore|implement|review|plan|general). The child starts blank. One focused task per worker. success_criteria is required for implement/review (and their default directors). Fire several spawn_agent calls in one turn to start independent lanes in parallel, then reply and end the turn — workers keep running while you are idle. Reports arrive as mailbox mail where mailbox delivery is mounted; where wait_agents is mounted (exec primary), collect with it instead. Do not poll. Excess fan-out is queued rather than refused. requires_tools declares hard tool requirements verified pre-spawn against the worker's capability mount (fail-closed with a reroute hint); a preflight rejection or a mount-time stale_snapshot failure is non-continuable — re-dispatch deliberately, never auto-retry or spawn a speculative successor.",
   inputSchema: {
     type: "object",
     properties: {
@@ -593,6 +603,12 @@ export const spawnAgentToolDefinition: ToolDefinition = {
         description:
           "Optional director id (e.g. from search_agents). Alternative to intent=.",
       },
+      requires_tools: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional hard tool requirements (canonical names, e.g. run_shell). Verified pre-spawn against the worker's capability mount — the spawn fails closed with a reroute hint when a tool is missing, and the mount re-checks at run start. Rejections are non-continuable: re-dispatch deliberately, never auto-retry.",
+      },
     },
     required: ["description", "prompt"],
   },
@@ -624,7 +640,8 @@ export const waitAgentsToolDefinition: ToolDefinition = {
     `(interrupted, cancelled, incomplete-report, and similar). A "failed" entry with "continuable": true is a recoverable transient ` +
     `provider failure (retryable/timeout/overload) — terminal, not a timeout and not a stall: do not re-wait it, and you may spawn at most ` +
     `one successor with the same brief. "failed" without the marker (auth, quota, context-overflow, or other errors) is not continuable — ` +
-    `do not respawn it. awaiting_director is not terminal: re-wait while still pending re-delivers the same question. ` +
+    `do not respawn it. Capability preflight rejections and mount-time stale_snapshot failures report failed ` +
+    `without the marker for the same reason — re-dispatch deliberately instead of retrying. awaiting_director is not terminal: re-wait while still pending re-delivers the same question. ` +
     `Answer with send_input (soft). Do not call this in a tight zero-progress loop: a timeout means the targets are still ` +
     `queued, running, or awaiting a director answer, not "try again right away" — do other work, reply to the operator, or change the brief. Calling again with the ` +
     `same targets is a real timed wait, not a spin, but wastes turns if nothing has changed. ` +
@@ -707,6 +724,45 @@ function fleetResult(callId: string, content: string): ToolResult {
 
 function fleetJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+/**
+ * Tier gate for stamped requires_tools (CL-9476). run.ts mounts submit_result
+ * and ask_director on Tier 3 leaves only, and fleet verbs on orchestrator
+ * tiers only — a requirement the dispatch tier can never mount rejects here
+ * as missing_tool (pre-spawn) instead of surviving to the mount-time stale
+ * echo. Returns the rejection, or undefined when the tier mounts everything
+ * required.
+ */
+export function tierGateRequiresTools(
+  canonical: readonly string[],
+  tier: SubagentTier,
+): CapabilityUnavailable | undefined {
+  for (const engine of canonical) {
+    if (
+      (engine === "submit_result" || engine === "ask_director") &&
+      tier !== "leaf"
+    ) {
+      return {
+        code: "missing_tool",
+        tool: engine,
+        alternatives: leafTierAlternatives(),
+        detail: `"${engine}" mounts on Tier 3 leaf workers only, never on ${tier} directors`,
+      };
+    }
+    try {
+      assertTierMayMountFleetVerb(tier, engine);
+    } catch (error) {
+      if (!(error instanceof FleetAuthorityError)) throw error;
+      return {
+        code: "missing_tool",
+        tool: engine,
+        alternatives: rerouteAlternatives(engine),
+        detail: error.message.split(". ")[0] ?? error.message,
+      };
+    }
+  }
+  return undefined;
 }
 
 interface ResolvedAgentDispatch {
@@ -960,6 +1016,7 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
         success_criteria: rawSuccessCriteria,
         do_not: rawDoNot,
         report_focus: rawReportFocus,
+        requires_tools: rawRequiresTools,
       } = parsed;
       const description = rawDesc.trim();
       const prompt = rawPrompt.trim();
@@ -1065,6 +1122,56 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
         );
       }
 
+      // CL-9476: fail closed before any session, telemetry, or worktree exists.
+      // A rejection returns here — no auto re-dispatch, no successor, no retry.
+      // The tier below is the single derivation shared by the tier gate and
+      // the run mount: run.ts mounts the leaf reporting channel exactly when
+      // tier is "leaf", so gating on any other value would let a requirement
+      // pass here and die as a stale snapshot at mount (or vice versa).
+      const dispatchTier: SubagentTier = resolved.orchestrator
+        ? (resolved.orchestratorTier ?? resolved.pkg?.tier ?? "orchestrator")
+        : "leaf";
+      let requiresTools: readonly string[] | undefined;
+      const rawEntries = rawRequiresTools ?? [];
+      const blankEntry = rawEntries.find((t) => t.trim().length === 0);
+      if (blankEntry !== undefined) {
+        return fleetResult(
+          call.id,
+          `Error: spawn_agent requires_tools entries must be non-empty tool names — got a blank entry. Correct requires_tools to canonical tool names and re-dispatch.`,
+        );
+      }
+      const requiresToolsRaw = rawEntries.map((t) => t.trim());
+      if (requiresToolsRaw.length > 0) {
+        const preflight = preflightCapabilities({
+          required: requiresToolsRaw,
+          ...(resolved.capabilities !== undefined
+            ? { resolvedFilter: resolved.capabilities }
+            : {}),
+          knownEngines: DEFAULT_KNOWN_ENGINES,
+          agentLabel: resolved.agentLabel,
+        });
+        if (!preflight.ok) {
+          return fleetResult(
+            call.id,
+            formatCapabilityUnavailable(
+              preflight.unavailable,
+              resolved.agentLabel,
+            ),
+          );
+        }
+        requiresTools = preflight.canonical;
+        // Tier-gated mounts (fleet verbs, the Tier 3 leaf reporting channel)
+        // reject here as missing_tool when the dispatch tier can never mount
+        // them — pre-spawn, never surviving to the mount-time stale echo.
+        const gated = tierGateRequiresTools(preflight.canonical, dispatchTier);
+        if (gated !== undefined) {
+          return fleetResult(
+            call.id,
+            formatCapabilityUnavailable(gated, resolved.agentLabel),
+          );
+        }
+      }
+
       const orchestrator = resolved.orchestrator;
       const nestedSpawnAllowlist = resolved.nestedSpawnAllowlist;
       const effort = resolveEffortForRole({
@@ -1109,6 +1216,7 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
         // governs it from here on.
         retained: true,
         provider: provider.providerName,
+        ...(requiresTools !== undefined ? { requiresTools } : {}),
         ...(deps.parentSessionId !== undefined
           ? { parentSessionId: deps.parentSessionId }
           : {}),
@@ -1415,6 +1523,7 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
             ...(resolved.capabilities !== undefined
               ? { capabilities: resolved.capabilities }
               : {}),
+            ...(requiresTools !== undefined ? { requiresTools } : {}),
             ...(allowedSkillNames !== undefined ? { allowedSkillNames } : {}),
             ...(resolved.pkg?.attachedSkills !== undefined &&
             resolved.pkg.attachedSkills.length > 0
@@ -1439,11 +1548,14 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
             ...(deps.deadlineMs !== undefined
               ? { deadlineMs: deps.deadlineMs }
               : {}),
-            ...(resolved.pkg !== undefined
-              ? { tier: resolved.pkg.tier }
-              : orchestrator
-                ? {}
-                : { tier: "leaf" }),
+            // Single tier derivation (dispatchTier above): the tier gate and
+            // the mount agree by construction, so a gated requirement can
+            // never die as a stale snapshot at mount, or vice versa. An
+            // orchestrator dispatch without a resolved package carries no
+            // tier — run.ts fails closed on fleet mounts from there.
+            ...(resolved.pkg !== undefined || !orchestrator
+              ? { tier: dispatchTier }
+              : {}),
             ...(resolved.pkg?.reportContract?.outputType !== undefined
               ? { reportType: resolved.pkg.reportContract.outputType }
               : {}),
