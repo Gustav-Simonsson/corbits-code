@@ -3,6 +3,7 @@ import {
   open,
   readFile,
   rename,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -60,9 +61,20 @@ interface AuthFile<TTokens extends BaseTokens> {
 const LOCK_RETRY_MS = 25;
 const LOCK_TIMEOUT_MS = 1_000;
 
+// Age at which a lock file carrying no holder PID (a foreign writer, or a
+// lock predating PID tagging) is presumed orphaned by a crashed holder and
+// taken over. Stays far above LOCK_TIMEOUT_MS so a waiter never declares a
+// live holder stale mid-wait; PID-tagged locks ignore this horizon.
+const LOCK_STALE_MS = 5_000;
+
 // Per-call unique temp (pid + counter). Matches mcp/auth-store — pid alone is not
 // unique per call if writeAuthFile ever overlaps in-process.
 let tmpWriteCounter = 0;
+
+// Per-waiter unique lock claim (pid + counter). Two contenders never share a
+// claim, so a steal re-read that still matches names the same file, and the
+// post-create ownership check can tell our claim from a winner's.
+let lockClaimCounter = 0;
 
 // Same-process ops on one auth file queue here so a caller's lock deadline
 // starts when it actually runs, not when it was invoked — otherwise one lock
@@ -95,6 +107,77 @@ function isProfile<TTokens extends BaseTokens>(
   const parsed = ProfileShape(value);
   if (parsed instanceof type.errors) return false;
   return isTokens(parsed.tokens);
+}
+
+function holderPid(content: string): number | null {
+  const pid = Number(content.split(":")[0]?.trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+// kill(pid, 0) liveness: success means the process exists (alive); EPERM
+// means it exists but belongs to another user (alive); ESRCH/EINVAL mean no
+// such process (dead). Any other failure reads as alive — never steal a live
+// holder's lock on a confused signal check; the waiter times out with a
+// recovery hint instead.
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    return code !== "ESRCH" && code !== "EINVAL";
+  }
+}
+
+// Null when the lock vanished under the waiter (a release raced the read);
+// anything but ENOENT propagates — permission and disk errors must surface,
+// not read as an empty lock.
+async function readLockContent(lockPath: string): Promise<string | null> {
+  try {
+    return await readFile(lockPath, "utf8");
+  } catch (err) {
+    if (isErrnoCode(err, "ENOENT")) return null;
+    throw err;
+  }
+}
+
+// True when the observed lock is safe to take over: a tagged holder whose
+// PID is dead (crashed — reachable under any timeout), or a legacy untagged
+// lock older than the stale horizon. A vanished lock reads as not stale;
+// the acquire loop retries the exclusive create instead.
+async function isLockStale(
+  lockPath: string,
+  content: string,
+): Promise<boolean> {
+  const pid = holderPid(content);
+  if (pid !== null) return !isPidAlive(pid);
+  try {
+    const info = await stat(lockPath);
+    return Date.now() - info.mtimeMs > LOCK_STALE_MS;
+  } catch (err) {
+    if (isErrnoCode(err, "ENOENT")) return false;
+    throw err;
+  }
+}
+
+function lockTimeoutError(lockPath: string, cause: unknown): Error {
+  return new Error(
+    `Timed out waiting for OAuth credential lock ${lockPath}. ` +
+      "If no Corbits process is running, remove this lock file manually and retry.",
+    { cause },
+  );
+}
+
+// Pace one contention round: throw once the deadline passed, else sleep a
+// retry interval. Every wait path funnels here so steal contention never
+// hot-spins.
+async function paceLockWait(
+  deadline: number,
+  lockPath: string,
+  cause: unknown,
+): Promise<void> {
+  if (Date.now() >= deadline) throw lockTimeoutError(lockPath, cause);
+  await delay(LOCK_RETRY_MS);
 }
 
 export function createAuthStore<TTokens extends BaseTokens>(
@@ -149,34 +232,107 @@ export function createAuthStore<TTokens extends BaseTokens>(
     const lockPath = `${path}.lock`;
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const deadline = Date.now() + (options.lockTimeoutMs ?? LOCK_TIMEOUT_MS);
+    // holderPid reads the pid leg; the counter leg keeps every waiter's
+    // claim distinct.
+    const claim = `${process.pid}:${(lockClaimCounter += 1)}`;
     let lock;
 
     while (true) {
       try {
-        lock = await open(lockPath, "wx", 0o600);
+        const handle = await open(lockPath, "wx", 0o600);
+        try {
+          await handle.writeFile(claim, "utf8");
+        } catch (writeError) {
+          try {
+            await handle.close();
+          } catch {
+            // Ignore close errors on the cleanup path; the write error below
+            // is the one the caller must see.
+          }
+          try {
+            await unlink(lockPath);
+          } catch (unlinkError) {
+            if (!isErrnoCode(unlinkError, "ENOENT")) throw unlinkError;
+          }
+          throw writeError;
+        }
+        // A steal may have unlinked our fresh file and created its own
+        // between our create and write; the path then names a live
+        // winner. Never unlink here — close and re-contend so only the
+        // winner proceeds.
+        if ((await readLockContent(lockPath)) !== claim) {
+          try {
+            await handle.close();
+          } catch {
+            // The path already names a live winner; the close outcome
+            // must not mask the paced retry below.
+          }
+          await paceLockWait(deadline, lockPath, undefined);
+          continue;
+        }
+        lock = handle;
         break;
       } catch (error) {
         if (!isErrnoCode(error, "EEXIST")) throw error;
-        if (Date.now() >= deadline) {
-          throw new Error(
-            `Timed out waiting for OAuth credential lock ${lockPath}. ` +
-              "If no Corbits process is running, remove this lock file manually and retry.",
-            { cause: error },
-          );
+        // A crashed holder never releases: take over a stale lock rather
+        // than brick the store. A lock that vanished under the read
+        // (a release raced us) is not stale — retry the exclusive create.
+        const content = await readLockContent(lockPath);
+        if (content !== null && (await isLockStale(lockPath, content))) {
+          // Re-check before unlinking so a concurrent takeover winner's
+          // fresh claim is never mistaken for the stale entry just
+          // observed — claims are unique per waiter, so a match still
+          // names the same file. A steal can still interleave between
+          // this re-read and the unlink; the post-create ownership
+          // check above then detects the loser and re-contends instead
+          // of running two holders.
+          if ((await readLockContent(lockPath)) === content) {
+            try {
+              await unlink(lockPath);
+            } catch (unlinkError) {
+              // A concurrent winner unlinked first; retry the create.
+              if (!isErrnoCode(unlinkError, "ENOENT")) throw unlinkError;
+            }
+          }
+          // Fall through to the deadline/sleep path: a steal that just
+          // lost to a concurrent winner paces like any other
+          // contention instead of hot-spinning.
         }
-        await delay(LOCK_RETRY_MS);
+        await paceLockWait(deadline, lockPath, error);
       }
     }
 
+    let callbackOutcome:
+      | { ok: true; value: TResult }
+      | { ok: false; error: unknown };
     try {
-      return await callback();
-    } finally {
-      try {
-        await lock.close();
-      } finally {
-        await unlink(lockPath);
+      callbackOutcome = { ok: true, value: await callback() };
+    } catch (error) {
+      callbackOutcome = { ok: false, error };
+    }
+
+    try {
+      await lock.close();
+    } catch {
+      // The callback outcome owns precedence; a close failure must not mask it.
+      // The unlink below still runs.
+    }
+
+    let releaseOutcome: { ok: true } | { ok: false; error: unknown } = {
+      ok: true,
+    };
+    try {
+      await unlink(lockPath);
+    } catch (error) {
+      // A stale-takeover steal may legitimately remove the file first.
+      if (!isErrnoCode(error, "ENOENT")) {
+        releaseOutcome = { ok: false, error };
       }
     }
+
+    if (!callbackOutcome.ok) throw callbackOutcome.error;
+    if (!releaseOutcome.ok) throw releaseOutcome.error;
+    return callbackOutcome.value;
   }
 
   function enqueueAuthFileOp<TResult>(
