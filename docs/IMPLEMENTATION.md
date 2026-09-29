@@ -424,6 +424,7 @@ Printed by `corbits --help` / `-h` from `CLI_HELP_TEXT` in `src/config/index.ts`
 | `--auto`                                   | true (default)             | Force auto mode on (workspace writes + unconstrained shell without prompts)                                                                                                                                                                 |
 | `--no-auto`                                | false                      | Start with auto mode off (ask on every consequential action); no in-session key toggles it                                                                                                                                                  |
 | `--help`, `-h`                             | —                          | Show help (exit 0 via `CliHelpError`)                                                                                                                                                                                                       |
+| `--version`, `-V`                          | —                          | Print `corbits v` plus the running `package.json` version (exit 0 via `CliVersionError`)                                                                                                                                                    |
 
 Positional arguments after flags are joined into the optional initial task delivered when the TUI mounts. With no positional task, the operator starts from an empty prompt.
 
