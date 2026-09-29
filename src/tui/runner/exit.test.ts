@@ -328,6 +328,7 @@ function stubRotationDirs(): ReturnType<typeof spyOn>[] {
 function hangCodexRefresh(): {
   settle: (value: { access: string }) => void;
   spy: ReturnType<typeof spyOn>;
+  waitForHang: () => Promise<void>;
 } {
   let settle: ((value: { access: string }) => void) | undefined;
   const spy = spyOn(codexSession, "getValidCodexToken").mockImplementation(
@@ -339,6 +340,13 @@ function hangCodexRefresh(): {
   return {
     spy,
     settle: (value) => defined(settle, "settleRefresh")(value),
+    // The refresh reaches the token session after an async staged-expiry
+    // probe, so wait for the hang instead of counting microtask ticks.
+    waitForHang: async () => {
+      for (let i = 0; i < 1000 && settle === undefined; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    },
   };
 }
 
@@ -353,8 +361,7 @@ describe("agentProxy.send vs /clear", () => {
     try {
       const { agentProxy } = await createRunLifecycle(state, services);
       const pending = agentProxy.send("keep me out of the new session");
-      await Promise.resolve();
-      await Promise.resolve();
+      await hung.waitForHang();
 
       resetSessionForRotation(state, services);
       state.currentAgent = newAgent;
@@ -375,8 +382,7 @@ describe("agentProxy.send vs /clear", () => {
     try {
       const { agentProxy } = await createRunLifecycle(state, services);
       const pending = agentProxy.send("deliver this");
-      await Promise.resolve();
-      await Promise.resolve();
+      await hung.waitForHang();
       hung.settle({ access: "fresh-token" });
       await pending;
       expect(sends).toEqual(["deliver this"]);
