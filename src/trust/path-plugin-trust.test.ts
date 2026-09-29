@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
+import type { GlobalSettingsWriter } from "../../src/mcp/add-server.js";
+import type { ProjectTrustStore } from "../../src/trust/project-trust.js";
+import { withMockedModule } from "../../testkit/mock-module.js";
 import {
   dedupePluginModules,
   discoverUserPlugins,
@@ -300,6 +303,308 @@ describe("path plugin trust across working directories", () => {
       });
       expect(mods.find((m) => m.manifest?.id === "p")?.metadataOnly).toBe(true);
       expect(await Bun.file(marker).exists()).toBe(false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+// The /plugins add-by-path ordering probe (CL-8991): `trustPathPlugins` is
+// mocked once for this file so each `addPath` below can observe whether any
+// plugin code ran before the grant resolved. The wrapper delegates to the
+// real store with an explicit home, so behavior — including the existing
+// tests above, which always pass their own home — is unchanged.
+const addPathProbe = {
+  home: "",
+  marker: "",
+  trustCalls: [] as string[][],
+  markerAtTrust: [] as boolean[],
+};
+
+function resetAddPathProbe(home: string, marker: string): void {
+  addPathProbe.home = home;
+  addPathProbe.marker = marker;
+  addPathProbe.trustCalls = [];
+  addPathProbe.markerAtTrust = [];
+}
+
+await withMockedModule(
+  import.meta.resolve("../../src/trust/path-trust.js"),
+  (real: typeof import("../../src/trust/path-trust.js")) => ({
+    ...real,
+    trustPathPlugins: async (paths: string[], home?: string) => {
+      addPathProbe.trustCalls.push([...paths]);
+      addPathProbe.markerAtTrust.push(
+        await Bun.file(addPathProbe.marker).exists(),
+      );
+      return real.trustPathPlugins(paths, home ?? addPathProbe.home);
+    },
+    // revokeTrust in the backend calls without a home (production default).
+    // Redirect here too so an add→revoke round trip in this file reads back
+    // the same store the grant went to.
+    revokePathPlugin: async (path: string, home?: string) => {
+      return real.revokePathPlugin(path, home ?? addPathProbe.home);
+    },
+  }),
+);
+
+function stubSettingsWriter(): GlobalSettingsWriter {
+  return {
+    enqueue: async <T>(job: () => Promise<T>): Promise<T> => job(),
+    update: async () => null,
+    updateAt: async () => null,
+    mutate: async () => "ok" as const,
+    mutateAt: async () => "ok" as const,
+  };
+}
+
+async function makeAddPathAdmin(base: string): Promise<{
+  addPath: (
+    path: string,
+  ) => Promise<{ ok: boolean; message: string; id?: string }>;
+  revokeTrust: (id: string) => Promise<{ ok: boolean; message: string }>;
+}> {
+  const backend = await import("../../src/tui/plugins-admin-backend.js");
+  const emptyProjectTrust: ProjectTrustStore = {
+    trustedPluginPaths: [],
+    trustedMcpFingerprints: [],
+    trustedGrantFingerprints: [],
+  };
+  const state = backend.createPluginsAdminState({
+    cwd: base,
+    settings: undefined,
+    modules: [],
+    pathTrust: { trustedPluginPaths: [] },
+    projectTrust: emptyProjectTrust,
+  });
+  return backend.createPluginsAdmin({
+    state,
+    globalSettingsPath: join(base, "settings.json"),
+    globalSettingsWriter: stubSettingsWriter(),
+    noteWarnings: () => undefined,
+  });
+}
+
+describe("addPath grants path trust before importing plugin code", () => {
+  test("single plugin: no JS runs before trustPathPlugins resolves", async () => {
+    const base = await mkdtemp(join(tmpdir(), "corbits-addpath-order-"));
+    try {
+      const home = join(base, "home");
+      await mkdir(home, { recursive: true });
+      const pluginDir = join(base, "shared-plugin");
+      const marker = join(base, "RCE_MARKER");
+      await writeCommandPlugin(pluginDir, "shared-plugin", marker);
+      resetAddPathProbe(home, marker);
+
+      const admin = await makeAddPathAdmin(base);
+      const result = await admin.addPath("shared-plugin");
+      expect(result).toEqual({
+        ok: true,
+        message: "Added shared-plugin",
+        id: "shared-plugin",
+      });
+
+      expect(addPathProbe.trustCalls).toEqual([[pluginDir]]);
+      for (const p of addPathProbe.trustCalls.flat())
+        expect(isAbsolute(p)).toBe(true);
+      expect(addPathProbe.markerAtTrust).toEqual([false]);
+      expect(await Bun.file(marker).exists()).toBe(true);
+      expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([
+        pluginDir,
+      ]);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("marketplace root: trust covers expanded members, still before any import", async () => {
+    const base = await mkdtemp(join(tmpdir(), "corbits-addpath-mkt-"));
+    try {
+      const home = join(base, "home");
+      await mkdir(home, { recursive: true });
+      const root = join(base, "marketplace");
+      const marker = join(base, "ROOT_MARKER");
+      await writeCommandPlugin(root, "mkt-root", marker);
+      const alpha = join(root, "plugins", "alpha");
+      const beta = join(root, "plugins", "beta");
+      await writeCommandPlugin(alpha, "alpha");
+      await writeCommandPlugin(beta, "beta");
+      await mkdir(join(root, ".claude-plugin"), { recursive: true });
+      await writeFile(
+        join(root, ".claude-plugin", "marketplace.json"),
+        JSON.stringify({
+          plugins: [
+            { name: "alpha", source: "./plugins/alpha" },
+            { name: "beta", source: "./plugins/beta" },
+          ],
+        }),
+        "utf8",
+      );
+      resetAddPathProbe(home, marker);
+
+      const admin = await makeAddPathAdmin(base);
+      const result = await admin.addPath("marketplace");
+      expect(result).toEqual({
+        ok: true,
+        message: `Added mkt-root (trusted 2 marketplace members: ${alpha}, ${beta})`,
+        id: "mkt-root",
+      });
+
+      expect(addPathProbe.trustCalls).toEqual([[alpha, beta]]);
+      for (const p of addPathProbe.trustCalls.flat())
+        expect(isAbsolute(p)).toBe(true);
+      expect(addPathProbe.markerAtTrust).toEqual([false]);
+      expect(await Bun.file(marker).exists()).toBe(true);
+      expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([
+        alpha,
+        beta,
+      ]);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("bogus path grants nothing", async () => {
+    const base = await mkdtemp(join(tmpdir(), "corbits-addpath-bogus-"));
+    try {
+      const home = join(base, "home");
+      await mkdir(home, { recursive: true });
+      resetAddPathProbe(home, join(base, "NEVER"));
+
+      const admin = await makeAddPathAdmin(base);
+      const result = await admin.addPath("does-not-exist");
+      expect(result).toEqual({
+        ok: false,
+        message: "Could not load a plugin at does-not-exist",
+      });
+      expect(addPathProbe.trustCalls).toEqual([]);
+      expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([]);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("post-trust import failure reports the load error and keeps the grant", async () => {
+    const base = await mkdtemp(join(tmpdir(), "corbits-addpath-broken-"));
+    try {
+      const home = join(base, "home");
+      await mkdir(home, { recursive: true });
+      const pluginDir = join(base, "broken-plugin");
+      await mkdir(pluginDir, { recursive: true });
+      await writeFile(
+        join(pluginDir, "manifest.json"),
+        JSON.stringify({
+          id: "broken-plugin",
+          name: "broken-plugin",
+          kind: "command",
+        }),
+        "utf8",
+      );
+      await writeFile(
+        join(pluginDir, "index.ts"),
+        `throw new Error("boom");\n`,
+        "utf8",
+      );
+      resetAddPathProbe(home, join(base, "NEVER"));
+
+      const admin = await makeAddPathAdmin(base);
+      const result = await admin.addPath("broken-plugin");
+      // Explicit add-by-path is consent: the grant is recorded before the
+      // import runs, so a failed import keeps the grant. Only bogus
+      // (unresolvable) paths return before the grant.
+      expect(result).toEqual({
+        ok: false,
+        message: "Could not load a plugin at broken-plugin",
+      });
+      expect(addPathProbe.trustCalls).toEqual([[pluginDir]]);
+      expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([
+        pluginDir,
+      ]);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("file-path add grants the containing dir so revokeTrust clears it and reload stays metadata-only", async () => {
+    const base = await mkdtemp(join(tmpdir(), "corbits-addpath-file-"));
+    try {
+      const home = join(base, "home");
+      await mkdir(home, { recursive: true });
+      const pluginDir = join(base, "p");
+      const marker = join(base, "FILE_MARKER");
+      await writeCommandPlugin(pluginDir, "file-plugin", marker);
+      resetAddPathProbe(home, marker);
+
+      const admin = await makeAddPathAdmin(base);
+      // Operator points at the file, not the directory.
+      const result = await admin.addPath(join(pluginDir, "index.ts"));
+      expect(result).toEqual({
+        ok: true,
+        message: "Added file-plugin",
+        id: "file-plugin",
+      });
+      // The grant is the normalized dir — the identity loadPluginEntry stamps
+      // and revokeTrust removes — never the raw file path.
+      expect(addPathProbe.trustCalls).toEqual([[pluginDir]]);
+      expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([
+        pluginDir,
+      ]);
+      expect(await Bun.file(marker).exists()).toBe(true);
+
+      const revoked = await admin.revokeTrust("file-plugin");
+      expect(revoked.ok).toBe(true);
+      expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([]);
+
+      // Next boot resolves the persisted entry against the emptied store: the
+      // module stays metadata-only and its code never re-executes.
+      await rm(marker, { force: true });
+      const store = await loadPathTrust(home);
+      const mods = await loadPluginsFromPaths([pluginDir], base, {
+        isPluginTrusted: (p) => isPathPluginTrusted(store, p),
+      });
+      expect(
+        mods.find((m) => m.manifest?.id === "file-plugin")?.metadataOnly,
+      ).toBe(true);
+      expect(await Bun.file(marker).exists()).toBe(false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("hybrid root add surfaces exactly the expanded member set", async () => {
+    const base = await mkdtemp(join(tmpdir(), "corbits-addpath-hybrid-"));
+    try {
+      const home = join(base, "home");
+      await mkdir(home, { recursive: true });
+      const root = join(base, "hybrid");
+      const rootMarker = join(base, "ROOT_MARKER");
+      await writeCommandPlugin(root, "hybrid-root", rootMarker);
+      const sibling = join(base, "agents", "evil-sibling");
+      const siblingMarker = join(base, "SIBLING_MARKER");
+      await writeCommandPlugin(sibling, "evil-sibling", siblingMarker);
+      await mkdir(join(root, ".claude-plugin"), { recursive: true });
+      await writeFile(
+        join(root, ".claude-plugin", "marketplace.json"),
+        JSON.stringify({
+          plugins: [{ name: "evil-sibling", source: "../agents/evil-sibling" }],
+        }),
+        "utf8",
+      );
+      resetAddPathProbe(home, rootMarker);
+
+      const admin = await makeAddPathAdmin(base);
+      const result = await admin.addPath("hybrid");
+      // Only the expanded member set is granted, and the result names it so
+      // the operator sees the sibling consent covers.
+      expect(addPathProbe.trustCalls).toEqual([[sibling]]);
+      expect((await loadPathTrust(home)).trustedPluginPaths).toEqual([sibling]);
+      expect(result).toEqual({
+        ok: true,
+        message: `Added hybrid-root (trusted 1 marketplace member: ${sibling})`,
+        id: "hybrid-root",
+      });
+      // The sibling is granted but never imported by the add itself.
+      expect(await Bun.file(siblingMarker).exists()).toBe(false);
     } finally {
       await rm(base, { recursive: true, force: true });
     }
