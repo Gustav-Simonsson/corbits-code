@@ -15,8 +15,11 @@ import { parseSubAgentReport } from "./report.js";
 /** Enough of a lane report for a parent continuation; traces stay on disk. */
 export const FLEET_DRY_REPORT_CHARS = 8_192;
 
-/** Summary/Blockers inline in mailbox digest; the blob holds the rest. */
+/** Summary/Blockers inline in occupancy digest; the blob holds the rest. */
 export const MAILBOX_DIGEST_SECTION_CHARS = 2_048;
+
+/** Unstructured reports have no envelope; keep the inline teaser short. */
+export const UNSTRUCTURED_DIGEST_CHARS = 280;
 
 export const FLEET_DRY_CONTINUATION_PREFIX =
   "The fleet has gone dry. Remaining open tasks:";
@@ -206,9 +209,12 @@ export function fleetDrySpillKey(
   return `fleet-dry:${agentId}:${field}`;
 }
 
-function clipDigestSection(text: string): string {
-  if (text.length <= MAILBOX_DIGEST_SECTION_CHARS) return text;
-  return `${text.slice(0, MAILBOX_DIGEST_SECTION_CHARS - 1).trimEnd()}…`;
+function clipDigestSection(
+  text: string,
+  max = MAILBOX_DIGEST_SECTION_CHARS,
+): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
 function mailboxSpillNotice(text: string, uri: string): string {
@@ -230,7 +236,9 @@ export async function spillWorkerField(
   field: "report" | "error",
   writeBlob?: FleetDryBlobWriter,
 ): Promise<string | undefined> {
-  if (text === undefined || writeBlob === undefined) return undefined;
+  if (text === undefined || text.length === 0 || writeBlob === undefined) {
+    return undefined;
+  }
   const key = fleetDrySpillKey(agentId, field);
   try {
     await writeBlob(key, new TextEncoder().encode(text), "text/plain");
@@ -260,6 +268,11 @@ export async function digestCollectedReport(
     report.report !== undefined
       ? parseSubAgentReport(report.report)
       : undefined;
+  const unstructured =
+    parsed !== undefined &&
+    parsed.findings.length === 0 &&
+    parsed.blockers.length === 0 &&
+    parsed.paths.length === 0;
   const reportUri = await spillWorkerField(
     report.report,
     report.agent_id,
@@ -274,17 +287,16 @@ export async function digestCollectedReport(
   );
   const summary =
     parsed !== undefined && parsed.summary.length > 0
-      ? clipDigestSection(parsed.summary)
+      ? clipDigestSection(
+          parsed.summary,
+          unstructured
+            ? UNSTRUCTURED_DIGEST_CHARS
+            : MAILBOX_DIGEST_SECTION_CHARS,
+        )
       : undefined;
   const findings =
     parsed !== undefined && summary === undefined && parsed.findings.length > 0
       ? clipDigestSection(parsed.findings)
-      : undefined;
-  const blockers =
-    parsed !== undefined
-      ? clipDigestSection(
-          parsed.blockers.length > 0 ? parsed.blockers : "None.",
-        )
       : undefined;
   const reportInline =
     report.report === undefined
@@ -298,6 +310,14 @@ export async function digestCollectedReport(
       : errorUri !== undefined
         ? mailboxSpillNotice(report.error, errorUri)
         : clipDigestSection(report.error);
+  const blockers =
+    parsed === undefined || unstructured
+      ? parsed !== undefined && parsed.blockers.length > 0
+        ? clipDigestSection(parsed.blockers)
+        : undefined
+      : clipDigestSection(
+          parsed.blockers.length > 0 ? parsed.blockers : "None.",
+        );
   return {
     agent_id: report.agent_id,
     status: report.status,
@@ -494,13 +514,14 @@ export async function collectUncollectedTerminals(
   return reports;
 }
 
-export function buildFleetDryContinuationPrompt(
+export function buildFleetDryContinuationPrompt<T extends { agent_id: string }>(
   tasks: readonly Task[],
-  reports: readonly CollectedWorkerReport[],
+  reports: readonly T[],
 ): string {
   const open = tasks.filter(
     (task) => task.status === "todo" || task.status === "doing",
   );
+  const unique = dedupeByAgentId(reports);
   const taskLines = open
     .map((task) => `- ${task.id}: ${task.title} (${task.status})`)
     .join("\n");
@@ -509,7 +530,7 @@ export function buildFleetDryContinuationPrompt(
     taskLines,
     "",
     "Collected worker reports (already collected — do not call wait_agents for these agent_ids):",
-    JSON.stringify(dedupeByAgentId(reports)),
+    JSON.stringify(unique),
     "",
     "Continue the remaining work. Mark each task done or cancelled with manage_tasks",
     "when finished, or spawn_agent the next specialist. Do not end this turn while",
@@ -558,7 +579,8 @@ async function driveOpenTasksAfterFleetDrySpill(
       args.mailbox,
       args.lanes,
       false,
-      args.writeBlob,
+      undefined,
+      false,
     )
   ).filter((report) => !delivering.has(report.agent_id));
   const uncollectedIds = new Set(uncollected.map((report) => report.agent_id));
@@ -566,26 +588,28 @@ async function driveOpenTasksAfterFleetDrySpill(
     (stub) =>
       !uncollectedIds.has(stub.agent_id) && !delivering.has(stub.agent_id),
   );
-  const reports = dedupeByAgentId([...uncollected, ...stubs]);
   const takeIds = uncollected.map((report) => report.agent_id);
   for (const id of takeIds) delivering.add(id);
-  const prompt = buildFleetDryContinuationPrompt(tasks, reports);
+  const fail = (): boolean => {
+    releaseOccupancyDelivering(args.mailbox, takeIds);
+    args.onSendFailure?.();
+    return false;
+  };
+  let prompt: string;
+  try {
+    const digested = await digestCollectedReports(uncollected, args.writeBlob);
+    const reports = dedupeByAgentId([...digested, ...stubs]);
+    prompt = buildFleetDryContinuationPrompt(tasks, reports);
+    args.beginSystemContinuation(prompt);
+  } catch {
+    return fail();
+  }
   const takeReports = (): void => {
     for (const id of takeIds) {
       args.mailbox?.take(id);
     }
     releaseOccupancyDelivering(args.mailbox, takeIds);
   };
-  const fail = (): boolean => {
-    releaseOccupancyDelivering(args.mailbox, takeIds);
-    args.onSendFailure?.();
-    return false;
-  };
-  try {
-    args.beginSystemContinuation(prompt);
-  } catch {
-    return fail();
-  }
   return settleOccupancySend({
     send: () => args.send(prompt),
     onSuccess: takeReports,

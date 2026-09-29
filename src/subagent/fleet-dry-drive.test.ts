@@ -529,6 +529,7 @@ describe("driveOpenTasksAfterFleetDry", () => {
       agent_id: string;
       status: string;
       description?: string;
+      summary?: string;
       report?: string;
     }[];
     expect(parsed).toEqual([
@@ -536,6 +537,7 @@ describe("driveOpenTasksAfterFleetDry", () => {
         agent_id: "fresh",
         status: "done",
         description: "new lane",
+        summary: "fresh report",
         report: "fresh report",
       },
       {
@@ -620,13 +622,16 @@ describe("driveOpenTasksAfterFleetDry", () => {
       send: () => ACCEPTED_DELIVERY,
     });
     expect(driven).toBe(true);
-    const parsed = reportsJSONFromPrompt(sent[0] ?? "");
-    expect(Array.isArray(parsed)).toBe(true);
-    const report = (parsed as { report?: string }[])[0]?.report ?? "";
-    expect(report).toContain(
+    const parsed = reportsJSONFromPrompt(sent[0] ?? "") as {
+      report_uri?: string;
+      summary?: string;
+    }[];
+    expect(parsed[0]?.report_uri).toBe(
       `tool-output:///${fleetDrySpillKey("big", "report")}`,
     );
-    expect(report).not.toContain("TAIL-MARKER");
+    expect(sent[0]).toContain("use read_file with that URI");
+    expect(sent[0]).not.toContain("TAIL-MARKER");
+    expect(parsed[0]?.summary).not.toContain("TAIL-MARKER");
     expect(
       new TextDecoder().decode(
         store.blobs.get(fleetDrySpillKey("big", "report"))?.bytes ??
