@@ -65,6 +65,7 @@ import {
 import { surfaceSystemNotice } from "./shell/prompt.js";
 import type { DeliverySettle, QueueKind } from "./delivery-queue.js";
 import { hydrateHistoryRows } from "./history-hydrate.js";
+import { MAX_RETAINED_STREAM_ROWS } from "./long-log.js";
 import type { StreamRow } from "./stream.js";
 
 import type { PendingImageAttachment } from "./image-attachments.js";
@@ -541,7 +542,9 @@ export async function mountProductHost(
 
   function onHistory(blocks: unknown): void {
     if (disposed) return;
-    for (const row of hydrateHistoryRows(blocks)) {
+    const rows = hydrateHistoryRows(blocks);
+    const tail = rows.slice(-MAX_RETAINED_STREAM_ROWS);
+    for (const row of tail) {
       appendStreamRow(shell, row);
     }
   }
