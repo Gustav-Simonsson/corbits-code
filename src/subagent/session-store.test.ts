@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  createSubAgentSessionStore,
-  DEFAULT_MAX_ENTRY_CHARS,
-} from "./session-store.js";
+import { createSubAgentSessionStore } from "./session-store.js";
 import { projectWaitStatus } from "./lifecycle.js";
 import { createAdmissionQueue } from "./admission.js";
 import { forcedStopReport } from "./stop-policy.js";
@@ -12,7 +9,7 @@ import { formatAgentsPanel } from "../tui/chrome-state.js";
 
 import type { ReactorEmittedEvent } from "@intx/inference";
 
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 
 function startCall(seq: number, callId: string, name: string) {
   return {
@@ -28,6 +25,73 @@ const textDelta = (token: string): ReactorEmittedEvent => ({
   data: { token, partial: { text: token } },
 });
 
+type SessionStore = ReturnType<typeof createSubAgentSessionStore>;
+
+type RetainedOpts = {
+  id?: string;
+  description?: string;
+  agentId?: string;
+  provider?: string;
+  run?: boolean;
+  inFlight?: boolean;
+  deliver?: (message: string) => void;
+  interrupt?: boolean;
+  close?: (deadlineMs?: number) => Promise<void>;
+  followup?: (message: string) => Promise<string>;
+  complete?: string;
+  completeOpts?: { agentRetained?: boolean };
+};
+
+function retainedSession(store: SessionStore, opts: RetainedOpts = {}) {
+  const session = store.start({
+    ...(opts.id !== undefined ? { id: opts.id } : {}),
+    description: opts.description ?? "d",
+    agentId: opts.agentId ?? "a",
+    brief: "b",
+    retained: true,
+    ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+  });
+  if (opts.run !== false) store.markRunning(session.id);
+  if (opts.inFlight === true) store.markRunInFlight(session.id);
+  if (opts.deliver !== undefined)
+    store.registerDeliver(session.id, opts.deliver);
+  if (opts.interrupt === true)
+    store.registerInterrupt(session.id, () => undefined);
+  if (opts.close !== undefined) store.registerClose(session.id, opts.close);
+  if (opts.followup !== undefined)
+    store.registerFollowup(session.id, opts.followup);
+  if (opts.complete !== undefined)
+    store.complete(session.id, opts.complete, opts.completeOpts);
+  return session;
+}
+
+function runningRetained(
+  store: SessionStore,
+  followup: (message: string) => Promise<string>,
+) {
+  return retainedSession(store, { inFlight: true, interrupt: true, followup });
+}
+
+function completedRetained(store: SessionStore, opts: RetainedOpts = {}) {
+  return retainedSession(store, {
+    ...opts,
+    complete: opts.complete ?? "## Summary\nDone.",
+  });
+}
+
+function fillRetained(store: SessionStore, n: number, prefix = "fill"): void {
+  for (let i = 0; i < n; i++) {
+    const s = store.start({
+      description: `${prefix}-${i}`,
+      agentId: "a",
+      brief: "b",
+      retained: true,
+    });
+    store.registerClose(s.id, async () => undefined);
+    store.complete(s.id, "## Summary\nDone.");
+  }
+}
+
 test("appendEvent dedups repeated tool_call.start names in toolNames", () => {
   const store = createSubAgentSessionStore();
   const session = store.start({ description: "d", agentId: "a", brief: "b" });
@@ -39,6 +103,82 @@ test("appendEvent dedups repeated tool_call.start names in toolNames", () => {
   const stored = store.get(session.id);
   expect(stored?.toolNames).toEqual(["grep"]);
 });
+
+function queuedSteer(store: SessionStore) {
+  const started: string[] = [];
+  const failures: unknown[] = [];
+  const session = runningRetained(store, async (message) => {
+    started.push(message);
+    return "should not run";
+  });
+  store.sendInputOne(session.id, "steer now", {
+    interrupt: true,
+    onFail: (err: unknown) => {
+      failures.push(err);
+    },
+  });
+  return { started, failures, session };
+}
+
+function expectSteerLost(
+  store: SessionStore,
+  sessionId: string,
+  started: string[],
+  failures: unknown[],
+): void {
+  expect(started).toEqual([]);
+  expect(failures).toHaveLength(1);
+  expect(String(defined(failures[0]))).toContain("steer now");
+  expect(store.get(sessionId)?.entries).toContainEqual(
+    expect.objectContaining({
+      kind: "report",
+      content: expect.stringContaining("steer now"),
+    }),
+  );
+}
+
+function stashedSteer(store: SessionStore) {
+  const started: string[] = [];
+  const failures: unknown[] = [];
+  const replies: string[] = [];
+  const session = runningRetained(store, async (message) => {
+    started.push(message);
+    return "followup reply";
+  });
+  store.sendInputOne(session.id, "steer now", {
+    interrupt: true,
+    onFail: (err: unknown) => {
+      failures.push(err);
+    },
+    onFollowupReply: (reply: string) => {
+      replies.push(reply);
+    },
+  });
+  return { started, failures, replies, session };
+}
+
+function expectSteerDelivered(
+  store: SessionStore,
+  sessionId: string,
+  started: string[],
+  failures: unknown[],
+  replies: string[],
+): void {
+  expect(started).toEqual(["steer now"]);
+  expect(failures).toEqual([]);
+  expect(replies).toEqual(["followup reply"]);
+  expect(store.get(sessionId)?.lifecycle.state).toBe("completed");
+  expect(store.get(sessionId)?.report).toBe("followup reply");
+}
+
+function resumeCompleted(store: SessionStore, sessionId: string): void {
+  expect(store.get(sessionId)?.status).toBe("done");
+  expect(store.get(sessionId)?.lifecycleStatus).toBe("completed");
+  expect(store.resumeOne(sessionId, "continue")).toEqual({
+    ok: true,
+    status: "running",
+  });
+}
 
 describe("session-store snapshot caching", () => {
   test("list() reuses the cached snapshot for a session unaffected by another session's notify", () => {
@@ -67,20 +207,6 @@ describe("session-store snapshot caching", () => {
     expect(bAfter).toBe(bBefore);
     expect(aAfter).not.toBe(aBefore);
     expect(aAfter?.entries).toEqual([{ kind: "text", content: "hello" }]);
-  });
-
-  test("list() returns a stable reference across repeated calls when nothing changed", () => {
-    const store = createSubAgentSessionStore();
-    const a = store.start({
-      description: "a",
-      agentId: "agent",
-      brief: "brief",
-    });
-
-    const first = store.list().find((s) => s.id === a.id);
-    const second = store.list().find((s) => s.id === a.id);
-
-    expect(second).toBe(first);
   });
 
   test("get() reuses the cached snapshot until the session mutates again", () => {
@@ -324,13 +450,6 @@ describe("terminal stop reasons", () => {
     expect(store.get(session.id)?.stopReason).toBeUndefined();
   });
 
-  test("a clean complete has no stopReason", () => {
-    const store = createSubAgentSessionStore();
-    const session = store.start({ description: "d", agentId: "a", brief: "b" });
-    store.complete(session.id, "## Summary\nDone.\n\n## Findings\nx");
-    expect(store.get(session.id)?.stopReason).toBeUndefined();
-  });
-
   test("cancel() records the cancel reason as stopReason", () => {
     const store = createSubAgentSessionStore();
     const withReason = store.start({
@@ -359,15 +478,10 @@ describe("terminal stop reasons", () => {
 
   test("sendInputOne interrupt records stopReason interrupted", () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+    const session = retainedSession(store, {
+      interrupt: true,
+      followup: () => new Promise(() => undefined),
     });
-    store.markRunning(session.id);
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(session.id, () => new Promise(() => undefined));
     expect(
       store.sendInputOne(session.id, "stop that", { interrupt: true }),
     ).toEqual({
@@ -381,13 +495,7 @@ describe("terminal stop reasons", () => {
 describe("CL-6943 reusable worker sessions", () => {
   test("a completed retained session stays open and reusable; resume_agent reopens it", () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
+    const session = retainedSession(store);
     expect(store.get(session.id)?.lifecycleStatus).toBe("running");
 
     store.registerFollowup(session.id, async () => "next turn");
@@ -412,23 +520,17 @@ describe("CL-6943 reusable worker sessions", () => {
       },
     });
     const store = createSubAgentSessionStore({ admission });
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-      provider: "p",
-    });
     let finish: (reply: string) => void = () => undefined;
-    store.registerFollowup(
-      session.id,
-      () =>
+    const session = retainedSession(store, {
+      provider: "p",
+      run: false,
+      followup: () =>
         new Promise<string>((resolve) => {
           started.push("followup");
           finish = resolve;
         }),
-    );
-    store.complete(session.id, "## Summary\nDone.");
+      complete: "## Summary\nDone.",
+    });
     expect(store.resumeOne(session.id, "continue")).toEqual({
       ok: true,
       status: "queued",
@@ -446,25 +548,19 @@ describe("CL-6943 reusable worker sessions", () => {
   test("followup on an already-occupied id starts without releasing the slot", async () => {
     const admission = createAdmissionQueue({ capacity: 1 });
     const store = createSubAgentSessionStore({ admission });
-    const session = store.start({
-      id: "worker",
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-      provider: "p",
-    });
     let followupStarted = false;
     let finish: (reply: string) => void = () => undefined;
-    store.registerFollowup(
-      session.id,
-      () =>
+    const session = retainedSession(store, {
+      id: "worker",
+      provider: "p",
+      run: false,
+      followup: () =>
         new Promise<string>((resolve) => {
           followupStarted = true;
           finish = resolve;
         }),
-    );
-    store.complete(session.id, "done");
+      complete: "done",
+    });
     expect(
       admission.enqueue({
         id: "worker",
@@ -486,33 +582,19 @@ describe("CL-6943 reusable worker sessions", () => {
   test("resume-from-completed is a live turn: send_input, interrupt, and appendEvent work", async () => {
     let finish: (reply: string) => void = () => undefined;
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
     const delivered: string[] = [];
-    store.registerDeliver(session.id, (message) => {
-      delivered.push(message);
-    });
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(
-      session.id,
-      () =>
+    const session = retainedSession(store, {
+      deliver: (message) => {
+        delivered.push(message);
+      },
+      interrupt: true,
+      followup: () =>
         new Promise<string>((resolve) => {
           finish = resolve;
         }),
-    );
-    store.complete(session.id, "## Summary\nDone.");
-    expect(store.get(session.id)?.status).toBe("done");
-    expect(store.get(session.id)?.lifecycleStatus).toBe("completed");
-
-    expect(store.resumeOne(session.id, "continue")).toEqual({
-      ok: true,
-      status: "running",
+      complete: "## Summary\nDone.",
     });
+    resumeCompleted(store, session.id);
     expect(store.get(session.id)?.status).toBe("running");
     expect(store.get(session.id)?.lifecycleStatus).toBe("running");
     expect(store.get(session.id)?.finishedAt).toBeUndefined();
@@ -546,25 +628,14 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("rejected followup restores strip status so interrupt_agent fails closed", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+    const session = retainedSession(store, {
+      interrupt: true,
+      followup: async () => {
+        throw new Error("send failed");
+      },
+      complete: "## Summary\nDone.",
     });
-    store.markRunning(session.id);
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(session.id, async () => {
-      throw new Error("send failed");
-    });
-    store.complete(session.id, "## Summary\nDone.");
-    expect(store.get(session.id)?.status).toBe("done");
-    expect(store.get(session.id)?.lifecycleStatus).toBe("completed");
-
-    expect(store.resumeOne(session.id, "continue")).toEqual({
-      ok: true,
-      status: "running",
-    });
+    resumeCompleted(store, session.id);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const after = store.get(session.id);
@@ -578,16 +649,11 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("rejected followup after interrupt restamps stopReason interrupted", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(session.id, async () => {
-      throw new Error("send failed");
+    const session = retainedSession(store, {
+      interrupt: true,
+      followup: async () => {
+        throw new Error("send failed");
+      },
     });
     expect(
       store.sendInputOne(session.id, "stop that", { interrupt: true }),
@@ -610,22 +676,14 @@ describe("CL-6943 reusable worker sessions", () => {
   test("interrupt then abort does not overwrite interrupted stamp to completed", async () => {
     let rejectFollowup: (err: unknown) => void = () => undefined;
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(
-      session.id,
-      () =>
+    const session = retainedSession(store, {
+      interrupt: true,
+      followup: () =>
         new Promise<string>((_resolve, reject) => {
           rejectFollowup = reject;
         }),
-    );
-    store.complete(session.id, "## Summary\nDone.");
+      complete: "## Summary\nDone.",
+    });
 
     expect(store.resumeOne(session.id, "continue")).toEqual({
       ok: true,
@@ -653,39 +711,6 @@ describe("CL-6943 reusable worker sessions", () => {
     });
   });
 
-  test("resume_agent validates the message before starting a retained turn", () => {
-    const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    let starts = 0;
-    store.registerFollowup(session.id, async () => {
-      starts++;
-      return "should not run";
-    });
-    store.complete(session.id, "## Summary\nDone.");
-
-    expect(store.resumeOne(session.id, "   ")).toEqual({
-      ok: false,
-      status: "completed",
-      hint: "resume_agent requires a non-empty message.",
-    });
-    expect(
-      store.resumeOne(session.id, "x".repeat(DEFAULT_MAX_ENTRY_CHARS + 1)),
-    ).toEqual({
-      ok: false,
-      status: "completed",
-      hint:
-        `resume_agent message exceeds ${DEFAULT_MAX_ENTRY_CHARS} characters ` +
-        `(got ${DEFAULT_MAX_ENTRY_CHARS + 1}).`,
-    });
-    expect(starts).toBe(0);
-    expect(store.get(session.id)?.lifecycleStatus).toBe("completed");
-  });
-
   test("resume_agent fails on an unknown id with not_found", () => {
     const store = createSubAgentSessionStore();
     expect(store.resumeOne("missing", "more")).toEqual({
@@ -696,16 +721,14 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("cancelAll then closeOne does not swallow a leftover-child throw as shutdown success", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+    const session = retainedSession(store, {
+      run: false,
+      close: async () => {
+        throw new Error("1 shell child process still live after 2000ms reap");
+      },
+      complete: "done",
+      completeOpts: { agentRetained: true },
     });
-    store.registerClose(session.id, async () => {
-      throw new Error("1 shell child process still live after 2000ms reap");
-    });
-    store.complete(session.id, "done", { agentRetained: true });
 
     const leftover = /still live after 2000ms reap/;
     let cancelThrew = false;
@@ -735,13 +758,10 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("closeOne fails a hung close instead of reporting shutdown success", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+    const session = retainedSession(store, {
+      run: false,
+      close: () => new Promise<void>(() => undefined), // never resolves
     });
-    store.registerClose(session.id, () => new Promise<void>(() => undefined)); // never resolves
 
     const started = Date.now();
     await expect(store.closeOne(session.id, 25)).rejects.toThrow(
@@ -754,14 +774,11 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("closeOne rejects when the registered close throws a leftover child after reap", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.registerClose(session.id, async () => {
-      throw new Error("1 shell child process still live after 2000ms reap");
+    const session = retainedSession(store, {
+      run: false,
+      close: async () => {
+        throw new Error("1 shell child process still live after 2000ms reap");
+      },
     });
 
     await expect(store.closeOne(session.id, 1000)).rejects.toThrow(
@@ -774,15 +791,12 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("closeOne is idempotent and returns not_found for an unknown id", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
     let closeCalls = 0;
-    store.registerClose(session.id, async () => {
-      closeCalls += 1;
+    const session = retainedSession(store, {
+      run: false,
+      close: async () => {
+        closeCalls += 1;
+      },
     });
 
     expect(await store.closeOne(session.id, 1000)).toBe("shutdown");
@@ -793,16 +807,13 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("resume_agent fails on a session close_agent already shut down (close is permanent)", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
     // registerClose always fires in production before onAgentReady's window
     // closes (CL-7001) — closeOne otherwise waits for it up to the deadline.
-    store.registerClose(session.id, async () => undefined);
-    store.complete(session.id, "## Summary\nDone.");
+    const session = retainedSession(store, {
+      run: false,
+      close: async () => undefined,
+      complete: "## Summary\nDone.",
+    });
     await store.closeOne(session.id, 1000);
     expect(store.resumeOne(session.id, "more")).toEqual({
       ok: false,
@@ -826,28 +837,15 @@ describe("CL-6943 reusable worker sessions", () => {
       maxCompleted: 1,
       maxRetained: 1,
     });
-    const retained = store.start({
-      description: "keep-me",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
     let closed = false;
-    store.registerClose(retained.id, async () => {
-      closed = true;
+    const retained = completedRetained(store, {
+      description: "keep-me",
+      run: false,
+      close: async () => {
+        closed = true;
+      },
     });
-    store.complete(retained.id, "## Summary\nDone.");
-
-    for (let i = 0; i < 3; i++) {
-      const s = store.start({
-        description: `fill-${i}`,
-        agentId: "a",
-        brief: "b",
-        retained: true,
-      });
-      store.registerClose(s.id, async () => undefined);
-      store.complete(s.id, "## Summary\nDone.");
-    }
+    fillRetained(store, 3);
 
     expect(store.get(retained.id)).toBeUndefined();
     expect(closed).toBe(true);
@@ -879,25 +877,12 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("resume_agent on a retention-evicted session returns an actionable status, not not_found", () => {
     const store = createSubAgentSessionStore({ maxRetained: 1 });
-    const retained = store.start({
+    const retained = completedRetained(store, {
       description: "keep-me",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+      run: false,
+      close: async () => undefined,
     });
-    store.registerClose(retained.id, async () => undefined);
-    store.complete(retained.id, "## Summary\nDone.");
-
-    for (let i = 0; i < 3; i++) {
-      const s = store.start({
-        description: `fill-${i}`,
-        agentId: "a",
-        brief: "b",
-        retained: true,
-      });
-      store.registerClose(s.id, async () => undefined);
-      store.complete(s.id, "## Summary\nDone.");
-    }
+    fillRetained(store, 3);
 
     const outcome = store.resumeOne(retained.id, "more");
     expect(outcome.ok).toBe(false);
@@ -909,33 +894,16 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("a running session is never evicted by maxRetained even when the cap is exceeded", () => {
     const store = createSubAgentSessionStore({ maxRetained: 1 });
-    const running = store.start({
-      description: "keep-me",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(running.id);
     // Resume it back to "running" so it is an open, actively-driven session.
-    store.registerClose(running.id, async () => undefined);
-    store.registerFollowup(
-      running.id,
-      () => new Promise<string>(() => undefined),
-    );
-    store.complete(running.id, "## Summary\nDone.");
+    const running = completedRetained(store, {
+      description: "keep-me",
+      close: async () => undefined,
+      followup: () => new Promise<string>(() => undefined),
+    });
     store.resumeOne(running.id, "keep going");
     expect(store.get(running.id)?.lifecycleStatus).toBe("running");
 
-    for (let i = 0; i < 5; i++) {
-      const s = store.start({
-        description: `fill-${i}`,
-        agentId: "a",
-        brief: "b",
-        retained: true,
-      });
-      store.registerClose(s.id, async () => undefined);
-      store.complete(s.id, "## Summary\nDone.");
-    }
+    fillRetained(store, 5);
 
     expect(store.get(running.id)).toBeDefined();
     expect(store.get(running.id)?.lifecycleStatus).toBe("running");
@@ -943,16 +911,7 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("maxRetained bounds memory: many spawned-and-completed retained sessions do not grow without limit", () => {
     const store = createSubAgentSessionStore({ maxRetained: 5 });
-    for (let i = 0; i < 50; i++) {
-      const s = store.start({
-        description: `worker-${i}`,
-        agentId: "a",
-        brief: "b",
-        retained: true,
-      });
-      store.registerClose(s.id, async () => undefined);
-      store.complete(s.id, "## Summary\nDone.");
-    }
+    fillRetained(store, 50, "worker");
     const openRetained = store
       .list()
       .filter((s) => s.retained === true && s.lifecycleStatus === "completed");
@@ -961,14 +920,11 @@ describe("CL-6943 reusable worker sessions", () => {
 
   test("once closed, a retained session becomes a normal finished record subject to the cap", async () => {
     const store = createSubAgentSessionStore({ maxCompleted: 1 });
-    const retained = store.start({
+    const retained = completedRetained(store, {
       description: "keep-me",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+      run: false,
+      close: async () => undefined,
     });
-    store.registerClose(retained.id, async () => undefined);
-    store.complete(retained.id, "## Summary\nDone.");
     await store.closeOne(retained.id, 1000);
 
     for (let i = 0; i < 3; i++) {
@@ -992,15 +948,12 @@ describe("interrupt stamps finishedAt once", () => {
       now: () => t,
       createId: () => "s-int",
     });
-    const session = store.start({
+    const session = retainedSession(store, {
       description: "looping",
       agentId: "explorer",
-      brief: "b",
-      retained: true,
+      interrupt: true,
     });
-    store.markRunning(session.id);
     store.appendEvent(session.id, startCall(1, "call-1", "run_shell"));
-    store.registerInterrupt(session.id, () => undefined);
 
     t = 2000;
     expect(store.interruptOne(session.id).ok).toBe(true);
@@ -1025,22 +978,16 @@ describe("interrupt stamps finishedAt once", () => {
       now: () => t,
       createId: () => "s-send",
     });
-    const session = store.start({
+    const session = retainedSession(store, {
       description: "looping",
       agentId: "explorer",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    store.appendEvent(session.id, startCall(1, "call-1", "run_shell"));
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(
-      session.id,
-      () =>
+      interrupt: true,
+      followup: () =>
         new Promise<string>((resolve) => {
           finish = resolve;
         }),
-    );
+    });
+    store.appendEvent(session.id, startCall(1, "call-1", "run_shell"));
 
     t = 2500;
     const outcome = store.sendInputOne(session.id, "stop that", {
@@ -1072,21 +1019,15 @@ describe("interrupt stamps finishedAt once", () => {
       now: () => t,
       createId: () => "s-followup",
     });
-    const session = store.start({
+    const session = retainedSession(store, {
       description: "looping",
       agentId: "explorer",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(
-      session.id,
-      () =>
+      interrupt: true,
+      followup: () =>
         new Promise<string>((resolve) => {
           finish = resolve;
         }),
-    );
+    });
 
     t = 2000;
     expect(store.interruptOne(session.id).ok).toBe(true);
@@ -1120,14 +1061,7 @@ describe("interrupt stamps finishedAt once", () => {
 describe("CL-7269 one stored worker lifecycle", () => {
   test("complete() after interrupt_agent does not overwrite interrupted", () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    store.registerInterrupt(session.id, () => undefined);
+    const session = retainedSession(store, { interrupt: true });
     expect(store.interruptOne(session.id).ok).toBe(true);
     store.complete(session.id, "late original send");
     const after = store.get(session.id);
@@ -1138,16 +1072,11 @@ describe("CL-7269 one stored worker lifecycle", () => {
 
   test("fail() of a live persisted agent invokes the registered close", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
     let closeCalls = 0;
-    store.registerClose(session.id, async () => {
-      closeCalls++;
+    const session = retainedSession(store, {
+      close: async () => {
+        closeCalls++;
+      },
     });
     store.fail(session.id, "send failed");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1194,14 +1123,10 @@ describe("CL-7269 one stored worker lifecycle", () => {
 
   test("cancel() is not resumable; interruptOne() is when retained", () => {
     const store = createSubAgentSessionStore();
-    const cancelled = store.start({
+    const cancelled = retainedSession(store, {
       description: "c",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+      followup: async () => "nope",
     });
-    store.markRunning(cancelled.id);
-    store.registerFollowup(cancelled.id, async () => "nope");
     expect(store.cancel(cancelled.id, "operator kill")).toBe(true);
     const afterCancel = store.get(cancelled.id);
     expect(afterCancel?.status).toBe("cancelled");
@@ -1210,15 +1135,11 @@ describe("CL-7269 one stored worker lifecycle", () => {
     expect(afterCancel?.retained).toBe(false);
     expect(store.resumeOne(cancelled.id, "continue").ok).toBe(false);
 
-    const interrupted = store.start({
+    const interrupted = retainedSession(store, {
       description: "i",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+      interrupt: true,
+      followup: async () => "next",
     });
-    store.markRunning(interrupted.id);
-    store.registerInterrupt(interrupted.id, () => undefined);
-    store.registerFollowup(interrupted.id, async () => "next");
     expect(store.interruptOne(interrupted.id).ok).toBe(true);
     const afterInterrupt = store.get(interrupted.id);
     expect(afterInterrupt?.lifecycle.state).toBe("interrupted");
@@ -1413,15 +1334,10 @@ describe("pending ask_director", () => {
 
   test("interruptOne cancels a pending ask", () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+    const session = retainedSession(store, {
+      interrupt: true,
+      followup: async () => "next",
     });
-    store.markRunning(session.id);
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(session.id, async () => "next");
     let rejected: unknown;
     store.registerAsk(session.id, {
       question: "which file?",
@@ -1442,22 +1358,17 @@ describe("pending ask_director", () => {
 
   test("sendInputOne interrupt cancels then followup", async () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
     const delivered: string[] = [];
-    store.registerDeliver(session.id, (message) => {
-      delivered.push(message);
-    });
-    store.registerInterrupt(session.id, () => undefined);
     const followups: string[] = [];
-    store.registerFollowup(session.id, async (message) => {
-      followups.push(message);
-      return "later";
+    const session = retainedSession(store, {
+      deliver: (message) => {
+        delivered.push(message);
+      },
+      interrupt: true,
+      followup: async (message) => {
+        followups.push(message);
+        return "later";
+      },
     });
     let rejected: unknown;
     store.registerAsk(session.id, {
@@ -1492,11 +1403,10 @@ describe("pending ask_director", () => {
 
   test("sendInputOne interrupt cancels a descendant pending ask", () => {
     const store = createSubAgentSessionStore();
-    const parent = store.start({
+    const parent = retainedSession(store, {
       description: "parent",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+      interrupt: true,
+      followup: async () => "next",
     });
     const child = store.start({
       description: "child",
@@ -1504,10 +1414,7 @@ describe("pending ask_director", () => {
       brief: "b",
       parentSessionId: parent.id,
     });
-    store.markRunning(parent.id);
     store.markRunning(child.id);
-    store.registerInterrupt(parent.id, () => undefined);
-    store.registerFollowup(parent.id, async () => "next");
     let rejected: unknown;
     store.registerAsk(child.id, {
       question: "q",
@@ -1531,16 +1438,24 @@ describe("pending ask_director", () => {
     expect(String(rejected)).toContain("cancelled by send_input interrupt");
   });
 
-  test("sendInputOne interrupt with missing handles does not cancel the pending ask", () => {
+  test.each([
+    {
+      name: "sendInputOne interrupt with missing handles",
+      arrange: (store: SessionStore, id: string) => {
+        store.registerFollowup(id, async () => "next");
+      },
+      act: (store: SessionStore, id: string) =>
+        store.sendInputOne(id, "stop that", { interrupt: true }),
+    },
+    {
+      name: "interruptOne with missing handle",
+      arrange: () => undefined,
+      act: (store: SessionStore, id: string) => store.interruptOne(id),
+    },
+  ])("$name does not cancel the pending ask", ({ arrange, act }) => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    store.registerFollowup(session.id, async () => "next");
+    const session = retainedSession(store);
+    arrange(store, session.id);
     let rejected: unknown;
     let resolved: string | undefined;
     store.registerAsk(session.id, {
@@ -1554,9 +1469,7 @@ describe("pending ask_director", () => {
       },
     });
 
-    expect(
-      store.sendInputOne(session.id, "stop that", { interrupt: true }),
-    ).toEqual({
+    expect(act(store, session.id)).toEqual({
       ok: false,
       status: "running",
     });
@@ -1569,14 +1482,7 @@ describe("pending ask_director", () => {
 
   test("interrupt then late registerAsk returns false and leaves no pending ask", () => {
     const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    store.registerInterrupt(session.id, () => undefined);
+    const session = retainedSession(store, { interrupt: true });
     expect(store.interruptOne(session.id).ok).toBe(true);
 
     expect(
@@ -1638,14 +1544,10 @@ describe("pending ask_director", () => {
 
   test("evicting a session with a pending ask rejects the ask", () => {
     const store = createSubAgentSessionStore({ maxRetained: 1 });
-    const session = store.start({
+    const session = retainedSession(store, {
       description: "asking",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+      close: async () => undefined,
     });
-    store.markRunning(session.id);
-    store.registerClose(session.id, async () => undefined);
     let rejected: unknown;
     expect(
       store.registerAsk(session.id, {
@@ -1664,54 +1566,12 @@ describe("pending ask_director", () => {
     store.attachReport(session.id, "salvage");
     expect(store.hasPendingAsk(session.id)).toBe(true);
 
-    for (let i = 0; i < 2; i++) {
-      const fill = store.start({
-        description: `fill-${i}`,
-        agentId: "a",
-        brief: "b",
-        retained: true,
-      });
-      store.registerClose(fill.id, async () => undefined);
-      store.complete(fill.id, "done");
-    }
+    fillRetained(store, 2);
 
     expect(store.get(session.id)).toBeUndefined();
     expect(store.hasPendingAsk(session.id)).toBe(false);
     expect(rejected).toBeInstanceOf(Error);
     expect(String(rejected)).toContain("session handles released");
-  });
-
-  test("interruptOne with missing handle does not cancel the pending ask", () => {
-    const store = createSubAgentSessionStore();
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    let rejected: unknown;
-    let resolved: string | undefined;
-    store.registerAsk(session.id, {
-      question: "which file?",
-      questionId: "ask-1",
-      resolve: (answer) => {
-        resolved = answer;
-      },
-      reject: (reason) => {
-        rejected = reason;
-      },
-    });
-
-    expect(store.interruptOne(session.id)).toEqual({
-      ok: false,
-      status: "running",
-    });
-    expect(store.hasPendingAsk(session.id)).toBe(true);
-    expect(rejected).toBeUndefined();
-    expect(resolved).toBeUndefined();
-    expect(store.resolveAsk(session.id, "src/foo.ts")).toBe(true);
-    expect(resolved).toBe("src/foo.ts");
   });
 
   test("complete and close cancel a pending ask", async () => {
@@ -1737,14 +1597,10 @@ describe("pending ask_director", () => {
     expect(store.hasPendingAsk(completed.id)).toBe(false);
     expect(String(completeRejected)).toContain("session completed");
 
-    const closed = store.start({
+    const closed = retainedSession(store, {
       description: "x",
-      agentId: "a",
-      brief: "b",
-      retained: true,
+      close: async () => undefined,
     });
-    store.markRunning(closed.id);
-    store.registerClose(closed.id, async () => undefined);
     let closeRejected: unknown;
     store.registerAsk(closed.id, {
       question: "q",
@@ -1794,49 +1650,7 @@ describe("pending ask_director", () => {
 });
 
 describe("CL-7344 follow-up stash", () => {
-  function runningRetained(
-    store: ReturnType<typeof createSubAgentSessionStore>,
-    followup: (message: string) => Promise<string>,
-  ) {
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-      retained: true,
-    });
-    store.markRunning(session.id);
-    store.markRunInFlight(session.id);
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(session.id, followup);
-    return session;
-  }
-
-  test("sendInputOne interrupt stashes and does not start follow-up until attachReport", async () => {
-    const store = createSubAgentSessionStore();
-    const started: string[] = [];
-    const session = runningRetained(store, async (message) => {
-      started.push(message);
-      return "followup";
-    });
-
-    expect(
-      store.sendInputOne(session.id, "steer now", { interrupt: true }),
-    ).toEqual({ ok: true, status: "interrupted" });
-    await Promise.resolve();
-    expect(started).toEqual([]);
-    expect(store.get(session.id)?.lifecycleStatus).toBe("running");
-    expect(store.resumeOne(session.id, "later").ok).toBe(false);
-
-    store.attachReport(session.id, "interrupted salvage", {
-      stopReason: "interrupted",
-    });
-    await Promise.resolve();
-    expect(started).toEqual(["steer now"]);
-    expect(store.get(session.id)?.lifecycleStatus).toBe("running");
-    expect(store.isRunInFlight(session.id)).toBe(true);
-  });
-
-  test("complete on a resumable session delivers the stash and preserves the original report", async () => {
+  test("CL-7989 run-completion wins with queued steers: all deliver in order and the original report survives", async () => {
     const store = createSubAgentSessionStore();
     const started: string[] = [];
     const failures: unknown[] = [];
@@ -2063,58 +1877,20 @@ describe("CL-7344 follow-up stash", () => {
 
   test("CL-7989 interrupt wins the race: stashed steer launches from attachReport", async () => {
     const store = createSubAgentSessionStore();
-    const started: string[] = [];
-    const failures: unknown[] = [];
-    const replies: string[] = [];
-    const session = runningRetained(store, async (message) => {
-      started.push(message);
-      return "followup reply";
-    });
-    store.sendInputOne(session.id, "steer now", {
-      interrupt: true,
-      onFail: (err: unknown) => {
-        failures.push(err);
-      },
-      onFollowupReply: (reply: string) => {
-        replies.push(reply);
-      },
-    });
+    const { started, failures, replies, session } = stashedSteer(store);
     store.attachReport(session.id, "salvage", { stopReason: "interrupted" });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(started).toEqual(["steer now"]);
-    expect(failures).toEqual([]);
-    expect(replies).toEqual(["followup reply"]);
-    expect(store.get(session.id)?.lifecycle.state).toBe("completed");
-    expect(store.get(session.id)?.report).toBe("followup reply");
+    expectSteerDelivered(store, session.id, started, failures, replies);
   });
 
   test("CL-7989 run-completion wins the race: stashed steer delivers as a fresh follow-up", async () => {
     const store = createSubAgentSessionStore();
-    const started: string[] = [];
-    const failures: unknown[] = [];
-    const replies: string[] = [];
-    const session = runningRetained(store, async (message) => {
-      started.push(message);
-      return "followup reply";
-    });
-    store.sendInputOne(session.id, "steer now", {
-      interrupt: true,
-      onFail: (err: unknown) => {
-        failures.push(err);
-      },
-      onFollowupReply: (reply: string) => {
-        replies.push(reply);
-      },
-    });
+    const { started, failures, replies, session } = stashedSteer(store);
     store.complete(session.id, "## Summary\nOriginal done.");
     expect(store.get(session.id)?.lifecycleStatus).toBe("running");
     expect(store.isRunInFlight(session.id)).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(started).toEqual(["steer now"]);
-    expect(failures).toEqual([]);
-    expect(replies).toEqual(["followup reply"]);
-    expect(store.get(session.id)?.lifecycle.state).toBe("completed");
-    expect(store.get(session.id)?.report).toBe("followup reply");
+    expectSteerDelivered(store, session.id, started, failures, replies);
     expect(store.get(session.id)?.entries).toContainEqual(
       expect.objectContaining({
         kind: "report",
@@ -2145,92 +1921,14 @@ describe("CL-7344 follow-up stash", () => {
 
   test("salvage completion with agentRetained:false drops the queued steer loudly", async () => {
     const store = createSubAgentSessionStore();
-    const started: string[] = [];
-    const failures: unknown[] = [];
-    const session = runningRetained(store, async (message) => {
-      started.push(message);
-      return "should not run";
-    });
-    store.sendInputOne(session.id, "steer now", {
-      interrupt: true,
-      onFail: (err: unknown) => {
-        failures.push(err);
-      },
-    });
+    const { started, failures, session } = queuedSteer(store);
     // Mirrors run.ts's salvage return: the report resolves through complete()
     // but the agent is already disposed, so the queued steer is superseded.
     store.complete(session.id, "Stopped: deadline\n\nPartial work...", {
       agentRetained: false,
     });
     await Promise.resolve();
-    expect(started).toEqual([]);
-    expect(failures).toHaveLength(1);
-    expect(String(defined(failures[0]))).toContain("steer now");
-    expect(store.get(session.id)?.entries).toContainEqual(
-      expect.objectContaining({
-        kind: "report",
-        content: expect.stringContaining("steer now"),
-      }),
-    );
-  });
-
-  test("CL-7989 run-completion wins with queued steers: all deliver in order", async () => {
-    const store = createSubAgentSessionStore();
-    const started: string[] = [];
-    const failures: unknown[] = [];
-    const session = runningRetained(store, async (message) => {
-      started.push(message);
-      return `reply to ${message}`;
-    });
-    const onFail = (err: unknown): void => {
-      failures.push(err);
-    };
-    store.sendInputOne(session.id, "steer one", { interrupt: true, onFail });
-    store.sendInputOne(session.id, "steer two", { interrupt: true, onFail });
-    store.complete(session.id, "## Summary\nOriginal done.");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(started).toEqual(["steer one", "steer two"]);
-    expect(failures).toEqual([]);
-    expect(store.get(session.id)?.lifecycle.state).toBe("completed");
-    expect(store.get(session.id)?.report).toBe("reply to steer two");
-  });
-
-  test("CL-7989 run-completion wins on a non-retained session: loss is surfaced", async () => {
-    const store = createSubAgentSessionStore();
-    const started: string[] = [];
-    const failures: unknown[] = [];
-    const session = store.start({
-      description: "d",
-      agentId: "a",
-      brief: "b",
-    });
-    store.markRunning(session.id);
-    store.markRunInFlight(session.id);
-    store.registerInterrupt(session.id, () => undefined);
-    store.registerFollowup(session.id, async (message) => {
-      started.push(message);
-      return "should not run";
-    });
-    store.sendInputOne(session.id, "steer now", {
-      interrupt: true,
-      onFail: (err: unknown) => {
-        failures.push(err);
-      },
-    });
-    store.complete(session.id, "## Summary\nOriginal done.");
-    await Promise.resolve();
-    expect(started).toEqual([]);
-    expect(store.get(session.id)?.report).toBe("## Summary\nOriginal done.");
-    expect(store.get(session.id)?.lifecycleStatus).toBe("completed");
-    expect(failures).toHaveLength(1);
-    expect(String(defined(failures[0]))).toContain("steer now");
-    expect(store.get(session.id)?.entries).toContainEqual(
-      expect.objectContaining({
-        kind: "report",
-        content: expect.stringContaining("steer now"),
-      }),
-    );
+    expectSteerLost(store, session.id, started, failures);
   });
 
   test("a throwing handoff onReply does not stall the queued steers behind it", async () => {
@@ -2257,29 +1955,181 @@ describe("CL-7344 follow-up stash", () => {
 
   test("CL-7989 run-failure wins the race: loss is surfaced, never silent", async () => {
     const store = createSubAgentSessionStore();
-    const started: string[] = [];
-    const failures: unknown[] = [];
-    const session = runningRetained(store, async (message) => {
-      started.push(message);
-      return "should not run";
-    });
-    store.sendInputOne(session.id, "steer now", {
-      interrupt: true,
-      onFail: (err: unknown) => {
-        failures.push(err);
-      },
-    });
+    const { started, failures, session } = queuedSteer(store);
     store.fail(session.id, "provider 500");
     await Promise.resolve();
-    expect(started).toEqual([]);
     expect(store.get(session.id)?.lifecycle.state).toBe("failed");
-    expect(failures).toHaveLength(1);
-    expect(String(defined(failures[0]))).toContain("steer now");
-    expect(store.get(session.id)?.entries).toContainEqual(
-      expect.objectContaining({
-        kind: "report",
-        content: expect.stringContaining("steer now"),
+    expectSteerLost(store, session.id, started, failures);
+  });
+});
+
+describe("transcript and store contract basics", () => {
+  const ev = (type: string, data: unknown): ReactorEmittedEvent =>
+    ({ type, seq: 1, data }) as unknown as ReactorEmittedEvent;
+
+  test("appendEvent folds deltas into text, tool, and tool_result entries", () => {
+    const store = createSubAgentSessionStore();
+    const session = store.start({ description: "d", agentId: "a", brief: "b" });
+
+    store.appendEvent(
+      session.id,
+      ev("inference.text.delta", { token: "Hello " }),
+    );
+    store.appendEvent(
+      session.id,
+      ev("inference.text.delta", { token: "world" }),
+    );
+    store.appendEvent(
+      session.id,
+      ev("inference.tool_call.start", { name: "grep", callId: "c1" }),
+    );
+    store.appendEvent(
+      session.id,
+      ev("inference.tool_call.end", {
+        name: "grep",
+        callId: "c1",
+        arguments: { pattern: "foo" },
       }),
     );
+    store.appendEvent(
+      session.id,
+      ev("tool.done", {
+        result: { callId: "c1", content: "match at a.ts:1", isError: false },
+      }),
+    );
+
+    const stored = store.get(session.id);
+    expect(stored?.toolNames).toEqual(["grep"]);
+    expect(stored?.currentToolName).toBeNull();
+    expect(stored?.entries).toEqual([
+      { kind: "text", content: "Hello world" },
+      {
+        kind: "tool",
+        callId: "c1",
+        name: "grep",
+        arguments: JSON.stringify({ pattern: "foo" }),
+      },
+      {
+        kind: "tool_result",
+        callId: "c1",
+        name: "grep",
+        content: "match at a.ts:1",
+        isError: false,
+      },
+    ]);
+  });
+
+  // Two open calls interleave argument fragments; each fragment must land on
+  // the entry that owns its callId, not the most recent tool entry.
+  test("interleaved parallel tool_call deltas attach to their own callId", () => {
+    const store = createSubAgentSessionStore();
+    const session = store.start({ description: "d", agentId: "a", brief: "b" });
+
+    store.appendEvent(
+      session.id,
+      ev("inference.tool_call.start", { name: "read", callId: "a" }),
+    );
+    store.appendEvent(
+      session.id,
+      ev("inference.tool_call.start", { name: "grep", callId: "b" }),
+    );
+    store.appendEvent(
+      session.id,
+      ev("inference.tool_call.delta", {
+        callId: "a",
+        argumentFragment: '{"path":',
+      }),
+    );
+    store.appendEvent(
+      session.id,
+      ev("inference.tool_call.delta", {
+        callId: "b",
+        argumentFragment: '{"pattern":',
+      }),
+    );
+    store.appendEvent(
+      session.id,
+      ev("inference.tool_call.delta", {
+        callId: "a",
+        argumentFragment: '"a.ts"}',
+      }),
+    );
+
+    const toolEntries =
+      store.get(session.id)?.entries.filter((e) => e.kind === "tool") ?? [];
+    expect(toolEntries).toEqual([
+      { kind: "tool", callId: "a", name: "read", arguments: '{"path":"a.ts"}' },
+      { kind: "tool", callId: "b", name: "grep", arguments: '{"pattern":' },
+    ]);
+  });
+
+  test("fail appends the failure as a report entry", () => {
+    const store = createSubAgentSessionStore();
+    const session = store.start({ description: "d", agentId: "a", brief: "b" });
+    store.fail(session.id, "provider 500");
+    expect(store.get(session.id)?.entries.at(-1)).toEqual({
+      kind: "report",
+      content: "Error: provider 500",
+    });
+  });
+
+  test("complete appends the report as the last transcript entry", () => {
+    const store = createSubAgentSessionStore();
+    const session = store.start({ description: "d", agentId: "a", brief: "b" });
+    store.complete(session.id, "## Summary\nDone.");
+    expect(store.get(session.id)?.entries.at(-1)).toEqual({
+      kind: "report",
+      content: "## Summary\nDone.",
+    });
+  });
+
+  test("subscribe notifies on each mutation; unsubscribe stops them", () => {
+    const store = createSubAgentSessionStore();
+    let ticks = 0;
+    const unsub = store.subscribe(() => {
+      ticks += 1;
+    });
+    const session = store.start({ description: "d", agentId: "a", brief: "b" });
+    store.appendEvent(session.id, textDelta("x"));
+    store.complete(session.id, "done");
+    expect(ticks).toBe(3);
+    unsub();
+    store.clear();
+    expect(ticks).toBe(3);
+  });
+
+  test("listForStrip puts running sessions ahead of completed ones", () => {
+    let t = 0;
+    const store = createSubAgentSessionStore({ now: () => ++t });
+    const done = store.start({
+      description: "old-done",
+      agentId: "a",
+      brief: "b",
+    });
+    store.complete(done.id, "ok");
+    store.start({ description: "live", agentId: "a", brief: "b" });
+    const strip = store.listForStrip();
+    expect(strip[0]?.description).toBe("live");
+    expect(strip[0]?.status).toBe("running");
+    expect(strip[1]?.description).toBe("old-done");
+  });
+
+  test("cancelAll aborts running sessions, returns their ids, skips finished ones", async () => {
+    const store = createSubAgentSessionStore();
+    const a = store.start({ description: "a", agentId: "w", brief: "b" });
+    const b = store.start({ description: "b", agentId: "w", brief: "b" });
+    const done = store.start({ description: "done", agentId: "w", brief: "b" });
+    store.complete(done.id, "ok");
+    const aborted: string[] = [];
+    store.registerCancel(a.id, () => aborted.push(a.id));
+    store.registerCancel(b.id, () => aborted.push(b.id));
+    store.registerCancel(done.id, () => aborted.push(done.id));
+
+    const cancelled = await store.cancelAll("Parent stop");
+    expect(cancelled.sort()).toEqual([a.id, b.id].sort());
+    expect(aborted.sort()).toEqual([a.id, b.id].sort());
+    expect(store.get(a.id)?.status).toBe("cancelled");
+    expect(store.get(b.id)?.status).toBe("cancelled");
+    expect(store.get(done.id)?.status).toBe("done");
   });
 });

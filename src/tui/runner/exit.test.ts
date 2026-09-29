@@ -1,7 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { type Agent } from "@intx/agent";
-import { getLogger } from "@intx/log";
+import { AgentContextLockError, type Agent } from "@intx/agent";
 import type { InferenceSource } from "@intx/types/runtime";
 
 import * as codexSession from "../../auth/codex/session.js";
@@ -10,37 +9,41 @@ import {
   readSourceCredentialMaterial,
   registerSourceCredentialRecord,
 } from "../../config/source-credentials.js";
-import { createChatDirector } from "../../agent/director.js";
+import { createChatDirector, type ChatDirector } from "../../agent/director.js";
 import * as sessionIndex from "../../session/index.js";
-import { createSubAgentSessionStore } from "../../subagent/session-store.js";
-import type {
-  ReactorAction,
-  ReactorCapabilities,
-  ReactorInboundEvent,
-  ReactorState,
-} from "@intx/types/runtime";
-import { LOG_NAMESPACE_ROOT } from "../../branding.js";
-import { defined } from "../../../tests/helpers/defined.js";
-import { withMockedHomedir } from "../../../tests/helpers/mock-module.js";
-import { createTempDirs } from "../../../tests/helpers/temporary-dirs.js";
+import {
+  createSubAgentSessionStore,
+  type SubAgentSessionStore,
+} from "../../subagent/session-store.js";
+import type { ReactorInboundEvent } from "@intx/types/runtime";
+import { defined } from "../../../testkit/defined.js";
+import {
+  stubReactorCapabilities,
+  stubReactorState,
+  stubTextTurnEvent,
+} from "../../../testkit/reactor-stubs.js";
+import {
+  withMockedHomedir,
+  withMockedModuleDuring,
+} from "../../../testkit/mock-module.js";
+import { createTempDirs } from "../../../testkit/temporary-dirs.js";
 import {
   createDeliveryGeneration,
   createSessionOperationQueue,
 } from "../delivery-queue.js";
 import {
+  agentRebuildFailure,
+  closeAgentForRebuild,
   createRunLifecycle,
   finalizeTUIRun,
   resetSessionForRotation,
   resyncIdleWithFleetFlag,
+  startInterruptRebuild,
 } from "./exit.js";
 import {
   COMPACTION_ABORTED_REASON,
   createCompactionLifecycle,
 } from "../../session/compaction-lifecycle.js";
-import {
-  printResumeHint,
-  resetResumeHintForTests,
-} from "../../session/resume-hint.js";
 import type { RunnerServices, RunnerState } from "./state.js";
 
 function stubQuit(args: {
@@ -87,23 +90,38 @@ function stubQuit(args: {
     },
     crashGuard: { markFinalized: () => undefined, isFinalized: () => false },
     activeRunHandle: { task: "", startedAt: 0, turnsUsed: 0, model: "" },
+    activatedToolNames: { list: () => [] },
     hookManager: { dispatchPostRun: async () => undefined },
     liveSessionMode: "orchestrator",
   } as unknown as RunnerServices;
   return { state, services };
 }
 
+/** A session-op tail that stays pending until the test rejects it. */
+function hungSessionTail(): {
+  tail: () => Promise<void>;
+  reject: (err: Error) => void;
+} {
+  let reject: ((err: Error) => void) | undefined;
+  const hung = new Promise<void>((_, rej) => {
+    reject = rej;
+  });
+  return {
+    tail: async () => {
+      await hung;
+    },
+    reject: (err) => defined(reject, "tail reject")(err),
+  };
+}
+
 describe("finalizeTUIRun quit order", () => {
   test("starts runtime shutdown without waiting on a hung session-op tail", async () => {
     const order: string[] = [];
-    let settleTail: ((err: Error) => void) | undefined;
-    const hungTail = new Promise<void>((_, reject) => {
-      settleTail = reject;
-    });
+    const { tail, reject } = hungSessionTail();
     const { state, services } = stubQuit({
       awaitTail: async () => {
         order.push("tail");
-        await hungTail;
+        await tail();
       },
       shutdownRuntime: async () => {
         order.push("shutdown");
@@ -115,63 +133,21 @@ describe("finalizeTUIRun quit order", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(order[0]).toBe("shutdown");
     } finally {
-      defined(settleTail, "settleTail")(new Error("stop"));
-    }
-    await expect(pending).rejects.toThrow("stop");
-  });
-
-  test("logs a runtime shutdown failure instead of swallowing it", async () => {
-    const logger = getLogger([LOG_NAMESPACE_ROOT, "tui"]);
-    const errorSpy = spyOn(logger, "error");
-    let settleTail: ((err: Error) => void) | undefined;
-    const hungTail = new Promise<void>((_, reject) => {
-      settleTail = reject;
-    });
-    const { state, services } = stubQuit({
-      awaitTail: () => hungTail,
-      shutdownRuntime: async () => {
-        throw new Error("plugin dispose failed");
-      },
-    });
-
-    const pending = finalizeTUIRun(state, services);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(errorSpy).toHaveBeenCalled();
-      const logged = errorSpy.mock
-        .calls as unknown as readonly (readonly unknown[])[];
-      const first = logged[0];
-      expect(first).toBeDefined();
-      expect(String(first?.[0])).toMatch(/shutdown/i);
-      expect(first?.[1]).toEqual({ error: "plugin dispose failed" });
-    } finally {
-      errorSpy.mockRestore();
-      defined(settleTail, "settleTail")(new Error("stop"));
+      reject(new Error("stop"));
     }
     await expect(pending).rejects.toThrow("stop");
   });
 
   test("aborts the in-flight compact before runtime shutdown so quit cannot stall", async () => {
     const order: string[] = [];
-    let settleTail: ((err: Error) => void) | undefined;
-    const hungTail = new Promise<void>((_, reject) => {
-      settleTail = reject;
-    });
+    const { tail, reject } = hungSessionTail();
     const lifecycle = createCompactionLifecycle();
-    const wrapped = lifecycle.wrapCompactor({
-      name: "hang",
-      version: "0",
-      apply: () =>
-        new Promise<never>(() => {
-          // Never settles on purpose: the quit abort must win the race.
-        }),
-    });
-    const pending = wrapped.apply([], {} as never);
+    const { pending } = hangCompact(lifecycle);
     expect(lifecycle.isCompacting()).toBe(true);
     const { state, services } = stubQuit({
       awaitTail: async () => {
         order.push("tail");
-        await hungTail;
+        await tail();
       },
       shutdownRuntime: async () => {
         order.push("shutdown");
@@ -201,107 +177,46 @@ describe("finalizeTUIRun quit order", () => {
       expect(result.record.reason).toBe(COMPACTION_ABORTED_REASON);
       expect(lifecycle.isCompacting()).toBe(false);
     } finally {
-      defined(settleTail, "settleTail")(new Error("stop"));
+      reject(new Error("stop"));
     }
     await expect(done).rejects.toThrow("stop");
   });
 });
 
 describe("finalizeTUIRun resume hint", () => {
-  test("prints the resume command with the exited session id", async () => {
-    resetResumeHintForTests();
+  // stderr channel, line format, and the shared once-flag live in
+  // src/session/resume-hint.test.ts; here only the finalize call site is
+  // pinned: the hint goes out once, after the session-op tail drains.
+  test("invokes printResumeHint once with the session id after the tail", async () => {
+    const order: string[] = [];
+    const calls: string[] = [];
+    const { state, services } = stubQuit({
+      awaitTail: async () => void order.push("tail"),
+      shutdownRuntime: async () => undefined,
+    });
     const dirs = createTempDirs(
       "corbits-resume-hint-cwd-",
       "corbits-resume-hint-home-",
     );
-    const sessionId = "123e4567-e89b-12d3-a456-426614174000";
-    const { state, services } = stubQuit({
-      awaitTail: async () => undefined,
-      shutdownRuntime: async () => undefined,
-    });
-    state.sessionId = sessionId;
-    (
-      services as unknown as { activatedToolNames: { list: () => string[] } }
-    ).activatedToolNames = { list: () => [] };
     (state.config as { cwd: string }).cwd = dirs.cwd;
-    const outWrites: string[] = [];
-    const errWrites: string[] = [];
-    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(((
-      chunk: unknown,
-    ) => {
-      outWrites.push(String(chunk));
-      return true;
-    }) as typeof process.stdout.write);
-    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
-      chunk: unknown,
-    ) => {
-      errWrites.push(String(chunk));
-      return true;
-    }) as typeof process.stderr.write);
     try {
-      const code = await withMockedHomedir(dirs.home, () =>
-        finalizeTUIRun(state, services),
+      await withMockedModuleDuring(
+        import.meta.resolve("../../session/resume-hint.js"),
+        (real: typeof import("../../session/resume-hint.js")) => ({
+          ...real,
+          printResumeHint: (sessionId: string) => {
+            calls.push(sessionId);
+            order.push("hint");
+          },
+        }),
+        () =>
+          withMockedHomedir(dirs.home, () => finalizeTUIRun(state, services)),
       );
-      expect(code).toBe(0);
     } finally {
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
       dirs.cleanup();
     }
-    // stderr, not stdout: a piped stdout (JSON consumers) must stay clean.
-    expect(
-      errWrites.some((w) => w === `Run corbits resume ${sessionId}\n`),
-    ).toBe(true);
-    expect(outWrites.some((w) => w.includes("resume"))).toBe(false);
-  });
-
-  test("an external signal racing finalize prints the hint exactly once", async () => {
-    resetResumeHintForTests();
-    const dirs = createTempDirs(
-      "corbits-resume-hint-race-cwd-",
-      "corbits-resume-hint-race-home-",
-    );
-    const sessionId = "123e4567-e89b-12d3-a456-426614174000";
-    let releaseTail: (() => void) | undefined;
-    const gatedTail = new Promise<void>((resolve) => {
-      releaseTail = resolve;
-    });
-    const { state, services } = stubQuit({
-      awaitTail: () => gatedTail,
-      shutdownRuntime: async () => undefined,
-    });
-    state.sessionId = sessionId;
-    (
-      services as unknown as { activatedToolNames: { list: () => string[] } }
-    ).activatedToolNames = { list: () => [] };
-    (state.config as { cwd: string }).cwd = dirs.cwd;
-    const errWrites: string[] = [];
-    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
-      chunk: unknown,
-    ) => {
-      errWrites.push(String(chunk));
-      return true;
-    }) as typeof process.stderr.write);
-    try {
-      const pending = withMockedHomedir(dirs.home, () =>
-        finalizeTUIRun(state, services),
-      );
-      // Simulate the signal handler firing mid-finalize: both paths funnel
-      // through printResumeHint, so the shared once-flag keeps exactly one
-      // line. (The process-level `terminating` guard covers signal-vs-signal
-      // only — it cannot see the finalize tail already in flight.)
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      printResumeHint(sessionId);
-      defined(releaseTail, "releaseTail")();
-      expect(await pending).toBe(0);
-    } finally {
-      stderrSpy.mockRestore();
-      dirs.cleanup();
-    }
-    const hintLines = errWrites.filter(
-      (w) => w === `Run corbits resume ${sessionId}\n`,
-    );
-    expect(hintLines).toHaveLength(1);
+    expect(calls).toEqual([state.sessionId]);
+    expect(order).toEqual(["tail", "hint"]);
   });
 });
 
@@ -378,6 +293,36 @@ function stubSendLifecycle(agent: Agent): {
     activeRunHandle: { task: "", startedAt: 0, model: "" },
   } as unknown as RunnerServices;
   return { state, services };
+}
+
+/** A compact whose summary call never settles, so abort must win the race. */
+function hangCompact(lifecycle: ReturnType<typeof createCompactionLifecycle>) {
+  const wrapped = lifecycle.wrapCompactor({
+    name: "hang",
+    version: "0",
+    apply: () =>
+      new Promise<never>(() => {
+        // Never settles on purpose.
+      }),
+  });
+  return { pending: wrapped.apply([], {} as never) };
+}
+
+function freshCodexToken(): ReturnType<typeof spyOn> {
+  return spyOn(codexSession, "getValidCodexToken").mockResolvedValue({
+    access: "fresh-token",
+  });
+}
+
+function stubRotationDirs(): ReturnType<typeof spyOn>[] {
+  return [
+    spyOn(sessionIndex, "initSessionDir").mockImplementation(
+      async () => "/tmp/rotated-session",
+    ),
+    spyOn(sessionIndex, "sessionContextDir").mockImplementation(
+      () => "/tmp/rotated-session/context",
+    ),
+  ];
 }
 
 function hangCodexRefresh(): {
@@ -496,25 +441,6 @@ describe("agentProxy.send vs /clear", () => {
   }
 });
 
-const rebuildMockState: ReactorState = {} as unknown as ReactorState;
-
-const rebuildMockCapabilities: ReactorCapabilities = {
-  infer: (options) =>
-    ({
-      type: "infer",
-      ...(options !== undefined ? { options } : {}),
-    }) as ReactorAction,
-  executeTools: (calls) => ({ type: "execute_tools", calls }),
-  suspend: (gate) => ({ type: "suspend", gate }),
-  fork: (mode, forkId) => ({ type: "fork", mode, forkId }),
-  emit: (eventType, data) => ({ type: "emit", eventType, data }),
-  reply: (content) => ({ type: "reply", content }),
-  checkpoint: (message = "") => ({ type: "checkpoint", message }),
-  compact: (compactor, reason) => ({ type: "compact", compactor, reason }),
-  wait: () => ({ type: "wait" }),
-  done: () => ({ type: "done" }),
-};
-
 function rebuildManageTasksEvent(): ReactorInboundEvent {
   return {
     type: "inference.done",
@@ -539,18 +465,78 @@ function rebuildManageTasksEvent(): ReactorInboundEvent {
   } as unknown as ReactorInboundEvent;
 }
 
-function rebuildTextTurn(): ReactorInboundEvent {
-  return {
-    type: "inference.done",
-    turn: {
-      role: "assistant",
-      model: "test",
-      timestamp: 0,
-      content: [{ type: "text", text: "all set" }],
-    },
-    usage: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, thinking: 0 },
-    source: { model: "test-model" },
-  } as unknown as ReactorInboundEvent;
+/**
+ * The services surface every rebuild path touches: holder swap, fleet store,
+ * workflow reattach, recorder reset, and a buildAgent that mints a fresh
+ * director from the static `allowIdleWithFleet: true` seed — the same seed
+ * the TUI session assembly uses, since fleet lanes may appear mid-session.
+ * The rotation-only stubs (buildSessionSources, hostHolder, the resetters)
+ * are inert on interrupt/reload paths.
+ */
+function wireRebuildServices(
+  services: RunnerServices,
+  directorHolder: RunnerServices["directorHolder"],
+  agent: Agent,
+  store?: SubAgentSessionStore,
+): void {
+  services.directorHolder = directorHolder;
+  services.subAgentSessions = (store ?? {
+    cancelAll: async () => [],
+    list: () => [],
+  }) as unknown as RunnerServices["subAgentSessions"];
+  services.workflowHost = {
+    reattach: () => undefined,
+    reset: () => undefined,
+  } as unknown as RunnerServices["workflowHost"];
+  services.cycleRecorder = {
+    dispose: async () => "",
+    reset: () => undefined,
+    handleEvent: () => undefined,
+  } as unknown as RunnerServices["cycleRecorder"];
+  services.buildSessionSources = () => ({
+    sources: [liveSource],
+    defaultSource: liveSource.id,
+    selected: liveSource,
+  });
+  services.permissionGate = {
+    reset: () => undefined,
+  } as unknown as RunnerServices["permissionGate"];
+  services.runSink = {
+    sink: () => undefined,
+    reset: () => undefined,
+  } as unknown as RunnerServices["runSink"];
+  services.sessionCost = {
+    addTurn: () => undefined,
+    reset: () => undefined,
+  } as unknown as RunnerServices["sessionCost"];
+  services.activatedToolNames = {
+    clear: () => undefined,
+    activate: () => false,
+    list: () => [],
+  } as unknown as RunnerServices["activatedToolNames"];
+  services.hostHolder = {} as unknown as RunnerServices["hostHolder"];
+  services.buildAgent = (async () => {
+    directorHolder.instance = createChatDirector("base", [], {
+      allowIdleWithFleet: true,
+    });
+    return agent;
+  }) as unknown as RunnerServices["buildAgent"];
+}
+
+/** Seed an open task, then assert the content-free turn still re-infers. */
+async function expectOpenTaskNudge(director: ChatDirector): Promise<void> {
+  await director.decide(
+    rebuildManageTasksEvent(),
+    stubReactorState,
+    stubReactorCapabilities,
+  );
+  const actions = await director.decide(
+    stubTextTurnEvent(),
+    stubReactorState,
+    stubReactorCapabilities,
+  );
+  const list = Array.isArray(actions) ? actions : [actions];
+  expect(list.some((action) => action.type === "infer")).toBe(true);
 }
 
 describe("rebuild re-syncs idle-with-fleet while drained", () => {
@@ -563,18 +549,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
       directorHolder: { instance: director },
       subAgentSessions: store,
     });
-    await director.decide(
-      rebuildManageTasksEvent(),
-      rebuildMockState,
-      rebuildMockCapabilities,
-    );
-    const actions = await director.decide(
-      rebuildTextTurn(),
-      rebuildMockState,
-      rebuildMockCapabilities,
-    );
-    const list = Array.isArray(actions) ? actions : [actions];
-    expect(list.some((action) => action.type === "infer")).toBe(true);
+    await expectOpenTaskNudge(director);
   });
 
   test("first assemble with a drained fleet does not leave idle-with-fleet stuck true", async () => {
@@ -582,41 +557,13 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     const directorHolder: RunnerServices["directorHolder"] = {};
     const agent = recordingAgent([]);
     const { state, services } = stubSendLifecycle(agent);
-    services.directorHolder =
-      directorHolder as unknown as RunnerServices["directorHolder"];
-    services.subAgentSessions =
-      store as unknown as RunnerServices["subAgentSessions"];
-    services.workflowHost = {
-      reattach: () => undefined,
-    } as unknown as RunnerServices["workflowHost"];
-    services.cycleRecorder = {
-      dispose: async () => "",
-      reset: () => undefined,
-      handleEvent: () => undefined,
-    } as unknown as RunnerServices["cycleRecorder"];
-    services.buildAgent = (async () => {
-      directorHolder.instance = createChatDirector("base", [], {
-        allowIdleWithFleet: true,
-      });
-      return agent;
-    }) as unknown as RunnerServices["buildAgent"];
+    wireRebuildServices(services, directorHolder, agent, store);
     await createRunLifecycle(state, services);
     const director = defined(
       directorHolder.instance,
       "directorHolder.instance",
     );
-    await director.decide(
-      rebuildManageTasksEvent(),
-      rebuildMockState,
-      rebuildMockCapabilities,
-    );
-    const actions = await director.decide(
-      rebuildTextTurn(),
-      rebuildMockState,
-      rebuildMockCapabilities,
-    );
-    const list = Array.isArray(actions) ? actions : [actions];
-    expect(list.some((action) => action.type === "infer")).toBe(true);
+    await expectOpenTaskNudge(director);
   });
 
   test("interrupt during an in-flight compaction aborts the compact and rebuilds so the next send works", async () => {
@@ -624,26 +571,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     const sends: string[] = [];
     const agent = recordingAgent(sends);
     const { state, services } = stubSendLifecycle(agent);
-    services.directorHolder =
-      directorHolder as unknown as RunnerServices["directorHolder"];
-    services.subAgentSessions = {
-      cancelAll: async () => [],
-      list: () => [],
-    } as unknown as RunnerServices["subAgentSessions"];
-    services.workflowHost = {
-      reattach: () => undefined,
-    } as unknown as RunnerServices["workflowHost"];
-    services.cycleRecorder = {
-      dispose: async () => "",
-      reset: () => undefined,
-      handleEvent: () => undefined,
-    } as unknown as RunnerServices["cycleRecorder"];
-    services.buildAgent = (async () => {
-      directorHolder.instance = createChatDirector("base", [], {
-        allowIdleWithFleet: true,
-      });
-      return agent;
-    }) as unknown as RunnerServices["buildAgent"];
+    wireRebuildServices(services, directorHolder, agent);
     await createRunLifecycle(state, services);
     // A fold is mid-flight on the reactor when the operator interrupts: the
     // wrapped compact hangs on its summary call.
@@ -653,15 +581,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     state.systemNotice = (text: string) => {
       notices.push(text);
     };
-    const wrapped = lifecycle.wrapCompactor({
-      name: "hang",
-      version: "0",
-      apply: () =>
-        new Promise<never>(() => {
-          // Never settles on purpose: the interrupt gate must win the race.
-        }),
-    });
-    const pending = wrapped.apply([], {} as never);
+    const { pending } = hangCompact(lifecycle);
     expect(lifecycle.isCompacting()).toBe(true);
     // CL-8220: the gate aborts the compact first instead of parking the
     // interrupt behind the unobservable reactor, then rebuilds as usual.
@@ -677,10 +597,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
       true,
     );
     // The rebuilt session accepts the resend — no hop was dropped.
-    const codexRefresh = spyOn(
-      codexSession,
-      "getValidCodexToken",
-    ).mockResolvedValue({ access: "fresh-token" });
+    const codexRefresh = freshCodexToken();
     try {
       await defined(state.agentProxy, "agentProxy").send("after interrupt");
     } finally {
@@ -695,69 +612,15 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     const sends: string[] = [];
     const agent = recordingAgent(sends);
     const { state, services } = stubSendLifecycle(agent);
-    services.directorHolder =
-      directorHolder as unknown as RunnerServices["directorHolder"];
-    services.subAgentSessions =
-      store as unknown as RunnerServices["subAgentSessions"];
-    services.workflowHost = {
-      reattach: () => undefined,
-      reset: () => undefined,
-    } as unknown as RunnerServices["workflowHost"];
-    services.cycleRecorder = {
-      dispose: async () => "",
-      reset: () => undefined,
-      handleEvent: () => undefined,
-    } as unknown as RunnerServices["cycleRecorder"];
-    services.buildSessionSources = () => ({
-      sources: [liveSource],
-      defaultSource: liveSource.id,
-      selected: liveSource,
-    });
-    services.permissionGate = {
-      reset: () => undefined,
-    } as unknown as RunnerServices["permissionGate"];
-    services.runSink = {
-      sink: () => undefined,
-      reset: () => undefined,
-    } as unknown as RunnerServices["runSink"];
-    services.sessionCost = {
-      addTurn: () => undefined,
-      reset: () => undefined,
-    } as unknown as RunnerServices["sessionCost"];
-    services.activatedToolNames = {
-      clear: () => undefined,
-      activate: () => false,
-      list: () => [],
-    } as unknown as RunnerServices["activatedToolNames"];
-    services.hostHolder = {} as unknown as RunnerServices["hostHolder"];
-    services.buildAgent = (async () => {
-      directorHolder.instance = createChatDirector("base", [], {
-        allowIdleWithFleet: true,
-      });
-      return agent;
-    }) as unknown as RunnerServices["buildAgent"];
-    const initDir = spyOn(sessionIndex, "initSessionDir").mockImplementation(
-      async () => "/tmp/rotated-session",
-    );
-    const contextDir = spyOn(
-      sessionIndex,
-      "sessionContextDir",
-    ).mockImplementation(() => "/tmp/rotated-session/context");
+    wireRebuildServices(services, directorHolder, agent, store);
+    const dirs = stubRotationDirs();
     try {
       await createRunLifecycle(state, services);
       // A fold is mid-flight on the reactor when the operator rotates: the
       // wrapped compact hangs on its summary call.
       const lifecycle = createCompactionLifecycle();
       state.compactionLifecycle = lifecycle;
-      const wrapped = lifecycle.wrapCompactor({
-        name: "hang",
-        version: "0",
-        apply: () =>
-          new Promise<never>(() => {
-            // Never settles on purpose: the rotation gate must win the race.
-          }),
-      });
-      const pending = wrapped.apply([], {} as never);
+      const { pending } = hangCompact(lifecycle);
       expect(lifecycle.isCompacting()).toBe(true);
       // The rotation aborts the compact first instead of parking behind the
       // hung summary call, then rebuilds onto the fresh session as usual.
@@ -768,10 +631,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
       await services.sessionOps.awaitTail();
       expect(state.fatalBuildError).toBeNull();
       // The rotated session accepts the resend — no hop was dropped.
-      const codexRefresh = spyOn(
-        codexSession,
-        "getValidCodexToken",
-      ).mockResolvedValue({ access: "fresh-token" });
+      const codexRefresh = freshCodexToken();
       try {
         await defined(state.agentProxy, "agentProxy").send("after rotation");
       } finally {
@@ -779,8 +639,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
       }
       expect(sends).toContain("after rotation");
     } finally {
-      initDir.mockRestore();
-      contextDir.mockRestore();
+      for (const spy of dirs) spy.mockRestore();
     }
   });
 
@@ -788,26 +647,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     const directorHolder: RunnerServices["directorHolder"] = {};
     const agent = recordingAgent([]);
     const { state, services } = stubSendLifecycle(agent);
-    services.directorHolder =
-      directorHolder as unknown as RunnerServices["directorHolder"];
-    services.subAgentSessions = {
-      cancelAll: async () => [],
-      list: () => [],
-    } as unknown as RunnerServices["subAgentSessions"];
-    services.workflowHost = {
-      reattach: () => undefined,
-    } as unknown as RunnerServices["workflowHost"];
-    services.cycleRecorder = {
-      dispose: async () => "",
-      reset: () => undefined,
-      handleEvent: () => undefined,
-    } as unknown as RunnerServices["cycleRecorder"];
-    services.buildAgent = (async () => {
-      directorHolder.instance = createChatDirector("base", [], {
-        allowIdleWithFleet: true,
-      });
-      return agent;
-    }) as unknown as RunnerServices["buildAgent"];
+    wireRebuildServices(services, directorHolder, agent);
     await createRunLifecycle(state, services);
     const lifecycle = createCompactionLifecycle();
     state.compactionLifecycle = lifecycle;
@@ -816,15 +656,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     services.buildAgent = (async () => {
       throw new Error("build blew up");
     }) as unknown as RunnerServices["buildAgent"];
-    const hanging = lifecycle.wrapCompactor({
-      name: "hang",
-      version: "0",
-      apply: () =>
-        new Promise<never>(() => {
-          // Never settles on purpose: the interrupt gate must win the race.
-        }),
-    });
-    const pending = hanging.apply([], {} as never);
+    const { pending } = hangCompact(lifecycle);
     expect(lifecycle.isCompacting()).toBe(true);
     defined(state.interrupt, "interrupt")();
     const aborted = await pending;
@@ -862,26 +694,7 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     const directorHolder: RunnerServices["directorHolder"] = {};
     const agent = recordingAgent([]);
     const { state, services } = stubSendLifecycle(agent);
-    services.directorHolder =
-      directorHolder as unknown as RunnerServices["directorHolder"];
-    services.subAgentSessions = {
-      cancelAll: async () => [],
-      list: () => [],
-    } as unknown as RunnerServices["subAgentSessions"];
-    services.workflowHost = {
-      reattach: () => undefined,
-    } as unknown as RunnerServices["workflowHost"];
-    services.cycleRecorder = {
-      dispose: async () => "",
-      reset: () => undefined,
-      handleEvent: () => undefined,
-    } as unknown as RunnerServices["cycleRecorder"];
-    services.buildAgent = (async () => {
-      directorHolder.instance = createChatDirector("base", [], {
-        allowIdleWithFleet: true,
-      });
-      return agent;
-    }) as unknown as RunnerServices["buildAgent"];
+    wireRebuildServices(services, directorHolder, agent);
     await createRunLifecycle(state, services);
     const lifecycle = createCompactionLifecycle();
     state.compactionLifecycle = lifecycle;
@@ -905,60 +718,29 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     const directorHolder: RunnerServices["directorHolder"] = {};
     const agent = recordingAgent([]);
     const { state, services } = stubSendLifecycle(agent);
-    services.directorHolder =
-      directorHolder as unknown as RunnerServices["directorHolder"];
-    services.subAgentSessions =
-      store as unknown as RunnerServices["subAgentSessions"];
-    services.workflowHost = {
-      reattach: () => undefined,
-    } as unknown as RunnerServices["workflowHost"];
-    services.cycleRecorder = {
-      dispose: async () => "",
-      reset: () => undefined,
-      handleEvent: () => undefined,
-    } as unknown as RunnerServices["cycleRecorder"];
-    services.buildAgent = (async () => {
-      // Every rebuild mints a fresh director from the static true seed (fleet
-      // lanes may appear mid-session), exactly like the TUI session assembly.
-      directorHolder.instance = createChatDirector("base", [], {
-        allowIdleWithFleet: true,
-      });
-      return agent;
-    }) as unknown as RunnerServices["buildAgent"];
+    // Every rebuild mints a fresh director from the static true seed (fleet
+    // lanes may appear mid-session), exactly like the TUI session assembly.
+    wireRebuildServices(services, directorHolder, agent, store);
     const fleetEvents: unknown[] = [];
     services.emitter.on("event", (event: { type: string }) => {
       if (event.type === "fleet") fleetEvents.push(event);
     });
     await createRunLifecycle(state, services);
-    const expectOpenTaskNudge = async (): Promise<void> => {
-      const director = defined(
-        directorHolder.instance,
-        "directorHolder.instance",
+    const nudges = (): Promise<void> =>
+      expectOpenTaskNudge(
+        defined(directorHolder.instance, "directorHolder.instance"),
       );
-      await director.decide(
-        rebuildManageTasksEvent(),
-        rebuildMockState,
-        rebuildMockCapabilities,
-      );
-      const actions = await director.decide(
-        rebuildTextTurn(),
-        rebuildMockState,
-        rebuildMockCapabilities,
-      );
-      const list = Array.isArray(actions) ? actions : [actions];
-      expect(list.some((action) => action.type === "infer")).toBe(true);
-    };
     // Drained fleet: the idle reload rebuilds onto the static true seed.
     state.pendingReload = true;
     defined(state.reloadIfIdle, "reloadIfIdle")();
     await services.sessionOps.awaitTail();
     expect(state.fatalBuildError).toBeNull();
-    await expectOpenTaskNudge();
+    await nudges();
     // The interrupt rebuild inherits the same seed.
     defined(state.interrupt, "interrupt")();
     await services.sessionOps.awaitTail();
     expect(state.fatalBuildError).toBeNull();
-    await expectOpenTaskNudge();
+    await nudges();
     expect(store.list()).toEqual([]);
     expect(fleetEvents).toEqual([]);
   });
@@ -968,54 +750,8 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
     const directorHolder: RunnerServices["directorHolder"] = {};
     const agent = recordingAgent([]);
     const { state, services } = stubSendLifecycle(agent);
-    services.directorHolder =
-      directorHolder as unknown as RunnerServices["directorHolder"];
-    services.subAgentSessions =
-      store as unknown as RunnerServices["subAgentSessions"];
-    services.workflowHost = {
-      reattach: () => undefined,
-      reset: () => undefined,
-    } as unknown as RunnerServices["workflowHost"];
-    services.cycleRecorder = {
-      dispose: async () => "",
-      reset: () => undefined,
-      handleEvent: () => undefined,
-    } as unknown as RunnerServices["cycleRecorder"];
-    services.buildSessionSources = () => ({
-      sources: [liveSource],
-      defaultSource: liveSource.id,
-      selected: liveSource,
-    });
-    services.permissionGate = {
-      reset: () => undefined,
-    } as unknown as RunnerServices["permissionGate"];
-    services.runSink = {
-      sink: () => undefined,
-      reset: () => undefined,
-    } as unknown as RunnerServices["runSink"];
-    services.sessionCost = {
-      addTurn: () => undefined,
-      reset: () => undefined,
-    } as unknown as RunnerServices["sessionCost"];
-    services.activatedToolNames = {
-      clear: () => undefined,
-      activate: () => false,
-      list: () => [],
-    } as unknown as RunnerServices["activatedToolNames"];
-    services.hostHolder = {} as unknown as RunnerServices["hostHolder"];
-    services.buildAgent = (async () => {
-      directorHolder.instance = createChatDirector("base", [], {
-        allowIdleWithFleet: true,
-      });
-      return agent;
-    }) as unknown as RunnerServices["buildAgent"];
-    const initDir = spyOn(sessionIndex, "initSessionDir").mockImplementation(
-      async () => "/tmp/rotated-session",
-    );
-    const contextDir = spyOn(
-      sessionIndex,
-      "sessionContextDir",
-    ).mockImplementation(() => "/tmp/rotated-session/context");
+    wireRebuildServices(services, directorHolder, agent, store);
+    const dirs = stubRotationDirs();
     try {
       await createRunLifecycle(state, services);
       defined(state.newSession, "newSession")();
@@ -1025,21 +761,162 @@ describe("rebuild re-syncs idle-with-fleet while drained", () => {
         directorHolder.instance,
         "directorHolder.instance",
       );
-      await director.decide(
-        rebuildManageTasksEvent(),
-        rebuildMockState,
-        rebuildMockCapabilities,
-      );
-      const actions = await director.decide(
-        rebuildTextTurn(),
-        rebuildMockState,
-        rebuildMockCapabilities,
-      );
-      const list = Array.isArray(actions) ? actions : [actions];
-      expect(list.some((action) => action.type === "infer")).toBe(true);
+      await expectOpenTaskNudge(director);
     } finally {
-      initDir.mockRestore();
-      contextDir.mockRestore();
+      for (const spy of dirs) spy.mockRestore();
     }
+  });
+});
+
+// CL-5753: an interrupt can hit close() while reactor.abort()/sendQueue.drain()
+// are mid-teardown, throwing before @intx/agent's close() ever reaches
+// lock.release(). Once that happens the agent is already marked closed, so a
+// retried close() is a silent no-op that can never free the lock either — the
+// workdir's lock is stuck held for the rest of the process. The next
+// buildAgent() for that same workdir is then guaranteed to throw
+// AgentContextLockError ("an agent is already open for workdir: ..."), which
+// is the crash from the ticket. These tests cover the two functions the
+// runner now routes every rebuild through so that failure is reported in
+// plain language rather than escaping as an unhandled rejection.
+describe("rebuild close helpers", () => {
+  function stubAgent(closeImpl: () => Promise<void>): Agent {
+    return { close: closeImpl } as unknown as Agent;
+  }
+
+  test("closeAgentForRebuild reports success when close() resolves", async () => {
+    const agent = stubAgent(() => Promise.resolve());
+    const closedCleanly = await closeAgentForRebuild(agent, "interrupt");
+    expect(closedCleanly).toBe(true);
+  });
+
+  test("agentRebuildFailure translates stale-lock errors and passes others through", () => {
+    // Simulates the second acquisition throwing after a failed close left the
+    // lock held: buildAgent() surfaces AgentContextLockError, which must not
+    // reach the caller as a raw stack trace.
+    const err = agentRebuildFailure(new AgentContextLockError("/tmp/workdir"));
+    expect(err.message).not.toContain("already open");
+    expect(err.message).toMatch(/restart/i);
+    const original = new Error("network unreachable");
+    expect(agentRebuildFailure(original)).toBe(original);
+  });
+
+  test("a failed close followed by a lock error never surfaces as a raw AgentContextLockError", async () => {
+    // End-to-end shape of the fix: close() throws (lock leaked in-process),
+    // the rebuild site short-circuits instead of calling buildAgent() again,
+    // and the resulting error is the plain-language one — never the raw
+    // AgentContextLockError a bare `throw` would have produced.
+    const agent = stubAgent(() =>
+      Promise.reject(new AgentContextLockError("/tmp/workdir")),
+    );
+    let rebuildError: Error | null = null;
+    try {
+      const closedCleanly = await closeAgentForRebuild(agent, "interrupt");
+      expect(closedCleanly).toBe(false);
+      if (!closedCleanly) {
+        throw new AgentContextLockError("/tmp/workdir");
+      }
+    } catch (err) {
+      rebuildError = agentRebuildFailure(err);
+    }
+    expect(rebuildError).not.toBeNull();
+    expect(rebuildError).not.toBeInstanceOf(AgentContextLockError);
+    expect(defined(rebuildError, "rebuild error").message).toMatch(/restart/i);
+  });
+
+  // reloadIfIdle itself is a closure captured inside runTUI's single
+  // ~2500-line scope (currentAgent, buildAgent, streamPromise,
+  // workflowController, pendingReload/inFlight, fatalBuildError, etc. are all
+  // local variables of that function), with no seam to construct or call it
+  // in isolation short of standing up the full TUI runner — provider config,
+  // plugin discovery, MCP wiring, and a real OpenTUI host. What can be driven
+  // directly, and is exactly the failure this bug reports, is the real
+  // `delivery-queue.ts` queue exercised the same way every rebuild site uses
+  // it: `void enqueueOp(async () => { try { ... } catch (err) {
+  // fatalBuildError = ... } })`. `enqueue` is `tail = tail.then(op, op);
+  // return tail;` — if `op` rejects and nothing internally catches it, that
+  // returned promise is the only thing that ever observes the rejection, and
+  // `void` discards it, which is precisely how the unhandled rejection in the
+  // ticket escaped.
+  //
+  // A true negative control (reproducing reloadIfIdle's pre-fix shape — no
+  // try/catch around the queued op — and asserting the rejection escapes) was
+  // attempted here and deliberately removed: bun:test installs its own
+  // `unhandledRejection` listener that fails whichever test is running the
+  // instant one fires, regardless of what that test asserts, so a test
+  // designed to prove an unhandled rejection *does* escape cannot pass in
+  // this harness — it is intercepted before the assertion runs. The test
+  // below is the harness-compatible half of that pair: same real queue, same
+  // real helpers, proving the fixed shape produces no such failure.
+  test("a rejecting reload op through the real delivery-queue never triggers an unhandled rejection", async () => {
+    const { enqueue, awaitTail } = createSessionOperationQueue();
+    const agent = stubAgent(() =>
+      Promise.reject(new AgentContextLockError("/tmp/workdir")),
+    );
+
+    let unhandled: unknown = null;
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandled = reason;
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+
+    let fatalBuildError: Error | null = null;
+    try {
+      // Mirrors reloadIfIdle's body verbatim: close the current agent through
+      // closeAgentForRebuild, skip buildAgent() and throw instead of
+      // re-acquiring on a failed close, and land any failure in
+      // fatalBuildError via agentRebuildFailure — all behind `void enqueueOp`,
+      // exactly as the runner calls it.
+      void enqueue(async () => {
+        try {
+          const closedCleanly = await closeAgentForRebuild(agent, "reload");
+          if (!closedCleanly) {
+            throw new AgentContextLockError("/tmp/workdir");
+          }
+        } catch (err) {
+          fatalBuildError = agentRebuildFailure(err);
+        }
+      });
+
+      await awaitTail();
+      // Give any unhandled rejection queued by the engine a chance to fire
+      // before asserting its absence — it lands on a later microtask/macrotask
+      // than the awaited queue settlement.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+
+    expect(unhandled).toBeNull();
+    expect(fatalBuildError).not.toBeNull();
+    expect(fatalBuildError).not.toBeInstanceOf(AgentContextLockError);
+    expect(
+      defined<Error>(fatalBuildError, "fatal build error").message,
+    ).toMatch(/restart/i);
+  });
+
+  // Overlay accept/decline tests stub bump() inside resolveSuspended, so
+  // deleting the interrupt-site bump would not fail them. Drive the interrupt
+  // helper itself.
+  test("interrupt bumps delivery generation before enqueueing rebuild", () => {
+    const order: string[] = [];
+    startInterruptRebuild({
+      deliveryGeneration: {
+        bump: () => {
+          order.push("bump");
+        },
+      },
+      markSendAborted: () => {
+        order.push("abort");
+      },
+      enqueue: (op) => {
+        order.push("enqueue");
+        return op();
+      },
+      rebuild: async () => {
+        order.push("rebuild");
+      },
+    });
+    expect(order[0]).toBe("bump");
+    expect(order.indexOf("enqueue")).toBeGreaterThan(0);
   });
 });

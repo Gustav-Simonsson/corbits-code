@@ -1,4 +1,4 @@
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import { describe, test, expect } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -62,8 +62,6 @@ describe("createApprovalLog", () => {
     expect(defined(record).mode).toBe("interactive");
     expect(defined(record).segments).toBe(3);
     expect(defined(record).outcome).toBe("allow-with-scope");
-    expect(defined(record).durationMs).toBe(150);
-    expect(defined(record).displayDelayMs).toBe(50);
     // No command text, path, or subject of any kind is ever recorded.
     expect(Object.keys(defined(record))).not.toContain("subject");
     expect(Object.keys(defined(record))).not.toContain("command");

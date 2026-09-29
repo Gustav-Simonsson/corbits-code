@@ -12,7 +12,6 @@ import type {
   InboundMessage,
 } from "@intx/types/runtime";
 
-import { APPROVAL_TIMEOUT_RESULT_TEXT } from "../permission/decline-markers.js";
 import type { PermissionGate } from "../permission/gate.js";
 import { createExtraDeniedPathMatcher } from "../plugins/secret-guard-plugin.js";
 import {
@@ -22,102 +21,34 @@ import {
   resolveParkedCallIdFromStore,
 } from "./approval-resume.js";
 import { createSessionOperationQueue } from "../tui/delivery-queue.js";
-
-function assistantTurn(
-  calls: { id: string; name: string; command: string }[],
-): ConversationTurn {
-  return {
-    role: "assistant",
-    content: calls.map((call) => ({
-      type: "tool_call" as const,
-      id: call.id,
-      name: call.name,
-      arguments: { command: call.command },
-    })),
-    timestamp: 1,
-  };
-}
-
-function timeoutTurn(callId: string): ConversationTurn {
-  return {
-    role: "user",
-    content: [
-      {
-        type: "tool_result" as const,
-        callId,
-        content: [
-          { type: "text" as const, text: APPROVAL_TIMEOUT_RESULT_TEXT },
-        ],
-        isError: true,
-      },
-    ],
-    timestamp: 2,
-  };
-}
-
-function shellSnapshot(command: string): ApprovalSnapshot {
-  return {
-    name: "run_shell",
-    description: "run a shell command",
-    inputSchema: {},
-    arguments: { command },
-  };
-}
-
-function suspension(
-  correlationId: string,
-  command: string,
-): Extract<SendResult, { type: "suspended" }> {
-  return {
-    type: "suspended",
-    correlationId,
-    approvalSnapshot: shellSnapshot(command),
-  };
-}
+import {
+  approvalTimeoutTurn as timeoutTurn,
+  assistantToolCallTurn as assistantTurn,
+  createApprovalResumeHarness,
+  decisionBody,
+  deliveredCorrelationId,
+  shellApprovalSnapshot as shellSnapshot,
+  suspendedResult as suspension,
+  userTextTurn,
+} from "../../testkit/approval-resume-harness.js";
 
 function setup(args: {
   preTurns: ConversationTurn[];
   onGate: (turns: ConversationTurn[]) => void;
   resolveParkedCallId?: (correlationId: string) => string | undefined;
 }) {
-  const turns: ConversationTurn[] = [...args.preTurns];
-  const delivered: InboundMessage[] = [];
-  const agent = {
-    history: async () => turns,
-    deliver: (message: InboundMessage) => {
-      delivered.push(message);
-    },
-  };
-  const gate = {
-    resolveSuspended: async () => {
-      args.onGate(turns);
-      return { allow: true };
-    },
-  } as unknown as PermissionGate;
+  const { agent, gate, delivered } = createApprovalResumeHarness({
+    turns: args.preTurns,
+    onGate: args.onGate,
+  });
   const resume = createApprovalResume({
-    getAgent: () => agent as Pick<Agent, "deliver" | "history">,
+    getAgent: () => agent,
     gate,
     resolveParkedCallId:
       args.resolveParkedCallId ??
       ((correlationId) => (correlationId === "corr-A" ? "call-A" : undefined)),
   });
   return { resume, delivered };
-}
-
-function decisionBody(message: InboundMessage): {
-  outcome: string;
-  message?: string;
-} {
-  if (message.content === undefined)
-    throw new Error("expected a decision body");
-  return JSON.parse(message.content) as { outcome: string; message?: string };
-}
-
-function deliveredCorrelationId(message: InboundMessage): string {
-  const correlationId = message.headers.interchangeCorrelationId;
-  if (correlationId === undefined)
-    throw new Error("expected an interchange correlation id");
-  return correlationId;
 }
 
 function fileSnapshot(name: string): ApprovalSnapshot {
@@ -324,47 +255,36 @@ describe("approval decision intent headers", () => {
 });
 
 describe("approval-resume parallel-parked approvals", () => {
-  test("delivers A's decision when a different parked call's approval times out", async () => {
-    const { resume, delivered } = setup({
-      preTurns: [
-        assistantTurn([
-          { id: "call-A", name: "run_shell", command: "echo alpha" },
-          { id: "call-B", name: "run_shell", command: "echo bravo" },
-        ]),
-      ],
-      onGate: (turns) => {
-        turns.push(timeoutTurn("call-B"));
-      },
+  for (const timedOutCallId of ["call-B", "call-A"]) {
+    test(`a ${timedOutCallId} timeout ${timedOutCallId === "call-B" ? "still delivers" : "drops"} A's decision`, async () => {
+      const { resume, delivered } = setup({
+        preTurns: [
+          assistantTurn([
+            { id: "call-A", name: "run_shell", command: "echo alpha" },
+            { id: "call-B", name: "run_shell", command: "echo bravo" },
+          ]),
+        ],
+        onGate: (turns) => {
+          turns.push(timeoutTurn(timedOutCallId));
+        },
+      });
+
+      const handled = await resume.handle(suspension("corr-A", "echo alpha"));
+
+      expect(handled).toBe(true);
+      if (timedOutCallId === "call-A") {
+        // A genuinely late decision for the parked call itself must drop.
+        expect(delivered).toHaveLength(0);
+        return;
+      }
+      expect(delivered).toHaveLength(1);
+      const message = delivered[0];
+      if (message === undefined)
+        throw new Error("expected a delivered decision");
+      expect(deliveredCorrelationId(message)).toBe("corr-A");
+      expect(decisionBody(message).outcome).toBe("approved");
     });
-
-    const handled = await resume.handle(suspension("corr-A", "echo alpha"));
-
-    expect(handled).toBe(true);
-    expect(delivered).toHaveLength(1);
-    const message = delivered[0];
-    if (message === undefined) throw new Error("expected a delivered decision");
-    expect(deliveredCorrelationId(message)).toBe("corr-A");
-    expect(decisionBody(message).outcome).toBe("approved");
-  });
-
-  test("still drops a genuinely late decision for the same parked call", async () => {
-    const { resume, delivered } = setup({
-      preTurns: [
-        assistantTurn([
-          { id: "call-A", name: "run_shell", command: "echo alpha" },
-          { id: "call-B", name: "run_shell", command: "echo bravo" },
-        ]),
-      ],
-      onGate: (turns) => {
-        turns.push(timeoutTurn("call-A"));
-      },
-    });
-
-    const handled = await resume.handle(suspension("corr-A", "echo alpha"));
-
-    expect(handled).toBe(true);
-    expect(delivered).toHaveLength(0);
-  });
+  }
 
   test("history throw after the operator answers still delivers", async () => {
     const turns = [
@@ -402,13 +322,7 @@ describe("approval-resume parallel-parked approvals", () => {
 
   test("pending-operation lookup identifies the parked call without history tool calls", async () => {
     const { resume, delivered } = setup({
-      preTurns: [
-        {
-          role: "user",
-          content: [{ type: "text" as const, text: "run two shell commands" }],
-          timestamp: 1,
-        },
-      ],
+      preTurns: [userTextTurn("run two shell commands")],
       onGate: (turns) => {
         turns.push(timeoutTurn("call-B"));
       },

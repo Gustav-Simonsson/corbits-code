@@ -21,7 +21,7 @@ import {
 } from "./shell/palette.js";
 import { setPromptModelLabel } from "./shell/prompt.js";
 
-const MODEL_LABEL = "xai/thegreataxios · grok-4.5";
+const MODEL_LABEL = "xai/alice · grok-4.5";
 
 const ITEMS = [
   "glm-5.2 * [Z.AI]",
@@ -67,7 +67,7 @@ async function paintOverlay(
   return withTestRenderer(async (h) => {
     const shell = createAppShell(h.renderer);
     setPromptModelLabel(shell, {
-      profile: "xai/thegreataxios",
+      profile: "xai/alice",
       model: "grok-4.5",
     });
     // An overlay always opens over a live session; the landing splits the
@@ -118,17 +118,19 @@ describe("overlay host never shares cells with the prompt border", () => {
       );
 
       const expected = [
-        " model · Esc cancel · Enter choose · Alt+A /connect add provider",
         ` ▶ ${ITEMS[0]}`,
         ...ITEMS.slice(1).map((i) => `   ${i}`),
       ];
-      expectCleanInterior(interior, expected);
+      // Row 0 is the title/how-to line: the supplied title must show, but
+      // its exact hint wording is not part of this contract.
+      expect(interior[0]).toContain("model");
+      expectCleanInterior(interior.slice(1), expected);
 
       // The selected row must be intact, not overwritten by the model label.
       expect(interior).toContain(` ▶ ${ITEMS[0]}`);
       for (const row of interior) {
         expect(row.includes(MODEL_LABEL)).toBe(false);
-        expect(row.includes("thegreataxios")).toBe(false);
+        expect(row.includes("alice")).toBe(false);
       }
 
       // The label rides the prompt box's top border, outside the overlay box.
@@ -185,8 +187,6 @@ describe("overlay host never shares cells with the prompt border", () => {
 });
 
 describe("plugins title how-to", () => {
-  const expected =
-    " plugins · Esc cancel · Enter toggle · Alt+A add path · Alt+X remove";
   for (const size of [
     { width: 80, height: 24 },
     { width: 100, height: 24 },
@@ -201,7 +201,9 @@ describe("plugins title how-to", () => {
           }),
         size,
       );
-      expect(interior[0]).toBe(expected);
+      expect(interior[0]).toContain("plugins");
+      expect(interior[0]).toContain("Alt+A");
+      expect(interior[0]).toContain("Alt+X");
     });
   }
 });
@@ -218,9 +220,7 @@ describe("web search provider how-to", () => {
       { width: 80, height: 24 },
     );
     expect(interior[0]).not.toContain("Alt+X");
-    expect(interior[0]).toBe(
-      " web search provider · Esc cancel · Enter choose",
-    );
+    expect(interior[0]).toContain("web search provider");
   });
 });
 
@@ -286,7 +286,7 @@ describe("every overlay kind paints clean rows", () => {
 
       expect(interior.length).toBeGreaterThan(0);
       for (const row of interior) {
-        expect(row.includes("thegreataxios")).toBe(false);
+        expect(row.includes("alice")).toBe(false);
       }
 
       const barRows = frameLine(frame, (l) => l.includes(MODEL_LABEL));

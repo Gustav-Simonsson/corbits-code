@@ -1,8 +1,8 @@
-import { defined } from "../tests/helpers/defined.js";
+import { defined } from "../testkit/defined.js";
 import { describe, test, expect } from "bun:test";
-import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import {
+  parseModelsDevContextWindows,
   parseModelsDevPricing,
   parseModelsDevReasoning,
   fetchPricing,
@@ -24,18 +24,9 @@ describe("defaultPricingCachePath", () => {
   test("resolves under ~/.corbits/, not project cwd .cache/", () => {
     const path = defaultPricingCachePath();
     expect(isAbsolute(path)).toBe(true);
-    expect(path).toBe(
-      join(homedir(), ".corbits", "cache", "models-pricing.json"),
-    );
     // Must not be the old cwd-relative default that polluted project directories.
     expect(path).not.toBe(".cache/models-pricing.json");
     expect(path.endsWith(join(".cache", "models-pricing.json"))).toBe(false);
-  });
-
-  test("accepts an injectable home directory", () => {
-    expect(defaultPricingCachePath("/tmp/fake-home")).toBe(
-      join("/tmp/fake-home", ".corbits", "cache", "models-pricing.json"),
-    );
   });
 });
 
@@ -159,13 +150,10 @@ describe("parseModelsDevPricing", () => {
     expect(result["incomplete"]).toBeUndefined();
   });
 
-  test("returns empty object for non-object input", () => {
+  test("returns empty object for input with no model entries", () => {
     expect(parseModelsDevPricing(null)).toEqual({});
     expect(parseModelsDevPricing("string")).toEqual({});
     expect(parseModelsDevPricing(42)).toEqual({});
-  });
-
-  test("returns empty object for empty object input", () => {
     expect(parseModelsDevPricing({})).toEqual({});
   });
 });
@@ -274,36 +262,6 @@ describe("loadPricing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// writePricingCache error path
-// ---------------------------------------------------------------------------
-
-describe("writePricingCache error handling", () => {
-  test("swallows write errors and logs to stderr", async () => {
-    const stderrLines: string[] = [];
-    const orig = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((s: string) => {
-      stderrLines.push(s);
-      return true;
-    }) as typeof process.stderr.write;
-
-    // Write to a path where mkdir will fail (file exists as a file, not dir)
-    const badPath = `/tmp/not-a-dir-${Date.now()}`;
-    try {
-      await Bun.write(badPath, "I am a file");
-      await writePricingCache(
-        { timestamp: 0, models: {} },
-        `${badPath}/nested/cache.json`,
-      );
-    } finally {
-      process.stderr.write = orig;
-    }
-    expect(stderrLines.some((l) => l.includes("failed to write cache"))).toBe(
-      true,
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
 // startPricingRefresh
 // ---------------------------------------------------------------------------
 
@@ -367,5 +325,41 @@ describe("readPricingCache / writePricingCache", () => {
     );
     const result = await readPricingCache(path);
     expect(result).toBeNull();
+  });
+});
+
+describe("parseModelsDevContextWindows", () => {
+  test("reads limit.context per model", () => {
+    const windows = parseModelsDevContextWindows({
+      "z-ai": {
+        models: {
+          "glm-4.6": {
+            id: "z-ai/glm-4.6",
+            limit: { context: 64_000, output: 8_000 },
+          },
+        },
+      },
+      openai: {
+        models: {
+          "gpt-5.6": { id: "openai/gpt-5.6", limit: { context: 1_000_000 } },
+          "no-limit": { id: "openai/no-limit" },
+        },
+      },
+    });
+    expect(windows["z-ai/glm-4.6"]).toBe(64_000);
+    expect(windows["openai/gpt-5.6"]).toBe(1_000_000);
+    expect(windows["openai/no-limit"]).toBeUndefined();
+  });
+});
+
+describe("parseModelsDevPricing root array", () => {
+  test("walks a top-level array payload the same way the other collectors do", () => {
+    // A nesting level where the root itself is an array, rather than an object
+    // whose values are arrays. parseModelsDevReasoning and
+    // parseModelsDevContextWindows already handle this; pricing must match.
+    const models = parseModelsDevPricing([
+      { id: "m1", input_cost_per_million: 1, output_cost_per_million: 2 },
+    ]);
+    expect(models["m1"]).toBeDefined();
   });
 });

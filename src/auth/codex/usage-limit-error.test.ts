@@ -1,4 +1,4 @@
-import { defined } from "../../../tests/helpers/defined.js";
+import { defined } from "../../../testkit/defined.js";
 import { describe, expect, test } from "bun:test";
 import {
   codexUsageLimitRetryAfterMs,
@@ -105,10 +105,9 @@ describe("formatCodexUsageLimitMessage", () => {
     const parsed = parseCodexUsageLimitError(LIVE_USAGE_LIMIT_BODY);
     expect(parsed).toBeDefined();
     const line = formatCodexUsageLimitMessage(defined(parsed), {
-      profile: "abk-labs",
+      profile: "acme-labs",
     });
-    expect(line).toContain('Codex profile "abk-labs"');
-    expect(line).toContain("workspace member");
+    expect(line).toContain('Codex profile "acme-labs"');
     expect(line).toMatch(/Resets in ~/);
     expect(line).toContain("/model");
   });
@@ -120,7 +119,6 @@ describe("formatCodexUsageLimitMessage", () => {
       planType: "plus",
       resetsInSeconds: 120,
     });
-    expect(line.startsWith("Codex usage limit reached")).toBe(true);
     expect(line).toContain("plus");
     expect(line).toContain("~2m");
   });

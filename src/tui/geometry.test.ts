@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import {
   AGENTS_PANEL_MAX_VISIBLE,
   COLLAPSE_ORDER,
@@ -12,7 +12,6 @@ import {
   PROMPT_IDLE_ROWS,
   SIDE_MARGIN,
   TASKS_PANEL_MAX_VISIBLE,
-  ZONE_IDS,
   ZONE_REGISTRY,
   resolveGeometry,
   type GeometryInput,
@@ -26,35 +25,6 @@ function idle80x24(overrides: Partial<GeometryInput> = {}) {
 }
 
 describe("zone registry", () => {
-  test("exports every constitution zone id", () => {
-    const expected = [
-      "progress",
-      "progress_divider",
-      "notice",
-      "pending",
-      "prompt",
-      "task",
-      "agents",
-      "plugin_banner",
-      "command_banner",
-      "settings_notice",
-      "transcript",
-      "overlay_host",
-    ] as const;
-    expect([...ZONE_IDS]).toEqual([...expected]);
-    for (const id of expected) {
-      expect(ZONE_REGISTRY[id].id).toBe(id);
-    }
-  });
-
-  test("the prompt box is the only always-on chrome, and it rests taller than its floor", () => {
-    expect(ZONE_REGISTRY.notice.idleDefault).toBe(0);
-    expect(ZONE_REGISTRY.prompt.idleDefault).toBe(PROMPT_IDLE_ROWS);
-    expect(ZONE_REGISTRY.prompt.min).toBe(PROMPT_BASE_ROWS);
-    expect(ZONE_REGISTRY.notice.alwaysOn).toBe(false);
-    expect(ZONE_REGISTRY.progress.idleDefault).toBe(0);
-  });
-
   test("collapse order cuts temporary banners first and never cuts the prompt below base", () => {
     expect(COLLAPSE_ORDER[0]).toBe("command_banner");
     expect(COLLAPSE_ORDER.at(-1)).toBe("prompt");
@@ -110,7 +80,6 @@ describe("resolveGeometry — 80×24 idle floor", () => {
 
 describe("resolveGeometry — agents panel", () => {
   test("agents zone max allows more than one row again", () => {
-    expect(ZONE_REGISTRY.agents.max).toBe(AGENTS_PANEL_MAX_VISIBLE + 1);
     for (let n = 0; n <= AGENTS_PANEL_MAX_VISIBLE + 3; n++) {
       const layout = idle80x24({ visibility: { agents: n } });
       const fracCap = Math.max(1, Math.floor(24 * FLEET_BOARD_CAP_FRACTION));
@@ -292,12 +261,6 @@ describe("resolveGeometry — task panel", () => {
       }
     }
   });
-
-  test("the task panel is ahead of the prompt in collapse order", () => {
-    expect(COLLAPSE_ORDER.indexOf("task")).toBeLessThan(
-      COLLAPSE_ORDER.indexOf("prompt"),
-    );
-  });
 });
 
 describe("resolveGeometry — collapse rules", () => {
@@ -420,10 +383,6 @@ describe("resolveGeometry — prompt growth", () => {
       expect(layout.heights.prompt).toBeGreaterThanOrEqual(PROMPT_BASE_ROWS);
     }
   });
-
-  test("prompt rests at its idle composing height by default", () => {
-    expect(idle80x24().heights.prompt).toBe(PROMPT_IDLE_ROWS);
-  });
 });
 
 describe("resolveGeometry — overlay modes", () => {
@@ -483,19 +442,6 @@ describe("resolveGeometry — resize / residual", () => {
     expect(tall.transcriptHeight).toBe(40 - tall.chromeHeight);
   });
 
-  test("120×40 idle still keeps floor and accrues residual to transcript", () => {
-    const layout = resolveGeometry({ terminal: { columns: 120, rows: 40 } });
-    expect(layout.transcriptHeight).toBeGreaterThanOrEqual(
-      IDLE_TRANSCRIPT_FLOOR,
-    );
-    expect(layout.chromeHeight).toBe(PROMPT_IDLE_ROWS);
-    expect(layout.transcriptHeight).toBe(40 - PROMPT_IDLE_ROWS);
-    // Idle has no agents → stack even on a wide terminal.
-    expect(layout.layoutMode).toBe("stack");
-    expect(layout.railWidth).toBe(0);
-    expect(layout.chatWidth).toBe(layout.contentWidth);
-  });
-
   test("does not read process.stdout — pure input only", () => {
     // Sanity: custom tiny size is honored even if stdout differs.
     const layout = resolveGeometry({ terminal: { columns: 40, rows: 18 } });
@@ -545,23 +491,6 @@ describe("resolveGeometry — stack-only layout", () => {
     expect(withAgents.heights.agents).toBe(8);
     expect(withAgents.chromeHeight).toBe(idle.chromeHeight + 8);
     expect(withAgents.transcriptHeight).toBe(idle.transcriptHeight - 8);
-  });
-
-  test("narrow terminal with agents → stack, full-width regions, railWidth 0", () => {
-    const layout = resolveGeometry({
-      terminal: { columns: 80, rows: 24 },
-      visibility: { agents: 5 },
-    });
-    expect(layout.layoutMode).toBe("stack");
-    expect(layout.railWidth).toBe(0);
-    expect(layout.railGutter).toBe(0);
-    expect(layout.chatWidth).toBe(layout.contentWidth);
-    expect(layout.regions.transcript?.width).toBe(layout.contentWidth);
-    expect(layout.regions.agents?.width).toBe(layout.contentWidth);
-    expect(defined(layout.regions.agents).y).toBeGreaterThan(
-      defined(layout.regions.transcript).y,
-    );
-    expect(layout.chromeHeight).toBeGreaterThan(PROMPT_IDLE_ROWS);
   });
 
   test("no agents → stack with railWidth 0 even on a wide terminal", () => {

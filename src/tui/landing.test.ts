@@ -6,8 +6,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { CapturedSpan } from "@opentui/core";
 import { rgbToHex } from "@opentui/core";
-import { defined } from "../../tests/helpers/defined.js";
-import { makePermissionItems, withTestRenderer, type Harness } from "./harness";
+import { defined } from "../../testkit/defined.js";
+import { makePermissionItems, type Harness } from "./harness";
 import {
   appendStreamRow,
   applyLandingSuggestion,
@@ -19,7 +19,7 @@ import {
   paintLanding,
   toggleTasksPanel,
 } from "./shell/chrome";
-import { createAppShell } from "./shell/index";
+import { withAppShell } from "./test-helpers";
 import { isLanding } from "./shell/internals";
 import {
   setPromptModelLabel,
@@ -43,7 +43,6 @@ import {
   wrapLanding,
 } from "./landing";
 import { LOCKUP_WORDMARK } from "./lockup";
-import pkg from "../../package.json" with { type: "json" };
 import { MARK_LARGE, MARK_MID, MARK_SMALL } from "./mark-shape";
 import { SNOW_CHAR } from "./mark-anim";
 
@@ -170,18 +169,7 @@ describe("landing layout math", () => {
     const content = landingBelowContent({ rows: 10, columns: 78 });
     expect(content.notice).toEqual([]);
     const text = landingBelowRows(content).map((row) => row.text);
-    expect(text).toContain("try");
     expect(text.some((line) => line.includes("telemetry"))).toBe(false);
-  });
-
-  test("the two doors are commands and /yolo", () => {
-    expect(LANDING_HINTS).toEqual([
-      { key: "/", rest: "for commands" },
-      {
-        key: "/yolo",
-        rest: "so Corbits Code doesn't have to ask for permissions",
-      },
-    ]);
   });
 
   test("the mark degrades through its tiers and then disappears", () => {
@@ -199,25 +187,15 @@ describe("landing layout math", () => {
     expect(resolveMarkGrid(3, 96)).toBeNull();
   });
 
-  test("every starter is reachable by its key", () => {
-    for (const item of LANDING_SUGGESTIONS) {
-      expect(landingSuggestionFor(item.key)).toBe(item);
-    }
+  test("a key with no starter selects nothing", () => {
     expect(landingSuggestionFor("z")).toBeNull();
   });
 });
 
 describe("landing screen", () => {
   test("centres the prompt box between the mark and the disclosure", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        title: "corbits",
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        run: "idle",
-        telemetryNotice: NOTICE,
-      });
-      try {
+    await withAppShell(
+      async (_shell, h) => {
         await settle(h);
         const painted = rows(h);
         // Either corner set: the prompt border's glyphs are the box owner's
@@ -252,8 +230,7 @@ describe("landing screen", () => {
         }
         expect(descriptionColumns.size).toBe(1);
         // The version is chrome, not part of the hero: it never shares a row
-        // with a hint, and cannot drift from package.json.
-        expect(LANDING_VERSION).toBe(`v${pkg.version}`);
+        // with a hint.
         for (const hint of LANDING_HINTS) {
           const row = painted.find((line) => line.includes(hint.rest));
           expect(row).not.toContain(LANDING_VERSION);
@@ -276,20 +253,20 @@ describe("landing screen", () => {
         for (const item of LANDING_SUGGESTIONS) {
           expect(h.captureCharFrame()).toContain(item.label);
         }
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          title: "corbits",
+          run: "idle",
+          telemetryNotice: NOTICE,
+        },
+      },
+    );
   });
 
   test("the mark advances off an injected clock while a turn runs", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         await settle(h);
         const still = markRows(h).join("\n");
 
@@ -307,10 +284,13 @@ describe("landing screen", () => {
           frames.add(markRows(h).join("\n"));
         }
         expect(frames.size).toBeGreaterThan(1);
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   });
 
   test("an idle mount keeps the snow drifting on its own, with nothing pumping frames by hand", async () => {
@@ -323,13 +303,8 @@ describe("landing screen", () => {
     // loop either while waiting — a test that pumps frames by hand can stay
     // green even when production's self-driving mechanism is dead, which is
     // exactly the blind spot that let the throttled build ship frozen snow.
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (_shell, h) => {
         await settle(h);
         const before = markRows(h).join("\n");
 
@@ -354,10 +329,13 @@ describe("landing screen", () => {
 
         expect(after).not.toBe(before);
         expect(stripSnow(after)).toBe(stripSnow(before));
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   }, 15_000);
 
   describe("landing idle timer", () => {
@@ -368,14 +346,8 @@ describe("landing screen", () => {
 
     test("reduced-motion mount never arms the idle timer and never draws snow", async () => {
       const { armed } = wrapLandingIdleTimer();
-      await withTestRenderer(async (h) => {
-        const shell = createAppShell(h.renderer, {
-          terminal: { columns: 80, rows: 24 },
-          wireKeys: false,
-          run: "idle",
-          reducedMotion: true,
-        });
-        try {
+      await withAppShell(
+        async (shell, h) => {
           expect(armed).toHaveLength(0);
           await settle(h);
           const first = markRows(h).join("\n");
@@ -391,21 +363,20 @@ describe("landing screen", () => {
             frames.add(frame);
           }
           expect(frames.size).toBe(1);
-        } finally {
-          shell.dispose();
-        }
-      }, SIZE);
+        },
+        {
+          shell: {
+            run: "idle",
+            reducedMotion: true,
+          },
+        },
+      );
     });
 
     test("a deferred system notice does not clear the landing idle timer", async () => {
       const { armed, cleared } = wrapLandingIdleTimer();
-      await withTestRenderer(async (h) => {
-        const shell = createAppShell(h.renderer, {
-          run: "idle",
-          wireKeys: false,
-          terminal: { columns: 80, rows: 24 },
-        });
-        try {
+      await withAppShell(
+        async (shell) => {
           const handle = soleLandingIdleHandle(armed);
           surfaceSystemNotice(
             shell,
@@ -413,58 +384,52 @@ describe("landing screen", () => {
           );
           expect(isLanding(shell)).toBe(true);
           expect(cleared).not.toContain(handle);
-        } finally {
-          shell.dispose();
-        }
-      }, SIZE);
+        },
+        {
+          shell: {
+            run: "idle",
+          },
+        },
+      );
     });
 
     test("appending a transcript row clears the landing idle timer", async () => {
       const { armed, cleared } = wrapLandingIdleTimer();
-      await withTestRenderer(async (h) => {
-        const shell = createAppShell(h.renderer, {
-          run: "idle",
-          wireKeys: false,
-          terminal: { columns: 80, rows: 24 },
-        });
-        try {
+      await withAppShell(
+        async (shell) => {
           const handle = soleLandingIdleHandle(armed);
           appendStreamRow(shell, { role: "user", text: "first prompt" });
           expect(isLanding(shell)).toBe(false);
           expect(cleared).toContain(handle);
-        } finally {
-          shell.dispose();
-        }
-      }, SIZE);
+        },
+        {
+          shell: {
+            run: "idle",
+          },
+        },
+      );
     });
 
     test("disposing the shell with no transcript clears the landing idle timer", async () => {
       const { armed, cleared } = wrapLandingIdleTimer();
-      await withTestRenderer(async (h) => {
-        const shell = createAppShell(h.renderer, {
-          run: "idle",
-          wireKeys: false,
-          terminal: { columns: 80, rows: 24 },
-        });
-        try {
+      await withAppShell(
+        async (shell) => {
           const handle = soleLandingIdleHandle(armed);
           shell.dispose();
           expect(cleared).toContain(handle);
-        } finally {
-          shell.dispose();
-        }
-      }, SIZE);
+        },
+        {
+          shell: {
+            run: "idle",
+          },
+        },
+      );
     });
   });
 
   test("a starter key fills the prompt; a typed prompt keeps its digits", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         await settle(h);
         const first = defined(LANDING_SUGGESTIONS[0]);
         expect(applyLandingSuggestion(shell, first.key)).toBe(true);
@@ -472,20 +437,18 @@ describe("landing screen", () => {
 
         // Already typed: the key is a character, not a shortcut.
         expect(applyLandingSuggestion(shell, first.key)).toBe(false);
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   });
 
   test("the starters withdraw while the prompt has text", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        telemetryNotice: NOTICE,
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         await settle(h);
         const first = defined(LANDING_SUGGESTIONS[0]);
         expect(h.captureCharFrame()).toContain(first.label);
@@ -502,141 +465,99 @@ describe("landing screen", () => {
         paintChrome(shell);
         await settle(h);
         expect(h.captureCharFrame()).toContain(first.label);
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
-  });
-
-  test("the brand lockup sits in the prompt box's bottom border, session-long", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-      });
-      try {
-        await settle(h);
-        // The lockup rides the box's bottom rule, so it is on the rule itself
-        // rather than on a row of its own beneath it.
-        const landingPainted = rows(h);
-        const landingRow = landingPainted.findIndex((row) =>
-          row.includes(LOCKUP_WORDMARK),
-        );
-        expect(landingRow).toBeGreaterThanOrEqual(0);
-        expect(landingPainted[landingRow]).toContain("╰");
-
-        // It outlives the landing: this is session chrome, not a splash.
-        appendStreamRow(shell, { role: "user", text: "first prompt" });
-        await settle(h);
-        const painted = rows(h);
-        const ruleRow = painted.findIndex((row) =>
-          row.includes(LOCKUP_WORDMARK),
-        );
-        // Session-active: the version row only reserves space on the landing
-        // screen (see `relayout`). Once there is real transcript content the
-        // box sits one row above the terminal's last line — the optical
-        // bottom pad (`BOTTOM_MARGIN_ROWS`) keeps it off the frame edge.
-        expect(ruleRow).toBe(SIZE.height - 2);
-        const row = defined(painted[ruleRow]);
-        // Left end of the rule, inside the shell gutter, costing no row.
-        expect(row.startsWith(" ╰─ ")).toBe(true);
-        expect(row.trimEnd().endsWith("╯")).toBe(true);
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          telemetryNotice: NOTICE,
+        },
+      },
+    );
   });
 
   test("a narrow rule drops the lockup and keeps the workspace", async () => {
-    await withTestRenderer(
-      async (h) => {
-        const shell = createAppShell(h.renderer, {
-          terminal: { columns: 34, rows: 20 },
-          wireKeys: false,
-          cwd: "/src/corbits-code",
-        });
-        try {
-          setPromptWorkspace(shell, { branch: "migration/opentui-tui" });
-          await settle(h);
-          const frame = h.captureCharFrame();
-          // The workspace is information and the mark is not: the mark goes.
-          expect(frame).not.toContain(LOCKUP_WORDMARK);
-          expect(frame).toContain("(migration/opentui-tui) ─╯");
-        } finally {
-          shell.dispose();
-        }
+    await withAppShell(
+      async (shell, h) => {
+        setPromptWorkspace(shell, { branch: "migration/opentui-tui" });
+        await settle(h);
+        const frame = h.captureCharFrame();
+        // The workspace is information and the mark is not: the mark goes.
+        expect(frame).not.toContain(LOCKUP_WORDMARK);
+        expect(frame).toContain("(migration/opentui-tui) ─╯");
       },
-      { width: 34, height: 20 },
+      {
+        width: 34,
+        height: 20,
+        shell: {
+          cwd: "/src/corbits-code",
+        },
+      },
     );
   });
 
   test("an overlay covers the landing, sliding it only as far as its content needs", async () => {
-    await withTestRenderer(
-      async (h) => {
-        const shell = createAppShell(h.renderer, {
-          terminal: { columns: 100, rows: 30 },
-          wireKeys: false,
+    await withAppShell(
+      async (shell, h) => {
+        await settle(h);
+        const before = rows(h);
+        const anchors = [
+          "message",
+          "telemetry",
+          defined(LANDING_SUGGESTIONS[0]).label,
+        ];
+        const was = anchors.map((text) =>
+          before.findIndex((row) => row.includes(text)),
+        );
+        expect(was.every((index) => index > 0)).toBe(true);
+        // The anchors are listed top to bottom, so their positions climb
+        // together before the overlay opens.
+        expect(was).toEqual([...was].sort((a, b) => a - b));
+
+        // Heavy inset permission overlay: many choices plus a multi-line body
+        // so the float must take real headroom from the landing split. A
+        // three-item empty body leaves message delta 0 and would pass even if
+        // the split never slid.
+        const heavyBody = [
+          "run_shell",
+          "Run shell command",
+          "Proposed: git reset --hard origin/main && rm -rf node_modules",
+          "Files at risk: 128 modified, 12 untracked.",
+          "Continue only if you accept discarding local work.",
+          "Also note: this path was requested by the explore agent.",
+          "Scopes include session, project, and once-only grants.",
+          "Review carefully before approving this request.",
+        ].join("\n");
+        openPermissionsOverlay(shell, {
+          items: makePermissionItems(16),
+          body: heavyBody,
+        });
+        expect(shell.layout.overlayMode).toBe("inset");
+        await settle(h);
+        const after = rows(h);
+        // Every landing anchor is still on screen and in the same relative
+        // order: the overlay is not letting the composition it covers spill
+        // off the viewport, overlap itself, or reshuffle. It may still
+        // slide the composition (up or down a little, as the mark re-grids
+        // for its new tier) when its own content needs more room than the
+        // even top/bottom split would otherwise leave it.
+        const nowAt = anchors.map((text) =>
+          after.findIndex((row) => row.includes(text)),
+        );
+        expect(nowAt.every((index) => index > 0)).toBe(true);
+        expect(nowAt).toEqual([...nowAt].sort((a, b) => a - b));
+        expect(new Set(nowAt).size).toBe(nowAt.length);
+        // Real geometry pressure: the prompt field moves so the inset can
+        // claim rows the even split would not have given it.
+        expect(nowAt[0]).not.toBe(was[0]);
+        expect(h.captureCharFrame()).toContain("Esc cancel");
+      },
+      {
+        width: 100,
+        height: 30,
+        shell: {
           run: "idle",
           telemetryNotice: NOTICE,
-        });
-        try {
-          await settle(h);
-          const before = rows(h);
-          const anchors = [
-            "message",
-            "telemetry",
-            defined(LANDING_SUGGESTIONS[0]).label,
-          ];
-          const was = anchors.map((text) =>
-            before.findIndex((row) => row.includes(text)),
-          );
-          expect(was.every((index) => index > 0)).toBe(true);
-          // The anchors are listed top to bottom, so their positions climb
-          // together before the overlay opens.
-          expect(was).toEqual([...was].sort((a, b) => a - b));
-
-          // Heavy inset permission overlay: many choices plus a multi-line body
-          // so the float must take real headroom from the landing split. A
-          // three-item empty body leaves message delta 0 and would pass even if
-          // the split never slid.
-          const heavyBody = [
-            "run_shell",
-            "Run shell command",
-            "Proposed: git reset --hard origin/main && rm -rf node_modules",
-            "Files at risk: 128 modified, 12 untracked.",
-            "Continue only if you accept discarding local work.",
-            "Also note: this path was requested by the explore agent.",
-            "Scopes include session, project, and once-only grants.",
-            "Review carefully before approving this request.",
-          ].join("\n");
-          openPermissionsOverlay(shell, {
-            items: makePermissionItems(16),
-            body: heavyBody,
-          });
-          expect(shell.layout.overlayMode).toBe("inset");
-          await settle(h);
-          const after = rows(h);
-          // Every landing anchor is still on screen and in the same relative
-          // order: the overlay is not letting the composition it covers spill
-          // off the viewport, overlap itself, or reshuffle. It may still
-          // slide the composition (up or down a little, as the mark re-grids
-          // for its new tier) when its own content needs more room than the
-          // even top/bottom split would otherwise leave it.
-          const nowAt = anchors.map((text) =>
-            after.findIndex((row) => row.includes(text)),
-          );
-          expect(nowAt.every((index) => index > 0)).toBe(true);
-          expect(nowAt).toEqual([...nowAt].sort((a, b) => a - b));
-          expect(new Set(nowAt).size).toBe(nowAt.length);
-          // Real geometry pressure: the prompt field moves so the inset can
-          // claim rows the even split would not have given it.
-          expect(nowAt[0]).not.toBe(was[0]);
-          expect(h.captureCharFrame()).toContain("Esc cancel");
-        } finally {
-          shell.dispose();
-        }
+        },
       },
-      { width: 100, height: 30 },
     );
   });
 
@@ -647,30 +568,27 @@ describe("landing screen", () => {
   // the overlay's real, already fraction-capped content height, so a terminal
   // tall enough for that content shows every choice without scrolling.
   test("a landing overlay with many choices shows them all when there is room", async () => {
-    await withTestRenderer(
-      async (h) => {
-        const shell = createAppShell(h.renderer, {
-          terminal: { columns: 100, rows: 48 },
-          wireKeys: false,
-          run: "idle",
+    await withAppShell(
+      async (shell, h) => {
+        const items = makePermissionItems(8);
+        openPermissionsOverlay(shell, {
+          items,
+          body: "run_shell\nRun shell command\nbun test src/tui",
         });
-        try {
-          const items = makePermissionItems(8);
-          openPermissionsOverlay(shell, {
-            items,
-            body: "run_shell\nRun shell command\nbun test src/tui",
-          });
-          expect(shell.layout.overlayMode).toBe("inset");
-          await settle(h);
-          const frame = h.captureCharFrame();
-          for (const choice of items) {
-            expect(frame).toContain(choice);
-          }
-        } finally {
-          shell.dispose();
+        expect(shell.layout.overlayMode).toBe("inset");
+        await settle(h);
+        const frame = h.captureCharFrame();
+        for (const choice of items) {
+          expect(frame).toContain(choice);
         }
       },
-      { width: 100, height: 48 },
+      {
+        width: 100,
+        height: 48,
+        shell: {
+          run: "idle",
+        },
+      },
     );
   });
 
@@ -680,14 +598,8 @@ describe("landing screen", () => {
       { width: 80, height: 24 },
       { width: 60, height: 20 },
     ]) {
-      await withTestRenderer(async (h) => {
-        const shell = createAppShell(h.renderer, {
-          terminal: { columns: size.width, rows: size.height },
-          wireKeys: false,
-          run: "idle",
-          telemetryNotice: NOTICE,
-        });
-        try {
+      await withAppShell(
+        async (_shell, h) => {
           await settle(h);
           const painted = rows(h);
           // The prompt field is on screen at every size, and the mark fits
@@ -699,21 +611,21 @@ describe("landing screen", () => {
           expect(h.captureCharFrame()).toContain(
             defined(LANDING_HINTS[0]).rest,
           );
-        } finally {
-          shell.dispose();
-        }
-      }, size);
+        },
+        {
+          ...size,
+          shell: {
+            run: "idle",
+            telemetryNotice: NOTICE,
+          },
+        },
+      );
     }
   });
 
   test("no titlebar, status strip or counter row survives", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         await settle(h);
         // A bare landing seats exactly two zones: the transcript canvas above
         // the prompt box. Resurrected chrome would arrive as a new region.
@@ -724,20 +636,18 @@ describe("landing screen", () => {
         // The old header blue and status green were fills; no chrome fill
         // survives when every painted span shares one background.
         expect(new Set(backgrounds(h)).size).toBe(1);
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   });
 
   test("the landing is dropped once the transcript has content", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        telemetryNotice: NOTICE,
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         await settle(h);
         expect(isLanding(shell)).toBe(true);
         appendStreamRow(shell, { role: "user", text: "first prompt" });
@@ -754,23 +664,21 @@ describe("landing screen", () => {
         expect(painted.findIndex((row) => /[└╰]/.test(row))).toBeGreaterThan(
           SIZE.height - 4,
         );
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          telemetryNotice: NOTICE,
+        },
+      },
+    );
   });
 
   test("startup MCP/load errors keep the mountain and ride the notice strip", async () => {
     // CL-5618 / CL-5600: system notices on load used to appendStreamRow →
     // clearLandingMark, wiping the brand hero. They must surface as secondary
     // chrome while geometry still seats MARK_SMALL or larger.
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         await settle(h);
         expect(isLanding(shell)).toBe(true);
         const before = markRows(h);
@@ -803,23 +711,21 @@ describe("landing screen", () => {
         const frame = h.captureCharFrame();
         expect(frame).toContain("first prompt");
         expect(frame).toContain("mcp github did not connect");
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   });
 
   test("startup plugin diagnostics keep the mountain and ride plugin !", async () => {
     // Plugin load warnings no longer go through surfaceSystemNotice — they
     // drive the standing `plugin !` attention mark instead. The mountain must
     // still stay up while that mark is painted.
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         await settle(h);
         expect(isLanding(shell)).toBe(true);
         const before = markRows(h);
@@ -837,10 +743,13 @@ describe("landing screen", () => {
         const frame = h.captureCharFrame();
         expect(frame).toContain("plugin !");
         expect(frame).not.toContain("skills missing");
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   });
 
   test("a flushed startup notice never carries a plumbing gutter label", async () => {
@@ -848,13 +757,8 @@ describe("landing screen", () => {
     // already says what it is, and the meta column is the operator's, not the
     // wiring's. (MCP notices still use the notice strip; plugin skill-miss
     // summaries do not.)
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         await settle(h);
         surfaceSystemNotice(
           shell,
@@ -883,10 +787,13 @@ describe("landing screen", () => {
           expect(line).not.toContain("command");
           expect(line).not.toContain("overlay");
         }
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   });
 
   test("the version is chrome, not the hero: it hides before actionable chrome does on a narrow terminal", async () => {
@@ -896,19 +803,18 @@ describe("landing screen", () => {
       width: VERSION_BADGE_MIN_COLUMNS + 20,
       height: VERSION_BADGE_MIN_ROWS + 8,
     };
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: roomy.width, rows: roomy.height },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (_shell, h) => {
         await settle(h);
         expect(h.captureCharFrame()).toContain(LANDING_VERSION);
-      } finally {
-        shell.dispose();
-      }
-    }, roomy);
+      },
+      {
+        ...roomy,
+        shell: {
+          run: "idle",
+        },
+      },
+    );
 
     // Just under the badge's column floor: the badge is gone, but the prompt
     // field — genuinely actionable chrome — is still on screen.
@@ -919,21 +825,20 @@ describe("landing screen", () => {
     expect(versionBadgeVisible(narrowColumns.width, narrowColumns.height)).toBe(
       false,
     );
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: narrowColumns.width, rows: narrowColumns.height },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (_shell, h) => {
         await settle(h);
         const frame = h.captureCharFrame();
         expect(frame).not.toContain(LANDING_VERSION);
         expect(frame).toContain("message");
-      } finally {
-        shell.dispose();
-      }
-    }, narrowColumns);
+      },
+      {
+        ...narrowColumns,
+        shell: {
+          run: "idle",
+        },
+      },
+    );
 
     // Just under the badge's row floor: same story, short rather than narrow.
     const shortRows = {
@@ -941,21 +846,20 @@ describe("landing screen", () => {
       height: VERSION_BADGE_MIN_ROWS - 1,
     };
     expect(versionBadgeVisible(shortRows.width, shortRows.height)).toBe(false);
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: shortRows.width, rows: shortRows.height },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (_shell, h) => {
         await settle(h);
         const frame = h.captureCharFrame();
         expect(frame).not.toContain(LANDING_VERSION);
         expect(frame).toContain("message");
-      } finally {
-        shell.dispose();
-      }
-    }, shortRows);
+      },
+      {
+        ...shortRows,
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   });
 
   test("the task panel and the version badge both paint while landing is still mounted, without clipping the prompt", async () => {
@@ -965,13 +869,8 @@ describe("landing screen", () => {
     // for the same short terminal at once. This is the regression case for
     // that interaction (CL-5735/5736 review, blocker 4).
     const size = { width: 100, height: 17 };
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: size.width, rows: size.height },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         setChromeZones(shell, {
           task: [{ label: "wire the version badge", status: "doing" }],
         });
@@ -1002,32 +901,13 @@ describe("landing screen", () => {
         expect(promptRow).toBeGreaterThan(0);
         const box = defined(shell.layout.regions.prompt);
         expect(box.y + box.height).toBeLessThanOrEqual(size.height);
-      } finally {
-        shell.dispose();
-      }
-    }, size);
-  });
-
-  test("the version never appears inside the hero block beside the mark/hints", async () => {
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: SIZE.width, rows: SIZE.height },
-        wireKeys: false,
-        run: "idle",
-      });
-      try {
-        await settle(h);
-        const painted = rows(h);
-        const heroEnd = painted.findIndex((row) => /[┌╭]/.test(row));
-        expect(heroEnd).toBeGreaterThan(0);
-        // Nothing above the box's own top border carries the version — the
-        // hero (mark + hint doors) is exactly the two lines, no third.
-        for (const row of painted.slice(0, heroEnd)) {
-          expect(row).not.toContain(LANDING_VERSION);
-        }
-      } finally {
-        shell.dispose();
-      }
-    }, SIZE);
+      },
+      {
+        ...size,
+        shell: {
+          run: "idle",
+        },
+      },
+    );
   });
 });

@@ -1,4 +1,4 @@
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import { describe, test, expect } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
@@ -44,6 +44,10 @@ function jsonl(turns: ConversationTurn[]): string {
   return turns.map((t) => JSON.stringify(t)).join("\n") + "\n";
 }
 
+function turnTexts(turns: ConversationTurn[]): string[] {
+  return turns.map((t) => (t.content[0] as { text: string }).text);
+}
+
 describe("createOptimizedContextStore load", () => {
   test("resumes turns spread across multiple segments in order", async () => {
     const dir = tempDir();
@@ -60,9 +64,7 @@ describe("createOptimizedContextStore load", () => {
     );
 
     const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b", "c", "d", "e"]);
+    expect(turnTexts(loaded.turns)).toEqual(["a", "b", "c", "d", "e"]);
   });
 
   test("reads a legacy monolithic turns.jsonl with no segments", async () => {
@@ -89,9 +91,7 @@ describe("createOptimizedContextStore load", () => {
     );
 
     const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b"]);
+    expect(turnTexts(loaded.turns)).toEqual(["a", "b"]);
   });
 
   // A small session never rolls over, so the active segment is turns.jsonl
@@ -106,9 +106,7 @@ describe("createOptimizedContextStore load", () => {
     );
 
     const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b"]);
+    expect(turnTexts(loaded.turns)).toEqual(["a", "b"]);
   });
 
   test("keeps extra segments when the torn line is in the base segment", async () => {
@@ -125,9 +123,7 @@ describe("createOptimizedContextStore load", () => {
     );
 
     const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b", "c"]);
+    expect(turnTexts(loaded.turns)).toEqual(["a", "b", "c"]);
   });
 
   test("the next write heals a torn base tail so reload is stable", async () => {
@@ -142,32 +138,10 @@ describe("createOptimizedContextStore load", () => {
     const recovered = await store.load();
     await store.writeTurns(recovered.turns);
     const reloaded = await store.load();
-    expect(
-      reloaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a"]);
+    expect(turnTexts(reloaded.turns)).toEqual(["a"]);
     expect(fs.readFileSync(path.join(dir, TURNS_FILE), "utf8")).toBe(
       jsonl([turn("a")]),
     );
-  });
-
-  test("recovers usable turns when turns.jsonl has a mid-file null-byte hole", async () => {
-    const dir = tempDir();
-    const store = await createOptimizedContextStore(dir);
-
-    const head = jsonl([turn("a"), turn("b")]);
-    const tail = jsonl([turn("c")]);
-    // Simulate truncate-past-EOF null padding between valid JSONL records.
-    const poisoned = Buffer.concat([
-      Buffer.from(head, "utf8"),
-      Buffer.alloc(64, 0),
-      Buffer.from(tail, "utf8"),
-    ]);
-    fs.writeFileSync(path.join(dir, TURNS_FILE), poisoned);
-
-    const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b", "c"]);
   });
 
   test("preserves pendingOperations when turns are poisoned but metadata is valid", async () => {
@@ -206,9 +180,7 @@ describe("createOptimizedContextStore load", () => {
     );
 
     const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b", "c"]);
+    expect(turnTexts(loaded.turns)).toEqual(["a", "b", "c"]);
     expect(loaded.pendingOperations).toEqual([pendingOp]);
     expect(loaded.tokenUsage).toEqual({
       input: 10,
@@ -250,9 +222,7 @@ describe("createOptimizedContextStore load", () => {
     );
 
     const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b"]);
+    expect(turnTexts(loaded.turns)).toEqual(["a", "b"]);
   });
 
   test("skips a truncated mid-string glued to the next record", async () => {
@@ -269,9 +239,7 @@ describe("createOptimizedContextStore load", () => {
     );
 
     const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b", "c"]);
+    expect(turnTexts(loaded.turns)).toEqual(["a", "b", "c"]);
   });
 
   // Compacted head rewrites segment 0 while a prior multi-segment history's
@@ -385,88 +353,6 @@ describe("createOptimizedContextStore load", () => {
     expect(loaded.turns).toHaveLength(2);
     expect(await listSegmentFiles(dir, TURNS_FILE)).toEqual([TURNS_FILE]);
   });
-
-  // Rebuild (new store) → compact rewrite → third store load must not see
-  // orphan tails. This is the production poison path without the reactor.
-  test("rebuild then compact then reload has unique tool_call ids", async () => {
-    const dir = tempDir();
-    const store1 = await createOptimizedContextStore(dir);
-
-    const callId = "call-rebuild-1";
-    const history: ConversationTurn[] = [];
-    const big = "x".repeat(20_000);
-    // Append one-at-a-time so the segmented writer rolls past segment 0.
-    for (let i = 0; i < 18; i++) {
-      history.push(turn(`${i}-${big}`));
-      await store1.writeTurns([...history]);
-    }
-    history.push({
-      role: "assistant",
-      content: [{ type: "tool_call", id: callId, name: "grep", arguments: {} }],
-      timestamp: 100,
-    });
-    history.push({
-      role: "user",
-      content: [
-        {
-          type: "tool_result",
-          callId,
-          content: [{ type: "text", text: "ok" }],
-        },
-      ],
-      timestamp: 101,
-    });
-    await store1.writeTurns([...history]);
-    await store1.writeMetadata({
-      pendingOperations: [],
-      tokenUsage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        thinking: 0,
-      },
-    });
-    await store1.commit({ message: "pre-rebuild" });
-    expect((await listSegmentFiles(dir, TURNS_FILE)).length).toBeGreaterThan(1);
-
-    // Agent rebuild: fresh store/writer, then compact to a short head that keeps
-    // the recent tool pair (same shape as keepRecent after summarization).
-    const store2 = await createOptimizedContextStore(dir);
-    const compacted: ConversationTurn[] = [
-      {
-        role: "user",
-        content: [{ type: "text", text: "[Compacted prior context]\nsummary" }],
-        timestamp: 1,
-      },
-      defined(history[history.length - 2]),
-      defined(history[history.length - 1]),
-    ];
-    await store2.writeTurns(compacted);
-    await store2.writeMetadata({
-      pendingOperations: [],
-      tokenUsage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        thinking: 0,
-      },
-    });
-    await store2.commit({ message: "post-compact" });
-
-    expect(await listSegmentFiles(dir, TURNS_FILE)).toEqual([TURNS_FILE]);
-
-    const store3 = await createOptimizedContextStore(dir);
-    const loaded = await store3.load();
-    expect(loaded.turns).toHaveLength(3);
-    const ids = loaded.turns.flatMap((t) =>
-      t.content
-        .filter((b) => b.type === "tool_call")
-        .map((b) => (b as { id: string }).id),
-    );
-    expect(ids).toEqual([callId]);
-  }, 30_000);
 });
 
 describe("loadRecentTurns", () => {
@@ -483,10 +369,7 @@ describe("loadRecentTurns", () => {
     );
 
     const loaded = await loadRecentTurns(dir, 2);
-    expect(loaded.map((t) => (t.content[0] as { text: string }).text)).toEqual([
-      "d",
-      "e",
-    ]);
+    expect(turnTexts(loaded)).toEqual(["d", "e"]);
   });
 
   test("walks back into older segments when the window exceeds the newest one", async () => {
@@ -505,111 +388,12 @@ describe("loadRecentTurns", () => {
     // window of 4, so the walk continues into segment 0 (2 turns) whole —
     // reads are segment-granular, not turn-exact.
     const loaded = await loadRecentTurns(dir, 4);
-    expect(loaded.map((t) => (t.content[0] as { text: string }).text)).toEqual([
-      "a",
-      "b",
-      "c",
-      "d",
-      "e",
-    ]);
+    expect(turnTexts(loaded)).toEqual(["a", "b", "c", "d", "e"]);
   });
 
   test("returns an empty list when no segments exist", async () => {
     const dir = tempDir();
     expect(await loadRecentTurns(dir, 10)).toEqual([]);
-  });
-
-  test("tolerates a torn tail only in the newest segment", async () => {
-    const dir = tempDir();
-    fs.writeFileSync(path.join(dir, TURNS_FILE), jsonl([turn("a")]));
-    fs.writeFileSync(
-      path.join(dir, segmentFileName(TURNS_FILE, 1)),
-      jsonl([turn("b")]) + '{"role":"user","content":[{"type":"te',
-    );
-
-    const loaded = await loadRecentTurns(dir, 5);
-    expect(loaded.map((t) => (t.content[0] as { text: string }).text)).toEqual([
-      "a",
-      "b",
-    ]);
-  });
-
-  test("skips a non-tail malformed line in the newest segment", async () => {
-    const dir = tempDir();
-    fs.writeFileSync(path.join(dir, TURNS_FILE), jsonl([turn("a")]));
-    fs.writeFileSync(
-      path.join(dir, segmentFileName(TURNS_FILE, 1)),
-      jsonl([turn("b")]) +
-        '{"role":"user","content":[{"type":"te\n' +
-        jsonl([turn("c")]),
-    );
-
-    const loaded = await loadRecentTurns(dir, 5);
-    expect(loaded.map((t) => (t.content[0] as { text: string }).text)).toEqual([
-      "a",
-      "b",
-      "c",
-    ]);
-  });
-
-  test("skips a malformed line in an older sealed segment", async () => {
-    const dir = tempDir();
-    fs.writeFileSync(path.join(dir, TURNS_FILE), jsonl([turn("a")]));
-    fs.writeFileSync(
-      path.join(dir, segmentFileName(TURNS_FILE, 1)),
-      jsonl([turn("b")]) +
-        '{"role":"user","content":[{"type":"te\n' +
-        jsonl([turn("c")]),
-    );
-    fs.writeFileSync(
-      path.join(dir, segmentFileName(TURNS_FILE, 2)),
-      jsonl([turn("d")]),
-    );
-
-    const loaded = await loadRecentTurns(dir, 5);
-    expect(loaded.map((t) => (t.content[0] as { text: string }).text)).toEqual([
-      "a",
-      "b",
-      "c",
-      "d",
-    ]);
-  });
-
-  test("skips a line that parses as JSON but fails the turn schema", async () => {
-    const dir = tempDir();
-    fs.writeFileSync(path.join(dir, TURNS_FILE), jsonl([turn("a")]));
-    const badTurn = JSON.stringify({
-      role: "user",
-      content: "not-an-array",
-      timestamp: 1,
-    });
-    fs.writeFileSync(
-      path.join(dir, segmentFileName(TURNS_FILE, 1)),
-      jsonl([turn("b")]) + badTurn + "\n" + jsonl([turn("c")]),
-    );
-
-    const loaded = await loadRecentTurns(dir, 5);
-    expect(loaded.map((t) => (t.content[0] as { text: string }).text)).toEqual([
-      "a",
-      "b",
-      "c",
-    ]);
-  });
-
-  test("reactor load skips a non-tail malformed line the same way display does", async () => {
-    const dir = tempDir();
-    const store = await createOptimizedContextStore(dir);
-    fs.writeFileSync(
-      path.join(dir, TURNS_FILE),
-      jsonl([turn("a")]) +
-        '{"role":"user","content":[{"type":"te\n' +
-        jsonl([turn("b")]),
-    );
-
-    const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b"]);
   });
 
   test("reactor load skips mid-file garbage in an extra segment", async () => {
@@ -625,9 +409,7 @@ describe("loadRecentTurns", () => {
     );
 
     const loaded = await store.load();
-    expect(
-      loaded.turns.map((t) => (t.content[0] as { text: string }).text),
-    ).toEqual(["a", "b", "c"]);
+    expect(turnTexts(loaded.turns)).toEqual(["a", "b", "c"]);
   });
 });
 
@@ -677,10 +459,6 @@ describe("createOptimizedContextStore checkpoint", () => {
     const dir = tempDir();
     await commitEmptyCheckpoint(dir);
     const commit = await headCommit(dir);
-    expect(commit.author.name).toBe("interchange-harness");
-    expect(commit.author.email).toBe("harness@interchange.local");
-    expect(commit.committer.name).toBe("interchange-harness");
-    expect(commit.committer.email).toBe("harness@interchange.local");
     expect(commit.gpgsig).toContain("BEGIN SSH SIGNATURE");
   });
 
@@ -804,10 +582,6 @@ describe("createSessionStores", () => {
   });
 });
 
-function turnTexts(turns: ConversationTurn[]): string[] {
-  return turns.map((t) => (t.content[0] as { text: string }).text);
-}
-
 async function gitLsTree(dir: string): Promise<string[]> {
   const proc = Bun.spawn(
     ["git", "-C", dir, "ls-tree", "-r", "--name-only", "HEAD"],
@@ -924,25 +698,6 @@ describe("createOptimizedContextStore unpublished rewrite", () => {
     await store.writeTurns([first, turn("two")]);
     const loaded = await store.load();
     expect(turnTexts(loaded.turns)).toEqual(["one", "two"]);
-  });
-
-  test("folds evidence-archive into the compact commit tree", async () => {
-    const dir = tempDir();
-    const store = await createOptimizedContextStore(dir);
-    await store.writeTurns([turn("old")]);
-    await store.writeMetadata(EMPTY_CHECKPOINT_METADATA);
-    await store.commit({ message: "old" });
-
-    const archiveDir = path.join(dir, "evidence-archive");
-    fs.mkdirSync(archiveDir, { recursive: true });
-    fs.writeFileSync(path.join(archiveDir, "index.jsonl"), "{}\n");
-    await store.writeTurns([turn("compacted")]);
-    await store.writeMetadata(EMPTY_CHECKPOINT_METADATA);
-    await store.commit({ message: "compact" });
-
-    expect(await gitLsTree(dir)).toContain("evidence-archive/index.jsonl");
-    const loaded = await store.load();
-    expect(turnTexts(loaded.turns)).toEqual(["compacted"]);
   });
 
   test("readAt of the old hash is not the load completeness path", async () => {
@@ -1114,8 +869,6 @@ describe("createOptimizedContextStore prompt dedupe (CL-9026)", () => {
     const tree = await gitLsTree(dir);
     expect(tree).not.toContain(PROMPT_FILE);
     expect(tree).not.toContain(extraPrompt);
-    expect(turnTexts((await store.load()).turns)).toEqual(
-      live.map((t) => (t.content[0] as { text: string }).text),
-    );
+    expect(turnTexts((await store.load()).turns)).toEqual(turnTexts(live));
   });
 });

@@ -16,10 +16,10 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, test } from "bun:test";
 
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import { PROMPT_KEY_BINDINGS } from "./prompt-input.js";
-import { helpItems, SHELL_SHORTCUTS } from "./keybindings.js";
-import { createHarness, withTestRenderer, type Harness } from "./harness.js";
+import { SHELL_SHORTCUTS } from "./keybindings.js";
+import { createHarness, type Harness } from "./harness.js";
 import { mountRunnerHost } from "./runner/host.js";
 import { openCommandSurface } from "./command-surfaces.js";
 import { focusOwner } from "./focus/focus-state.js";
@@ -31,7 +31,7 @@ import {
   shellFocusTranscript,
   truncateStreamRows,
 } from "./shell/chrome.js";
-import { createAppShell } from "./shell/index.js";
+import { withAppShell } from "./test-helpers.js";
 import {
   isSlashPopupOpen,
   setMentionSuggestionSource,
@@ -45,7 +45,7 @@ import {
   type AppShell,
 } from "./shell/internals.js";
 import { leaveSubagentObserve } from "./shell/observe.js";
-import { openHelpOverlay, setPaletteCatalog } from "./shell/palette.js";
+import { setPaletteCatalog } from "./shell/palette.js";
 import {
   addPendingAttachment,
   applyShellInterrupt,
@@ -743,23 +743,14 @@ function rowsIn(group: Group): readonly { keys: string; probe: Probe }[] {
 
 /** Run every probe in a group against one shell, so one renderer covers many rows. */
 async function runGroup(group: Group): Promise<void> {
-  await withTestRenderer(
-    async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: true,
-        run: "idle",
-      });
-      try {
-        for (const { keys, probe } of rowsIn(group)) {
-          shell.prompt.value = "";
-          await probe({ h, shell, chords: chordsOf(keys) });
-        }
-      } finally {
-        shell.dispose();
+  await withAppShell(
+    async (shell, h) => {
+      for (const { keys, probe } of rowsIn(group)) {
+        shell.prompt.value = "";
+        await probe({ h, shell, chords: chordsOf(keys) });
       }
     },
-    { width: 80, height: 24 },
+    { shell: { wireKeys: true, run: "idle" } },
   );
 }
 
@@ -854,80 +845,38 @@ describe("the runner host does not shadow the prompt bindings the catalog claims
 
 describe("? no longer opens help", () => {
   test("bare ? types a literal character instead of opening the shortcut list", async () => {
-    const harness = await createHarness({ width: 80, height: 24 });
-    try {
-      const shell = createAppShell(harness.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        wireKeys: true,
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell, h) => {
         shellFocusPrompt(shell);
         shell.prompt.value = "";
-        harness.pressKey("?");
+        h.pressKey("?");
         expect(shell.overlayKind).toBeNull();
         expect(shell.prompt.value).toBe("?");
 
         shellFocusTranscript(shell);
-        harness.pressKey("?");
+        h.pressKey("?");
         // No binding claims it with the transcript focused either — help has
         // no chord left at all, only the /help command.
         expect(shell.overlayKind).toBeNull();
-      } finally {
-        shell.dispose();
-      }
-    } finally {
-      harness.destroy();
-    }
+      },
+      { shell: { wireKeys: true, run: "idle" } },
+    );
   });
 });
 
 describe("help stays reachable as a command", () => {
   test("/help still opens the shortcut list", async () => {
     const notifications: string[] = [];
-    await withTestRenderer(async (h) => {
-      const shell = createAppShell(h.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        run: "idle",
-      });
-      try {
+    await withAppShell(
+      async (shell) => {
         expect(shell.overlayKind).toBeNull();
         const opened = openCommandSurface(shell, "help", {
           notify: (text) => notifications.push(text),
         });
         expect(opened).toBe(true);
         expect(shell.overlayKind).toBe("help");
-      } finally {
-        shell.dispose();
-      }
-    });
-  });
-
-  test("openHelpOverlay (the /help handler) opens the same overlay the removed ? chord used to", async () => {
-    const harness = await createHarness({ width: 80, height: 24 });
-    try {
-      const shell = createAppShell(harness.renderer, {
-        terminal: { columns: 80, rows: 24 },
-        run: "idle",
-      });
-      try {
-        openHelpOverlay(shell);
-        expect(shell.overlayKind).toBe("help");
-      } finally {
-        shell.dispose();
-      }
-    } finally {
-      harness.destroy();
-    }
-  });
-});
-
-describe("helpItems", () => {
-  test("lists every catalog row then Close help", () => {
-    const items = helpItems();
-    expect(items).toHaveLength(SHELL_SHORTCUTS.length + 1);
-    const first = defined(SHELL_SHORTCUTS[0]);
-    expect(items[0]).toBe(`${first.keys} — ${first.description}`);
-    expect(items[items.length - 1]).toBe("Close help");
+      },
+      { shell: { run: "idle" } },
+    );
   });
 });

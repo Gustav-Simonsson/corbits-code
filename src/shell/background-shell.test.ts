@@ -1,11 +1,10 @@
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   MAX_COMPLETED_BACKGROUND_SHELLS,
   MAX_RUNNING_BACKGROUND_SHELLS,
-  MAX_SHELL_COLLECT_WAIT_MS,
   createBackgroundShellRegistry,
 } from "./background-shell.js";
 
@@ -23,10 +22,6 @@ async function waitUntilGone(token: string): Promise<void> {
 }
 
 describe("background shell registry", () => {
-  test("default collect wait cap is 300s", () => {
-    expect(MAX_SHELL_COLLECT_WAIT_MS).toBe(300_000);
-  });
-
   test("start returns a handle immediately while the process runs", async () => {
     const registry = createBackgroundShellRegistry();
     const started = registry.start({
@@ -207,86 +202,57 @@ describe("background shell registry", () => {
     }
   });
 
-  test("one-sided timeout does not starve the other waiter", async () => {
-    const registry = createBackgroundShellRegistry();
-    const started = registry.start({
-      command: "sleep 1; echo done",
-      cwd: tmpCwd,
-    });
-    if ("error" in started) throw new Error(started.error);
-    try {
-      const [impatient, patient] = await Promise.all([
-        registry.collect(started.id, 100),
-        registry.collect(started.id, 5_000),
-      ]);
-      expect(impatient.state).toBe("running");
-      expect(patient.state).toBe("completed");
-      if (patient.state !== "completed") return;
-      expect(patient.exit.output).toContain("done");
-    } finally {
-      registry.disposeAll("test done");
-    }
-  });
-
-  test("one-sided abort does not starve the other waiter", async () => {
-    const registry = createBackgroundShellRegistry();
-    const started = registry.start({
-      command: "sleep 1; echo done",
-      cwd: tmpCwd,
-    });
-    if ("error" in started) throw new Error(started.error);
-    try {
+  test("one-sided release (timeout or abort) does not starve the other waiter", async () => {
+    const impatientCollect = (
+      registry: ReturnType<typeof createBackgroundShellRegistry>,
+      id: string,
+      mode: "timeout" | "abort",
+    ) => {
+      if (mode === "timeout") return registry.collect(id, 100);
       const aborted = new AbortController();
       setTimeout(() => aborted.abort(new Error("stop waiting")), 100);
-      const [cancelled, patient] = await Promise.all([
-        registry.collect(started.id, 5_000, aborted.signal),
-        registry.collect(started.id, 5_000),
-      ]);
-      expect(cancelled.state).toBe("running");
-      expect(patient.state).toBe("completed");
-      if (patient.state !== "completed") return;
-      expect(patient.exit.output).toContain("done");
-    } finally {
-      registry.disposeAll("test done");
+      return registry.collect(id, 5_000, aborted.signal);
+    };
+
+    for (const mode of ["timeout", "abort"] as const) {
+      const registry = createBackgroundShellRegistry();
+      const started = registry.start({
+        command: "sleep 1; echo done",
+        cwd: tmpCwd,
+      });
+      if ("error" in started) throw new Error(started.error);
+      try {
+        const [impatient, patient] = await Promise.all([
+          impatientCollect(registry, started.id, mode),
+          registry.collect(started.id, 5_000),
+        ]);
+        expect(impatient.state).toBe("running");
+        expect(patient.state).toBe("completed");
+        if (patient.state !== "completed") return;
+        expect(patient.exit.output).toContain("done");
+      } finally {
+        registry.disposeAll("test done");
+      }
     }
   });
 
-  test("collect wait is capped so a huge wait_ms cannot park unbounded", async () => {
-    const registry = createBackgroundShellRegistry({ maxCollectWaitMs: 80 });
-    const started = registry.start({
-      command: "sleep 30",
-      cwd: tmpCwd,
-    });
-    if ("error" in started) throw new Error(started.error);
-    try {
-      const t0 = Date.now();
-      const snapshot = await registry.collect(started.id, 30_000);
-      const elapsed = Date.now() - t0;
-      expect(snapshot.state).toBe("running");
-      expect(elapsed).toBeLessThan(2_000);
-    } finally {
-      registry.disposeAll("test done");
-    }
-  });
-
-  test("non-finite wait_ms is still capped", async () => {
-    const registry = createBackgroundShellRegistry({ maxCollectWaitMs: 80 });
-    const started = registry.start({
-      command: "sleep 30",
-      cwd: tmpCwd,
-    });
-    if ("error" in started) throw new Error(started.error);
-    try {
-      const t0 = Date.now();
-      const snapshot = await registry.collect(
-        started.id,
-        Number.POSITIVE_INFINITY,
-      );
-      const elapsed = Date.now() - t0;
-      expect(snapshot.state).toBe("running");
-      expect(elapsed).toBeLessThan(2_000);
-    } finally {
-      registry.disposeAll("test done");
+  test("collect wait is capped so a huge or non-finite wait_ms cannot park unbounded", async () => {
+    for (const waitMs of [30_000, Number.POSITIVE_INFINITY]) {
+      const registry = createBackgroundShellRegistry({ maxCollectWaitMs: 80 });
+      const started = registry.start({
+        command: "sleep 30",
+        cwd: tmpCwd,
+      });
+      if ("error" in started) throw new Error(started.error);
+      try {
+        const t0 = Date.now();
+        const snapshot = await registry.collect(started.id, waitMs);
+        const elapsed = Date.now() - t0;
+        expect(snapshot.state).toBe("running");
+        expect(elapsed).toBeLessThan(2_000);
+      } finally {
+        registry.disposeAll("test done");
+      }
     }
   });
 

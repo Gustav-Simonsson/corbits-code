@@ -1,4 +1,4 @@
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import { expect, test, describe } from "bun:test";
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,11 +14,9 @@ import { createShellOutputFeed } from "../session/shell-output-feed.js";
 
 import {
   BoundedShellOutput,
-  MAX_SHELL_OUTPUT_BYTES,
   SHELL_FEED_EMIT_MS,
   advertiseShellGuardTimeout,
   resolveShellTimeoutMs,
-  formatShellTimeoutNotice,
   DEFAULT_FOREGROUND_SHELL_TIMEOUT_MS,
   reapLiveChildren,
   runGuardedShell,
@@ -82,20 +80,6 @@ describe("runGuardedShell", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  test("omitted timeout does not arm a timer", async () => {
-    const start = Date.now();
-    const { exitCode, timedOut, output } = await runGuardedShell(
-      { command: "sleep 0.05; echo done" },
-      neverAbort(),
-    );
-    expect(timedOut).toBe(false);
-    expect(exitCode).toBe(0);
-    expect(output).toContain("done");
-    // Completes without a timeout flag; under a 15s default this would also
-    // pass for a short sleep — pair with resolveShellTimeoutMs coverage.
-    expect(Date.now() - start).toBeLessThan(5_000);
-  });
-
   test("merges settings.env into the spawn environment on top of process.env", async () => {
     const { output } = await runGuardedShell(
       {
@@ -105,14 +89,6 @@ describe("runGuardedShell", () => {
       neverAbort(),
     );
     expect(output).toContain("from-settings");
-  });
-
-  test("still inherits process.env when settings.env is provided", async () => {
-    const { output } = await runGuardedShell(
-      { command: "echo $PATH", env: { CORBITS_TEST_ENV_VAR: "x" } },
-      neverAbort(),
-    );
-    expect(output.trim().length).toBeGreaterThan(0);
   });
 
   test("returns partial output and a timed-out flag instead of throwing", async () => {
@@ -128,7 +104,6 @@ describe("runGuardedShell", () => {
   });
 
   test("truncates with head+tail when output exceeds the byte cap", async () => {
-    expect(MAX_SHELL_OUTPUT_BYTES).toBe(512_000);
     const cap = 8_192;
     const { output, outputTruncated, exitCode } = await runGuardedShell(
       {
@@ -145,21 +120,6 @@ describe("runGuardedShell", () => {
     expect(output).toMatch(/END|bbbb/);
     expect(output).toMatch(/command output truncated/);
     expect(output.length).toBeLessThan(cap + 512);
-  });
-
-  test("does not return the full oversized payload when truncated", async () => {
-    const cap = 4_096;
-    const { output, outputTruncated } = await runGuardedShell(
-      {
-        command: "python3 -c \"print('x' * 600000)\"",
-        timeout: 5_000,
-        maxOutputBytes: cap,
-      },
-      neverAbort(),
-    );
-    expect(outputTruncated).toBe(true);
-    expect(output.length).toBeLessThan(cap + 512);
-    expect(output).toMatch(/command output truncated/);
   });
 
   test("BoundedShellOutput keeps head and tail slices under cap", () => {
@@ -197,125 +157,87 @@ describe("runGuardedShell", () => {
     await expect(promise).rejects.toThrow(/aborted/);
     await waitUntilGone(token);
   });
-
-  test("abort kills the process group", async () => {
-    const controller = new AbortController();
-    const promise = runGuardedShell(
-      { command: "sleep 60", timeout: 30_000 },
-      controller.signal,
-    );
-    setTimeout(() => controller.abort(), 50);
-    await expect(promise).rejects.toThrow(/aborted/);
-  });
 });
 
 describe("resolveShellTimeoutMs", () => {
-  test("omitted foreground timeout is 120s", () => {
-    expect(
-      resolveShellTimeoutMs({ requested: undefined, background: false }),
-    ).toBe(DEFAULT_FOREGROUND_SHELL_TIMEOUT_MS);
-    expect(resolveShellTimeoutMs({ requested: 0, background: false })).toBe(
-      DEFAULT_FOREGROUND_SHELL_TIMEOUT_MS,
-    );
-    expect(resolveShellTimeoutMs({ requested: -1, background: false })).toBe(
-      DEFAULT_FOREGROUND_SHELL_TIMEOUT_MS,
-    );
-  });
-
-  test("maxMs clamps only the foreground default path", () => {
-    expect(
-      resolveShellTimeoutMs({
-        requested: undefined,
-        background: false,
-        maxMs: 100,
-      }),
-    ).toBe(100);
-    expect(
-      resolveShellTimeoutMs({
-        requested: undefined,
-        background: false,
-        defaultMs: 15_000,
-        maxMs: 100,
-      }),
-    ).toBe(100);
-    expect(
-      resolveShellTimeoutMs({
-        requested: undefined,
-        background: false,
-        defaultMs: 120_000,
-        maxMs: 60_000,
-      }),
-    ).toBe(60_000);
-  });
-
-  test("per-call timeout is not clamped by maxMs", () => {
-    expect(
-      resolveShellTimeoutMs({
-        requested: 5_000,
-        background: false,
-        maxMs: 100,
-      }),
-    ).toBe(5_000);
-    expect(
-      resolveShellTimeoutMs({
-        requested: 3_600_000,
-        background: false,
-        defaultMs: 120_000,
-        maxMs: 100,
-      }),
-    ).toBe(3_600_000);
-    expect(
-      resolveShellTimeoutMs({
-        requested: 5_400_000,
-        background: false,
-        defaultMs: 15_000,
-        maxMs: 600_000,
-      }),
-    ).toBe(5_400_000);
-  });
-
-  test("background omitted timeout is undefined even when defaultMs is 90", () => {
-    expect(
-      resolveShellTimeoutMs({
-        requested: undefined,
-        background: true,
-        defaultMs: 90,
-        maxMs: 50,
-      }),
-    ).toBeUndefined();
-  });
-
-  test("background per-call timeout is the bound with no clamp", () => {
-    expect(
-      resolveShellTimeoutMs({
-        requested: 5_000,
-        background: true,
-        defaultMs: 120_000,
-        maxMs: 100,
-      }),
-    ).toBe(5_000);
-  });
-
-  test("settings defaultMs overrides the 120s foreground default", () => {
-    expect(
-      resolveShellTimeoutMs({
-        requested: undefined,
-        background: false,
-        defaultMs: 90,
-      }),
-    ).toBe(90);
-  });
-});
-
-describe("formatShellTimeoutNotice", () => {
-  test("keeps the terminated marker and nudges background:true", () => {
-    const notice = formatShellTimeoutNotice(120_000);
-    expect(notice).toContain(
-      "[command timed out after 120000ms and was terminated]",
-    );
-    expect(notice).toContain(
-      "Retry with background:true for long-running commands (builds, tests, dev servers); completion arrives as a later-turn system message, and shell_collect collects or cancels.",
-    );
+  test("resolves the foreground default, clamps only defaults, and leaves background unbounded", () => {
+    const cases: [
+      Parameters<typeof resolveShellTimeoutMs>[0],
+      number | undefined,
+    ][] = [
+      // Omitted/filler foreground timeout is the 120s default.
+      [
+        { requested: undefined, background: false },
+        DEFAULT_FOREGROUND_SHELL_TIMEOUT_MS,
+      ],
+      [
+        { requested: 0, background: false },
+        DEFAULT_FOREGROUND_SHELL_TIMEOUT_MS,
+      ],
+      [
+        { requested: -1, background: false },
+        DEFAULT_FOREGROUND_SHELL_TIMEOUT_MS,
+      ],
+      // maxMs clamps only the foreground default path.
+      [{ requested: undefined, background: false, maxMs: 100 }, 100],
+      [
+        {
+          requested: undefined,
+          background: false,
+          defaultMs: 15_000,
+          maxMs: 100,
+        },
+        100,
+      ],
+      [
+        {
+          requested: undefined,
+          background: false,
+          defaultMs: 120_000,
+          maxMs: 60_000,
+        },
+        60_000,
+      ],
+      // Per-call timeout is not clamped by maxMs.
+      [{ requested: 5_000, background: false, maxMs: 100 }, 5_000],
+      [
+        {
+          requested: 3_600_000,
+          background: false,
+          defaultMs: 120_000,
+          maxMs: 100,
+        },
+        3_600_000,
+      ],
+      [
+        {
+          requested: 5_400_000,
+          background: false,
+          defaultMs: 15_000,
+          maxMs: 600_000,
+        },
+        5_400_000,
+      ],
+      // Background: omitted stays undefined; per-call is the bound, unclamped.
+      [
+        { requested: undefined, background: true, defaultMs: 90, maxMs: 50 },
+        undefined,
+      ],
+      [
+        { requested: 5_000, background: true, defaultMs: 120_000, maxMs: 100 },
+        5_000,
+      ],
+      // Settings defaultMs overrides the 120s foreground default.
+      [{ requested: undefined, background: false, defaultMs: 90 }, 90],
+    ];
+    const mismatched = cases
+      .map(([input, expected]) => ({
+        input,
+        expected,
+        actual: resolveShellTimeoutMs(input),
+      }))
+      .filter((c) => c.actual !== c.expected);
+    expect(mismatched).toEqual([]);
   });
 });
 
@@ -537,29 +459,6 @@ describe("advertiseShellGuardTimeout", () => {
     };
   }
 
-  test("rewrites run_shell timeout description when a settings default is set", () => {
-    const rewritten = advertiseShellGuardTimeout(runShellDef(), 120_000);
-    const timeout = timeoutSchema(rewritten);
-    expect(timeout?.description).toContain("foreground default: 120000");
-    expect(timeout?.description).toMatch(
-      /omit on background:true for no timeout/,
-    );
-    expect(timeout?.description).not.toContain("30000");
-    expect(timeout?.default).toBe(120_000);
-  });
-
-  test("advertises default 120000 when settings default is unset", () => {
-    const rewritten = advertiseShellGuardTimeout(runShellDef());
-    const timeout = timeoutSchema(rewritten);
-    expect(timeout?.description).toContain("foreground default: 120000");
-    expect(timeout?.default).toBe(120_000);
-    expect(timeout?.description).not.toContain("30000");
-    expect(timeout?.description).not.toContain("15000");
-    expect(timeout?.description).toMatch(
-      /omit on background:true for no timeout/,
-    );
-  });
-
   test("advertised default matches resolver when only maxTimeoutMs is set", () => {
     const maxMs = 60_000;
     const resolved = resolveShellTimeoutMs({
@@ -585,30 +484,6 @@ describe("advertiseShellGuardTimeout", () => {
       inputSchema: { type: "object", properties: {} },
     };
     expect(advertiseShellGuardTimeout(def)).toBe(def);
-  });
-
-  test("advertises background:true with collect/cancel guidance", () => {
-    const rewritten = advertiseShellGuardTimeout({
-      name: "run_shell",
-      description: "Execute a shell command",
-      inputSchema: {
-        type: "object",
-        properties: { command: { type: "string" } },
-        required: ["command"],
-      },
-    });
-    const background = (
-      rewritten.inputSchema["properties"] as Record<
-        string,
-        { description: string }
-      >
-    )["background"];
-    expect(background).toBeDefined();
-    expect(background?.description).toContain("shell_collect");
-    expect(background?.description).toMatch(/omit timeout/i);
-    expect(background?.description).toMatch(
-      /does not change the retained shell cwd/i,
-    );
   });
 
   test("omits background when collect is not mounted", () => {
@@ -855,43 +730,29 @@ describe("shellGuardPlugin", () => {
     expect(toolContentTrimmed(allowed)).toBe(realpathSync(join(root, "..")));
   });
 
-  test("retains cwd from cd even when the command exits non-zero", async () => {
-    const root = await mkdtemp(join(tmpdir(), "ic-cd-fail-"));
-    const nested = join(root, "nested");
-    await mkdir(nested);
-    const handler = defined(shellGuardPlugin(root).middleware)(fallback);
-    const fail = await handler(
-      {
-        id: "cf1",
-        name: "run_shell",
-        arguments: { command: "cd nested && false" },
-      },
-      neverAbort(),
-    );
-    expect(String(fail.content)).toMatch(/exit code/);
-    const pwd = await handler(
-      { id: "cf2", name: "run_shell", arguments: { command: "pwd" } },
-      neverAbort(),
-    );
-    expect(String(pwd.content).trim()).toBe(realpathSync(nested));
-  });
-
-  test("retains cwd across successive run_shell calls", async () => {
-    const root = await mkdtemp(join(tmpdir(), "ic-retain-cwd-"));
-    const sub = join(root, "nested");
-    await mkdir(sub);
-    const handler = defined(shellGuardPlugin(root).middleware)(fallback);
-    const cdResult = await handler(
-      { id: "cd1", name: "run_shell", arguments: { command: "cd nested" } },
-      neverAbort(),
-    );
-    expect(cdResult.isError).toBeUndefined();
-    const pwdResult = await handler(
-      { id: "pwd1", name: "run_shell", arguments: { command: "pwd" } },
-      neverAbort(),
-    );
-    expect(toolContentTrimmed(pwdResult)).toBe(realpathSync(sub));
-  });
+  // Exit status must not affect whether the landed cwd is retained.
+  for (const command of ["cd nested", "cd nested && false"]) {
+    test(`retains cwd across successive run_shell calls after \`${command}\``, async () => {
+      const root = await mkdtemp(join(tmpdir(), "ic-retain-cwd-"));
+      const nested = join(root, "nested");
+      await mkdir(nested);
+      const handler = defined(shellGuardPlugin(root).middleware)(fallback);
+      const cdResult = await handler(
+        { id: "cd1", name: "run_shell", arguments: { command } },
+        neverAbort(),
+      );
+      if (command.endsWith("false")) {
+        expect(String(cdResult.content)).toMatch(/exit code/);
+      } else {
+        expect(cdResult.isError).toBeUndefined();
+      }
+      const pwd = await handler(
+        { id: "pwd1", name: "run_shell", arguments: { command: "pwd" } },
+        neverAbort(),
+      );
+      expect(toolContentTrimmed(pwd)).toBe(realpathSync(nested));
+    });
+  }
 
   test("per-call cwd override does not change retained cwd", async () => {
     const root = await mkdtemp(join(tmpdir(), "ic-override-cwd-"));

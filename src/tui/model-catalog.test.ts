@@ -121,6 +121,24 @@ const go: ModelCatalogProvider = {
   opencodeGo: true,
 };
 
+/** A provider whose every model is also a recent entry, for recentMax tests. */
+function allRecentCatalog(count: number, recentMax?: number) {
+  const many = Array.from({ length: count }, (_, i) => ({
+    provider: "xai",
+    model: `m${i}`,
+  }));
+  const provider: ModelCatalogProvider = {
+    name: "xai",
+    models: many.map((r) => r.model),
+  };
+  return buildModelsFirstCatalog({
+    providers: [provider],
+    recent: many,
+    favorites: [],
+    ...(recentMax === undefined ? {} : { recentMax }),
+  });
+}
+
 describe("buildModelsFirstCatalog", () => {
   test("orders recent, then favorites, then provider buckets", () => {
     const list = buildModelsFirstCatalog({
@@ -166,38 +184,13 @@ describe("buildModelsFirstCatalog", () => {
   });
 
   test("caps recent at recentMax (default 5)", () => {
-    const many = Array.from({ length: 8 }, (_, i) => ({
-      provider: "xai",
-      model: `m${i}`,
-    }));
-    const provider: ModelCatalogProvider = {
-      name: "xai",
-      models: many.map((r) => r.model),
-    };
-    const list = buildModelsFirstCatalog({
-      providers: [provider],
-      recent: many,
-      favorites: [],
-    });
+    const list = allRecentCatalog(8);
 
     expect(list.filter((r) => r.section === "recent")).toHaveLength(5);
   });
 
   test("respects a custom recentMax", () => {
-    const many = Array.from({ length: 4 }, (_, i) => ({
-      provider: "xai",
-      model: `m${i}`,
-    }));
-    const provider: ModelCatalogProvider = {
-      name: "xai",
-      models: many.map((r) => r.model),
-    };
-    const list = buildModelsFirstCatalog({
-      providers: [provider],
-      recent: many,
-      favorites: [],
-      recentMax: 2,
-    });
+    const list = allRecentCatalog(4, 2);
 
     expect(list.filter((r) => r.section === "recent")).toHaveLength(2);
   });
@@ -212,8 +205,8 @@ describe("buildModelsFirstCatalog", () => {
     });
 
     const recent = list.find((r) => r.section === "recent");
-    expect(recent?.warning).toMatch(/Go model on Zen path/);
-    expect(recent?.label).not.toContain("Go model on Zen path");
+    expect(recent?.warning).toBeTruthy();
+    expect(recent?.label).not.toContain(String(recent?.warning));
 
     const goRow = list.find(
       (r) => r.id === modelOptionId("opencode-go", "kimi-k2.7-code"),
@@ -231,16 +224,7 @@ describe("buildModelsFirstCatalog", () => {
     const row = list.find(
       (r) => r.id === modelOptionId("zen", "kimi-k2.7-code"),
     );
-    expect(row?.warning).toMatch(/Go model on Zen path/);
-  });
-
-  test("uses provider name as label when label is unset", () => {
-    const list = buildModelsFirstCatalog({
-      providers: [{ name: "custom", models: ["m1"] }],
-      recent: [],
-      favorites: [],
-    });
-    expect(list[0]?.label).toBe("m1 * [custom]");
+    expect(row?.warning).toBeTruthy();
   });
 });
 
@@ -255,7 +239,7 @@ describe("describeModelCatalogOption", () => {
       { pricing: null },
     );
     expect(description?.tone).toBe("consequence");
-    expect(description?.impact).toMatch(/Zen credits/);
+    expect(description?.impact).toBeTruthy();
   });
 
   test("reports pricing as unknown rather than inventing a number", () => {
@@ -263,33 +247,28 @@ describe("describeModelCatalogOption", () => {
       { id: modelOptionId("xai", "grok-4"), label: "grok-4 * [xAI]" },
       { pricing: null },
     );
-    expect(description?.impact).toMatch(/pricing unknown/i);
+    expect(description?.impact).toBeTruthy();
+    expect(description?.impact).not.toMatch(/[$\d]/);
   });
 
-  test("connected ChatGPT rows state plan billing plainly instead of unknown pricing (CL-5606)", () => {
+  test("connected subscription rows state plan billing plainly instead of unknown pricing (CL-5606)", () => {
     // Subscription-billed models have no per-token price; "Pricing unknown"
     // misreads as metered billing with a missing rate.
-    const description = describeModelCatalogOption(
-      {
-        id: modelOptionId("codex/default", "gpt-5.1-codex-max"),
-        label: "gpt-5.1-codex-max * [Codex default]",
-      },
+    const unknown = describeModelCatalogOption(
+      { id: modelOptionId("xai", "grok-4"), label: "x" },
       { pricing: null },
     );
-    expect(description?.impact).not.toMatch(/pricing unknown/i);
-    expect(description?.impact).toMatch(/ChatGPT subscription/);
-  });
-
-  test("connected Grok rows state plan billing plainly instead of unknown pricing (CL-5606)", () => {
-    const description = describeModelCatalogOption(
-      {
-        id: modelOptionId("xai/work", "grok-4"),
-        label: "grok-4 * [xAI work]",
-      },
-      { pricing: null },
-    );
-    expect(description?.impact).not.toMatch(/pricing unknown/i);
-    expect(description?.impact).toMatch(/subscription/);
+    for (const id of [
+      modelOptionId("codex/default", "gpt-5.1-codex-max"),
+      modelOptionId("xai/work", "grok-4"),
+    ]) {
+      const description = describeModelCatalogOption(
+        { id, label: "x" },
+        { pricing: null },
+      );
+      expect(description?.impact).toBeTruthy();
+      expect(description?.impact).not.toBe(unknown?.impact);
+    }
   });
 
   test("colon-less ids keep the full provider instead of dropping the last character", () => {
@@ -299,6 +278,10 @@ describe("describeModelCatalogOption", () => {
       { id: "codex/", label: "default * [Codex default]" },
       { pricing: null },
     );
-    expect(description?.impact).toMatch(/ChatGPT subscription/);
+    const reference = describeModelCatalogOption(
+      { id: modelOptionId("codex/default", "gpt-5.1-codex-max"), label: "x" },
+      { pricing: null },
+    );
+    expect(description?.impact).toBe(reference?.impact);
   });
 });

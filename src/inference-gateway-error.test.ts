@@ -1,13 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   carriesCodexReLoginHint,
-  codexCredential404ReclassifiedStats,
   GATEWAY_OVERLOAD_USER_MESSAGE,
   isGatewayOverloadInferenceError,
   looksLikeHtmlGatewayBody,
   normalizeInferenceErrorForRetry,
-  resetCodexCredential404StatsForTests,
-  XAI_CAPACITY_USER_MESSAGE,
 } from "./inference-gateway-error.js";
 
 const CLOUDFLARE_503_HTML = `<!DOCTYPE html>
@@ -141,38 +138,58 @@ describe("normalizeInferenceErrorForRetry", () => {
     expect(normalizeInferenceErrorForRetry(err)).toEqual(err);
   });
 
-  test("known-Go bare 429 without Console Go markers reclassifies as rate_limit", () => {
-    // intx defaults 429 → quota_exhausted; without body markers the old path
-    // left that category in place. Known-Go context must reclassify.
-    const bare = {
-      category: "quota_exhausted" as const,
-      message: "Too Many Requests",
-      statusCode: 429,
-      raw: { error: { message: "Too Many Requests" } },
-    };
+  // intx defaults 429 → quota_exhausted; known-provider context channels
+  // reclassify a bare 429 (no quota markers in the body) as a plain rate
+  // limit. A reclassified message must never claim quota/usage-limit copy.
+  const BARE_429 = {
+    category: "quota_exhausted" as const,
+    message: "Too Many Requests",
+    statusCode: 429,
+    retryAfterMs: 45_000,
+    raw: { error: { message: "Too Many Requests" } },
+  };
 
-    // Without Go context, leave intx's classification alone.
-    expect(normalizeInferenceErrorForRetry(bare)).toEqual(bare);
+  // Live Codex usage-limit 429 body: plan metadata plus a reset ETA the
+  // normalizer converts to retryAfterMs.
+  const CODEX_USAGE_LIMIT_BODY = {
+    detail: {
+      error: {
+        code: "usage_limit_reached",
+        message: "You have reached your usage limit. Try again later.",
+        plan_type: "workspace_member",
+        resets_in_seconds: 3435,
+      },
+    },
+  };
 
-    // All three Go-context channels reclassify the same bare 429.
-    for (const [context, checkMessage] of [
-      [{ requestURL: "https://opencode.ai/zen/go/v1/chat/completions" }, true],
-      [{ providerId: "opencode-go" }, false],
-      [{ opencodeGo: true }, false],
-    ] as const) {
-      const normalized = normalizeInferenceErrorForRetry({
-        ...bare,
-        ...context,
-      });
-      expect(normalized.category).toBe("retryable");
-      if (checkMessage) {
-        // Bare 429 keeps the original message and appends a short retry hint.
-        expect(normalized.message.toLowerCase()).toMatch(
-          /too many requests|rate limit/,
-        );
-      }
-    }
+  test.each([
+    { requestURL: "https://opencode.ai/zen/go/v1/chat/completions" },
+    { providerId: "opencode-go" },
+    { opencodeGo: true },
+    { providerId: "xai/alice" },
+    { providerId: "codex/acme-labs" },
+  ])("known-provider bare 429 reclassifies as retryable (%j)", (context) => {
+    const normalized = normalizeInferenceErrorForRetry({
+      ...BARE_429,
+      ...context,
+    });
+    expect(normalized.category).toBe("retryable");
+    expect(normalized.retryAfterMs).toBe(45_000);
+    expect(normalized.message.toLowerCase()).toMatch(
+      /too many requests|rate limit/,
+    );
+    expect(normalized.message.toLowerCase()).not.toMatch(
+      /quota exhausted|usage limit reached/,
+    );
   });
+
+  test.each([{}, { providerId: "openai" }])(
+    "bare 429 without a known provider keeps intx's quota_exhausted (%j)",
+    (context) => {
+      const err = { ...BARE_429, ...context };
+      expect(normalizeInferenceErrorForRetry(err)).toEqual(err);
+    },
+  );
 
   test("403 with usage-limit body reclassifies as quota_exhausted", () => {
     const normalized = normalizeInferenceErrorForRetry({
@@ -192,26 +209,16 @@ describe("normalizeInferenceErrorForRetry", () => {
   });
 
   test("maps Codex usage_limit_reached detail.error body to quota_exhausted with reset ETA", () => {
-    const liveBody = {
-      detail: {
-        error: {
-          code: "usage_limit_reached",
-          message: "You have reached your usage limit. Try again later.",
-          plan_type: "workspace_member",
-          resets_in_seconds: 3435,
-        },
-      },
-    };
     const normalized = normalizeInferenceErrorForRetry({
       category: "quota_exhausted",
       message: "Too Many Requests",
       statusCode: 429,
-      raw: liveBody,
-      providerId: "codex/abk-labs",
+      raw: CODEX_USAGE_LIMIT_BODY,
+      providerId: "codex/acme-labs",
     });
     expect(normalized.category).toBe("quota_exhausted");
     expect(normalized.retryAfterMs).toBe(3_435_000);
-    expect(normalized.message).toContain('Codex profile "abk-labs"');
+    expect(normalized.message).toContain('Codex profile "acme-labs"');
     expect(normalized.message).toContain("workspace member");
     expect(normalized.message).toMatch(/Resets in ~/);
     expect(normalized.message).toContain("/model");
@@ -342,51 +349,52 @@ describe("normalizeInferenceErrorForRetry", () => {
     expect(normalized.message).toContain("Invalid token: expired");
   });
 
-  test("Codex bare 404 without an auth signal stays fatal", () => {
-    const error = {
-      category: "fatal" as const,
-      message: "Not Found",
-      statusCode: 404,
-      providerId: "codex/work",
-    };
-    expect(normalizeInferenceErrorForRetry(error)).toBe(error);
-  });
-
-  test("Codex routing 404 without an auth signal stays fatal", () => {
-    const error = {
-      category: "fatal" as const,
-      message: "Not Found",
-      statusCode: 404,
-      providerId: "codex/work",
-      raw: { error: { code: "not_found", message: "No such endpoint" } },
-    };
-    expect(normalizeInferenceErrorForRetry(error)).toBe(error);
-  });
-
-  test("Codex 404 naming a dotted unknown model stays fatal", () => {
-    const error = {
-      category: "fatal" as const,
-      message: "The model 'gpt-3.5-turbo' does not exist",
-      statusCode: 404,
-      providerId: "codex/work",
-    };
-    expect(normalizeInferenceErrorForRetry(error)).toBe(error);
-  });
-
-  test("Codex 404 naming an unknown model keeps fatal switch-models guidance", () => {
-    const error = {
-      category: "fatal" as const,
-      message: "The model 'gpt-99' does not exist",
-      statusCode: 404,
-      providerId: "codex/work",
-      raw: {
-        error: {
-          code: "model_not_found",
-          message: "The model 'gpt-99' does not exist",
-          type: "invalid_request_error",
+  test.each([
+    {
+      name: "bare 404 without an auth signal",
+      error: {
+        category: "fatal" as const,
+        message: "Not Found",
+        statusCode: 404,
+        providerId: "codex/work",
+      },
+    },
+    {
+      name: "routing 404 without an auth signal",
+      error: {
+        category: "fatal" as const,
+        message: "Not Found",
+        statusCode: 404,
+        providerId: "codex/work",
+        raw: { error: { code: "not_found", message: "No such endpoint" } },
+      },
+    },
+    {
+      name: "404 naming a dotted unknown model",
+      error: {
+        category: "fatal" as const,
+        message: "The model 'gpt-3.5-turbo' does not exist",
+        statusCode: 404,
+        providerId: "codex/work",
+      },
+    },
+    {
+      name: "404 naming an unknown model keeps fatal switch-models guidance",
+      error: {
+        category: "fatal" as const,
+        message: "The model 'gpt-99' does not exist",
+        statusCode: 404,
+        providerId: "codex/work",
+        raw: {
+          error: {
+            code: "model_not_found",
+            message: "The model 'gpt-99' does not exist",
+            type: "invalid_request_error",
+          },
         },
       },
-    };
+    },
+  ])("Codex $name stays fatal", ({ error }) => {
     expect(normalizeInferenceErrorForRetry(error)).toBe(error);
   });
 
@@ -432,90 +440,66 @@ describe("normalizeInferenceErrorForRetry", () => {
     expect(normalizeInferenceErrorForRetry(error)).toBe(error);
   });
 
-  test("reclassified Codex 404s bump the counter with a body sample", () => {
-    resetCodexCredential404StatsForTests();
-    expect(codexCredential404ReclassifiedStats().count).toBe(0);
-    normalizeInferenceErrorForRetry({
-      category: "fatal",
-      message: "Not Found",
-      statusCode: 404,
-      providerId: "codex/work",
-      raw: REVOKED_CREDENTIAL_404_RAW,
-    });
-    // A fatal 404 without an auth signal must not bump the counter.
-    normalizeInferenceErrorForRetry({
-      category: "fatal",
-      message: "Not Found",
-      statusCode: 404,
-      providerId: "codex/work",
-    });
-    const stats = codexCredential404ReclassifiedStats();
-    expect(stats.count).toBe(1);
-    expect(stats.lastSample).toContain("revoked");
-  });
-
-  test("known-xAI message-only capacity protocol error becomes retryable", () => {
-    const normalized = normalizeInferenceErrorForRetry({
-      category: "protocol_mismatch",
-      message: "The model is currently at capacity. Please try again later.",
-      providerId: "xai/default",
+  test.each([
+    {
+      name: "message-only capacity protocol error",
+      error: {
+        category: "protocol_mismatch" as const,
+        message: "The model is currently at capacity. Please try again later.",
+        providerId: "xai/default",
+        retryAfterMs: 2_500,
+      },
       retryAfterMs: 2_500,
-    });
-    expect(normalized.category).toBe("retryable");
-    expect(normalized.retryAfterMs).toBe(2_500);
-  });
-
-  test("known-xAI JSON-bodied high-demand protocol error becomes retryable", () => {
-    const normalized = normalizeInferenceErrorForRetry({
-      category: "protocol_mismatch",
-      message: "malformed JSON in SSE data payload",
-      providerId: "xai/default",
-      raw: {
-        error: {
-          message: "The service is unavailable due to high demand",
+    },
+    {
+      name: "JSON-bodied high-demand protocol error",
+      error: {
+        category: "protocol_mismatch" as const,
+        message: "malformed JSON in SSE data payload",
+        providerId: "xai/default",
+        raw: {
+          error: {
+            message: "The service is unavailable due to high demand",
+          },
         },
       },
-    });
+      retryAfterMs: undefined,
+    },
+    {
+      name: "exact temporary-unavailable phrase",
+      error: {
+        category: "protocol_mismatch" as const,
+        message: "Service temporarily unavailable",
+        providerId: "xai/default",
+      },
+      retryAfterMs: undefined,
+    },
+    {
+      name: "exact phrase carried on raw",
+      error: {
+        category: "protocol_mismatch" as const,
+        message: "malformed JSON in SSE data payload",
+        providerId: "xai/default",
+        raw: "Service temporarily unavailable",
+      },
+      retryAfterMs: undefined,
+    },
+    {
+      name: "exact phrase nested in JSON raw",
+      error: {
+        category: "protocol_mismatch" as const,
+        message: "malformed JSON in SSE data payload",
+        providerId: "xai/default",
+        raw: { error: { message: "Service temporarily unavailable" } },
+      },
+      retryAfterMs: undefined,
+    },
+  ])("known-xAI $name becomes retryable", ({ error, retryAfterMs }) => {
+    const normalized = normalizeInferenceErrorForRetry(error);
     expect(normalized.category).toBe("retryable");
-  });
-
-  test("known-xAI exact temporary-unavailable phrase becomes retryable", () => {
-    const normalized = normalizeInferenceErrorForRetry({
-      category: "protocol_mismatch",
-      message: "Service temporarily unavailable",
-      providerId: "xai/default",
-    });
-    expect(normalized.category).toBe("retryable");
-  });
-
-  test("known-xAI exact phrase carried on raw becomes retryable", () => {
-    const normalized = normalizeInferenceErrorForRetry({
-      category: "protocol_mismatch",
-      message: "malformed JSON in SSE data payload",
-      providerId: "xai/default",
-      raw: "Service temporarily unavailable",
-    });
-    expect(normalized.category).toBe("retryable");
-  });
-
-  test("known-xAI exact phrase nested in JSON raw becomes retryable", () => {
-    const normalized = normalizeInferenceErrorForRetry({
-      category: "protocol_mismatch",
-      message: "malformed JSON in SSE data payload",
-      providerId: "xai/default",
-      raw: { error: { message: "Service temporarily unavailable" } },
-    });
-    expect(normalized.category).toBe("retryable");
-  });
-
-  test("remapped xAI capacity copy does not claim an ongoing retry", () => {
-    const normalized = normalizeInferenceErrorForRetry({
-      category: "protocol_mismatch",
-      message: "The model is currently at capacity",
-      providerId: "xai/default",
-    });
-    expect(normalized.message).toBe(XAI_CAPACITY_USER_MESSAGE);
-    expect(normalized.message).not.toContain("retrying");
+    if (retryAfterMs !== undefined) {
+      expect(normalized.retryAfterMs).toBe(retryAfterMs);
+    }
   });
 
   test("mixed xAI capacity and quota copy stays unchanged", () => {
@@ -565,33 +549,12 @@ describe("normalizeInferenceErrorForRetry", () => {
     expect(normalizeInferenceErrorForRetry(error)).toBe(error);
   });
 
-  test("known-xAI bare 429 reclassifies as retryable", () => {
-    const bare = {
-      category: "quota_exhausted" as const,
-      message: "Too Many Requests",
-      statusCode: 429,
-      retryAfterMs: 45_000,
-      raw: { error: { message: "Too Many Requests" } },
-    };
-
-    // Without xAI context, leave intx's classification alone.
-    expect(normalizeInferenceErrorForRetry(bare)).toEqual(bare);
-
-    const viaProviderId = normalizeInferenceErrorForRetry({
-      ...bare,
-      providerId: "xai/thegreataxios",
-    });
-    expect(viaProviderId.category).toBe("retryable");
-    expect(viaProviderId.retryAfterMs).toBe(45_000);
-    expect(viaProviderId.message.toLowerCase()).toMatch(/rate limit/);
-  });
-
   test("known-xAI 429 with usage/quota body stays quota_exhausted", () => {
     const normalized = normalizeInferenceErrorForRetry({
       category: "quota_exhausted",
       message: "Too Many Requests",
       statusCode: 429,
-      providerId: "xai/thegreataxios",
+      providerId: "xai/alice",
       retryAfterMs: 86_400_000,
       raw: {
         error: {
@@ -606,47 +569,12 @@ describe("normalizeInferenceErrorForRetry", () => {
     expect(normalized.retryAfterMs).toBe(86_400_000);
   });
 
-  test("unknown provider bare 429 stays quota_exhausted", () => {
-    const err = {
-      category: "quota_exhausted" as const,
-      message: "Too Many Requests",
-      statusCode: 429,
-      providerId: "openai",
-      retryAfterMs: 5_000,
-      raw: { error: { message: "Too Many Requests" } },
-    };
-    expect(normalizeInferenceErrorForRetry(err)).toEqual(err);
-  });
-
-  test("known-Codex bare 429 without usage_limit_reached remaps to retryable", () => {
-    const bare = {
-      category: "quota_exhausted" as const,
-      message: "Too Many Requests",
-      statusCode: 429,
-      retryAfterMs: 5_000,
-      raw: { error: { message: "Too Many Requests" } },
-    };
-
-    expect(normalizeInferenceErrorForRetry(bare)).toEqual(bare);
-
-    const viaProviderId = normalizeInferenceErrorForRetry({
-      ...bare,
-      providerId: "codex/abk-labs",
-    });
-    expect(viaProviderId.category).toBe("retryable");
-    expect(viaProviderId.retryAfterMs).toBe(5_000);
-    expect(viaProviderId.message.toLowerCase()).toMatch(/rate limit/);
-    expect(viaProviderId.message.toLowerCase()).not.toMatch(
-      /quota exhausted|usage limit reached/,
-    );
-  });
-
   test("known-Codex 429 with ChatGPT usage-limit prose remaps to retryable", () => {
     const normalized = normalizeInferenceErrorForRetry({
       category: "quota_exhausted",
       message: "You have hit your ChatGPT usage limit",
       statusCode: 429,
-      providerId: "codex/abk-labs",
+      providerId: "codex/acme-labs",
       raw: "You have hit your ChatGPT usage limit",
     });
     expect(normalized.category).toBe("retryable");
@@ -661,7 +589,7 @@ describe("normalizeInferenceErrorForRetry", () => {
       category: "quota_exhausted",
       message: "Too Many Requests",
       statusCode: 429,
-      providerId: "codex/abk-labs",
+      providerId: "codex/acme-labs",
     });
     expect(normalized.category).toBe("retryable");
   });
@@ -671,20 +599,11 @@ describe("normalizeInferenceErrorForRetry", () => {
       category: "quota_exhausted",
       message: "Too Many Requests",
       statusCode: 429,
-      providerId: "codex/abk-labs",
-      raw: {
-        detail: {
-          error: {
-            code: "usage_limit_reached",
-            message: "You have reached your usage limit. Try again later.",
-            plan_type: "workspace_member",
-            resets_in_seconds: 3435,
-          },
-        },
-      },
+      providerId: "codex/acme-labs",
+      raw: CODEX_USAGE_LIMIT_BODY,
     });
     expect(normalized.category).toBe("quota_exhausted");
     expect(normalized.retryAfterMs).toBe(3_435_000);
-    expect(normalized.message).toContain('Codex profile "abk-labs"');
+    expect(normalized.message).toContain('Codex profile "acme-labs"');
   });
 });

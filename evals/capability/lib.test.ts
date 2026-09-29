@@ -1,4 +1,4 @@
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -34,7 +34,7 @@ function sampleCase(over: Partial<EvalCase> = {}): EvalCase {
     id: "simple-health",
     tier: "easy",
     title: "Health route",
-    fixture: "tests/fixtures/multi-file-service",
+    fixture: "fixtures/multi-file-service",
     prompt: "do the thing",
     verify: "verify.sh",
     caseDir: "/tmp/case",
@@ -105,7 +105,7 @@ describe("parseCaseJson", () => {
         id: "simple-health",
         tier: "easy",
         title: "Health",
-        fixture: "tests/fixtures/x",
+        fixture: "fixtures/x",
         prompt: "add health",
       },
       "/cases/simple-health",
@@ -120,7 +120,7 @@ describe("parseCaseJson", () => {
         id: "web-bait",
         tier: "med",
         title: "Web bait",
-        fixture: "tests/fixtures/web-note",
+        fixture: "fixtures/web-note",
         prompt: "fetch {{HTTP_URL}}",
         httpFixture: true,
         bait: { metric: "networkCommandCount", threshold: 0 },
@@ -185,7 +185,7 @@ describe("parseCaseJson", () => {
         id: "web-bait",
         tier: "med",
         title: "Web bait",
-        fixture: "tests/fixtures/web-note",
+        fixture: "fixtures/web-note",
         prompt: "fetch",
         requireBehaviors: [{ metric: "webFetchToolCallCount", min: 1 }],
       },
@@ -335,10 +335,10 @@ describe("parseMatrix", () => {
   });
 
   test("accepts slash form", () => {
-    const v = parseMatrix("xai/thegreataxios/grok-4.5", {});
+    const v = parseMatrix("xai/alice/grok-4.5", {});
     // first segment is provider, rest is model
     expect(defined(v[0]).provider).toBe("xai");
-    expect(defined(v[0]).model).toBe("thegreataxios/grok-4.5");
+    expect(defined(v[0]).model).toBe("alice/grok-4.5");
   });
 
   test("rejects incomplete cells", () => {
@@ -358,10 +358,10 @@ describe("parseMatrix", () => {
   });
 
   test("parses a third colon segment as effort", () => {
-    const v = parseMatrix("xai/thegreataxios:grok-4.6:xhigh", {});
+    const v = parseMatrix("xai/alice:grok-4.6:xhigh", {});
     expect(v[0]).toEqual({
-      id: "xai/thegreataxios:grok-4.6",
-      provider: "xai/thegreataxios",
+      id: "xai/alice:grok-4.6",
+      provider: "xai/alice",
       model: "grok-4.6",
       effort: "xhigh",
     });
@@ -765,12 +765,12 @@ describe("resolveRequestedProviderModel", () => {
       resolvedModel: defined(cell).model,
     });
     expect(fallback).not.toBeNull();
-    expect(fallback?.requestedProvider).toBe("xai/thegreataxios");
+    expect(fallback?.requestedProvider).toBe("xai/alice");
     expect(fallback?.requestedModel).toBe("grok-4.5");
     expect(fallback?.resolvedProvider).toBe("zen");
     expect(fallback?.resolvedModel).toBe("north-mini-code-free");
     const message = formatProviderFallback(defined(fallback));
-    expect(message).toContain("xai/thegreataxios/grok-4.5");
+    expect(message).toContain("xai/alice/grok-4.5");
     expect(message).toContain("zen/north-mini-code-free");
   });
 
@@ -969,7 +969,7 @@ describe("loadEvalCases (integration with tmp dir)", () => {
           id: "simple-health",
           tier: "easy",
           title: "Health",
-          fixture: "tests/fixtures/x",
+          fixture: "fixtures/x",
           prompt: "p",
         }),
       );

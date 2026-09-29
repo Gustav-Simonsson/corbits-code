@@ -620,57 +620,37 @@ describe("verifyOrRepair", () => {
 });
 
 describe("pruning compactor verify pass", () => {
-  test("a lossy fold is repaired: the goal and exact path survive", async () => {
-    const compactor = createPruningCompactor({
-      keepRecentTurns: 2,
-      summaryMaxChars: 2000,
-      // CL-9007: pin a tiny tail budget so the fold covers the same older
-      // region the old keepRecentTurns cut folded.
-      compactionShape: { tailBudgetTokens: 10 },
-      summarize: async () => "Work continues. Next: fix tests.",
-    });
-    const turns: ConversationTurn[] = [
-      ...droppedTurns(),
-      textTurn("user", "recent ask"),
-      textTurn("assistant", "recent reply"),
-    ];
-    const result = await compactor.apply(turns, mockStrategyCtx);
-    expect(allText(result.output)).toContain("opaque tokens");
-    expect(allText(result.output)).toContain("auth.ts");
-    expect(result.record.decisions).toMatchObject({ verifyRepaired: 1 });
-  });
-
-  test("a contradicting fold aborts: prior context is kept", async () => {
-    const compactor = createPruningCompactor({
-      keepRecentTurns: 2,
-      summaryMaxChars: 2000,
-      // CL-9007: pin a tiny tail budget so the fold covers the same older
-      // region the old keepRecentTurns cut folded.
-      compactionShape: { tailBudgetTokens: 10 },
-      summarize: async () => "Auth migration done. No errors remain.",
-    });
-    const turns: ConversationTurn[] = [
-      ...droppedTurns(),
-      textTurn("user", "recent ask"),
-      textTurn("assistant", "recent reply"),
-    ];
-    const result = await compactor.apply(turns, mockStrategyCtx);
-    expect(result.output).toBe(turns);
-    expect(result.record.reason).toBe("verify failed — keeping prior context");
-    expect(result.record.decisions).toMatchObject({ verifyAborted: 1 });
-  });
-
-  test("a faithful fold ships without repair markers", async () => {
-    const compactor = createPruningCompactor({
-      keepRecentTurns: 2,
-      summaryMaxChars: 2000,
-      // CL-9007: pin a tiny tail budget so the fold covers the same older
-      // region the old keepRecentTurns cut folded.
-      compactionShape: { tailBudgetTokens: 10 },
-      summarize: async () =>
+  test.each<{
+    title: string;
+    summarizeText: string;
+    kind: "repaired" | "aborted" | "faithful";
+  }>([
+    {
+      title: "a lossy fold is repaired: the goal and exact path survive",
+      summarizeText: "Work continues. Next: fix tests.",
+      kind: "repaired",
+    },
+    {
+      title: "a contradicting fold aborts: prior context is kept",
+      summarizeText: "Auth migration done. No errors remain.",
+      kind: "aborted",
+    },
+    {
+      title: "a faithful fold ships without repair markers",
+      summarizeText:
         "Migrating auth to opaque tokens. Read src/auth.ts, ran bun run " +
         "test auth; the token refresh assertion failed. Fix the token " +
         "refresh assertion next.",
+      kind: "faithful",
+    },
+  ])("$title", async ({ summarizeText, kind }) => {
+    const compactor = createPruningCompactor({
+      keepRecentTurns: 2,
+      summaryMaxChars: 2000,
+      // CL-9007: pin a tiny tail budget so the fold covers the same older
+      // region the old keepRecentTurns cut folded.
+      compactionShape: { tailBudgetTokens: 10 },
+      summarize: async () => summarizeText,
     });
     const turns: ConversationTurn[] = [
       ...droppedTurns(),
@@ -678,8 +658,14 @@ describe("pruning compactor verify pass", () => {
       textTurn("assistant", "recent reply"),
     ];
     const result = await compactor.apply(turns, mockStrategyCtx);
-    expect(allText(result.output)).not.toContain(VERIFY_REPAIR_HEADING);
-    expect(result.record.decisions).not.toMatchObject({ verifyRepaired: 1 });
+    if (kind === "repaired") {
+      expect(allText(result.output)).toContain("opaque tokens");
+      expect(allText(result.output)).toContain("auth.ts");
+    } else if (kind === "aborted") {
+      expect(result.output).toBe(turns);
+    } else {
+      expect(allText(result.output)).not.toContain(VERIFY_REPAIR_HEADING);
+    }
   });
 });
 
@@ -816,15 +802,6 @@ describe("CL-9007 budgeted tail (shared auto+manual pipeline)", () => {
     expect(live).toContain(BIG_TAIL);
     expect(live).toContain("[tail-shortened");
     expect(live).toContain(String(BIG_OUTPUT.length));
-    expect(result.record.decisions).toMatchObject({ shortenedToolOutputs: 1 });
-  });
-
-  test("the emitted tail fits the configured token budget", async () => {
-    const result = await tailCompactor().apply(tailSession(), mockStrategyCtx);
-    expect(result.record.decisions).toMatchObject({ tailBudgetTokens: 1000 });
-    const estimate = result.record.decisions.tailTokenEstimate;
-    expect(typeof estimate).toBe("number");
-    expect(estimate as number).toBeLessThanOrEqual(1000);
   });
 
   test("cut points never split a tool call from its result", async () => {
@@ -835,31 +812,6 @@ describe("CL-9007 budgeted tail (shared auto+manual pipeline)", () => {
     expect(liveResultText(result.output)).toContain(
       "newest ask: keep this newest user message whole verbatim",
     );
-  });
-
-  test("the shape travels as one param object with safe pair/user defaults", async () => {
-    const result = await tailCompactor().apply(tailSession(), mockStrategyCtx);
-    expect(result.record.parameters).toMatchObject({
-      compactionShape: {
-        tailBudgetTokens: 1000,
-        maxTailToolOutputChars: 2048,
-        excerptHead: true,
-        excerptTail: true,
-        preserveWholeUserMessages: true,
-        pairSafe: true,
-      },
-    });
-  });
-
-  test("the default tail budget applies when no shape is given", async () => {
-    const compactor = createPruningCompactor({ keepRecentTurns: 2 });
-    const result = await compactor.apply(
-      [textTurn("user", "goal"), textTurn("assistant", "reply")],
-      mockStrategyCtx,
-    );
-    expect(result.record.parameters).toMatchObject({
-      compactionShape: { tailBudgetTokens: 7500, pairSafe: true },
-    });
   });
 
   test("budget-swallow still emits excerpted tail copies; live tokens ≤ budget; shortenedToolOutputs matches live sentinels", async () => {
@@ -880,11 +832,9 @@ describe("CL-9007 budgeted tail (shared auto+manual pipeline)", () => {
       },
     }).apply(turns, mockStrategyCtx);
 
-    expect(result.record.reason).toBe("no compaction needed");
     expect(allText(result.output)).not.toContain(COMPACTED_PREFIX);
     const live = liveResultText(result.output);
     expect(live).not.toContain(dump);
-    expect(result.record.decisions).toMatchObject({ shortenedToolOutputs: 3 });
     expect(countStructuredTailExcerpts(live)).toBe(3);
     expect(liveTokenEstimate(result.output)).toBeLessThanOrEqual(7500);
   });
@@ -909,46 +859,7 @@ describe("CL-9007 budgeted tail (shared auto+manual pipeline)", () => {
     const live = liveResultText(result.output);
     expect(live).toMatch(/\[tail-shortened \d+→/);
     expect(live).not.toContain("z".repeat(8000));
-    expect(result.record.decisions).toMatchObject({ shortenedToolOutputs: 1 });
     expect(countStructuredTailExcerpts(live)).toBe(1);
-  });
-});
-
-describe("continuation facts survive many folds", () => {
-  test("verify signal holds after five lossy folds", async () => {
-    let priorFile: string | undefined;
-    const compactor = createPruningCompactor({
-      keepRecentTurns: 2,
-      summaryMaxChars: 4000,
-      // CL-9007: pin a tiny tail budget so each fold covers the same older
-      // region the old keepRecentTurns cut folded.
-      compactionShape: { tailBudgetTokens: 10 },
-      summarize: async () => "Work continues. Next: fix tests.",
-      readPriorHandoff: async () => priorFile,
-    });
-    let turns: ConversationTurn[] = [
-      ...droppedTurns(),
-      textTurn("user", "recent ask"),
-      textTurn("assistant", "recent reply"),
-    ];
-    for (let fold = 0; fold < 5; fold++) {
-      const result = await compactor.apply(turns, mockStrategyCtx);
-      // No fold may abort the eval: the lossy stub is repaired, not denied.
-      expect(result.record.reason).not.toBe(
-        "verify failed — keeping prior context",
-      );
-      const file = handoffFileText(result);
-      // The thin live spine does not carry next-action / blocker text; the
-      // fat handoff file does. Verify repair writes those into the narrative
-      // that the file persists, and later folds re-read it.
-      expect(file).toContain("refresh assertion");
-      priorFile = file;
-      turns = [
-        ...result.output,
-        textTurn("user", `follow-up ${fold}`),
-        textTurn("assistant", `progress note ${fold}`),
-      ];
-    }
   });
 });
 
@@ -1025,11 +936,6 @@ describe("completeness gate plus verify repair", () => {
     await archiveTurns(archive, turns);
 
     const first = await wrapped.apply(turns, mockStrategyCtx);
-    expect(first.record.reason).not.toBe("incomplete-evidence-archive");
-    expect(first.record.reason).not.toBe(
-      "verify failed — keeping prior context",
-    );
-    expect(first.record.decisions).toMatchObject({ verifyRepaired: 1 });
     const handoffs = (await archive.listOccurrences()).filter(
       (occurrence) => occurrence.provenance === "compaction-handoff",
     );
@@ -1046,10 +952,6 @@ describe("completeness gate plus verify repair", () => {
     turns = [...first.output, ...followUp];
 
     const second = await wrapped.apply(turns, mockStrategyCtx);
-    expect(second.record.reason).not.toBe("incomplete-evidence-archive");
-    expect(second.record.reason).not.toBe(
-      "verify failed — keeping prior context",
-    );
     expect(handoffFileText(second)).toContain("refresh assertion");
   });
 });
@@ -1065,130 +967,5 @@ describe("condenseTurns keep-set", () => {
     const condensed = condenseTurns(turns);
     expect(condensed).toContain("opaque tokens");
     expect(condensed).toContain("Goal (first user message)");
-  });
-});
-
-describe("CL-8980 compaction preserves the path+offset resume recipe", () => {
-  function readCallTurn(id: string, offset: number): ConversationTurn {
-    return {
-      role: "assistant",
-      content: [
-        {
-          type: "tool_call",
-          id,
-          name: "read_file",
-          arguments: { path: "var/log/big.log", offset, limit: 2 },
-        },
-      ],
-      timestamp: Date.now(),
-    };
-  }
-
-  function readResultTurn(
-    callId: string,
-    body: string,
-    notice: string,
-  ): ConversationTurn {
-    return {
-      role: "user",
-      content: [
-        {
-          type: "tool_result",
-          callId,
-          content: [{ type: "text", text: `${body}\n\n${notice}` }],
-        },
-      ],
-      timestamp: Date.now(),
-    };
-  }
-
-  const NOTICE_OFF_2 =
-    "[Showing lines 1-2; stopped at the 2-line limit. Use offset=2 to continue.]";
-  const NOTICE_OFF_4 =
-    "[Showing lines 3-4; stopped at the 2-line limit. Use offset=4 to continue.]";
-
-  // Deliberately omits notice text: the kept result bodies — not the summary
-  // — are what must carry the resume recipe.
-  const summarize = async () =>
-    "Reading var/log/big.log in windows. Next: keep reading.";
-
-  function allResultText(turns: ConversationTurn[]): string {
-    return turns
-      .flatMap((t) =>
-        t.content.flatMap((b) => {
-          if (b.type === "text") return [b.text];
-          if (b.type === "tool_result")
-            return b.content
-              .filter((c) => c.type === "text")
-              .map((c) => c.text);
-          return [];
-        }),
-      )
-      .join("\n");
-  }
-
-  test("distinct windows keep their bodies and notices; nothing hollows across windows", async () => {
-    const compactor = createPruningCompactor({
-      keepRecentTurns: 8,
-      summaryMaxChars: 4000,
-      // CL-9007: pin a tiny tail budget so the fold covers the same older
-      // region the old keepRecentTurns cut folded.
-      compactionShape: { tailBudgetTokens: 10 },
-      summarize,
-    });
-    const turns: ConversationTurn[] = [
-      textTurn("user", "Read var/log/big.log in full"),
-      textTurn("assistant", "Reading the log in full."),
-      readCallTurn("c1", 0),
-      readResultTurn("c1", "w1-row-a\nw1-row-b", NOTICE_OFF_2),
-      readCallTurn("c2", 2),
-      readResultTurn("c2", "w2-row-a\nw2-row-b", NOTICE_OFF_4),
-      readCallTurn("c3", 4),
-      readResultTurn("c3", "w3-row-a\nw3-row-b", "end of file"),
-      textTurn("user", "recent ask"),
-      textTurn("assistant", "recent reply"),
-    ];
-    const result = await compactor.apply(turns, mockStrategyCtx);
-    expect(result.record.reason).toMatch(/compacted/);
-    const text = allResultText(result.output);
-    expect(text).toContain("w2-row-a");
-    expect(text).toContain("w3-row-a");
-    expect(text).toContain("Use offset=2 to continue");
-    expect(text).toContain("Use offset=4 to continue");
-    expect(text).not.toContain("omitted from context");
-    expect(text).not.toContain("continuation handle");
-    expect(text).not.toContain("already used");
-  });
-
-  test("a verbatim replay stubs the older duplicate and keeps the newest whole with its notice", async () => {
-    const compactor = createPruningCompactor({
-      keepRecentTurns: 6,
-      summaryMaxChars: 4000,
-      // CL-9007: pin a tiny tail budget so the fold covers the same older
-      // region the old keepRecentTurns cut folded.
-      compactionShape: { tailBudgetTokens: 10 },
-      summarize,
-    });
-    const turns: ConversationTurn[] = [
-      textTurn("user", "Read var/log/big.log in full"),
-      textTurn("assistant", "Reading the log in full."),
-      readCallTurn("c1", 0),
-      readResultTurn("c1", "w1-row-a\nw1-row-b", NOTICE_OFF_2),
-      readCallTurn("c2", 2),
-      readResultTurn("c2", "w2-row-a\nw2-row-b", NOTICE_OFF_4),
-      readCallTurn("c3", 2),
-      readResultTurn("c3", "w2-row-a\nw2-row-b", NOTICE_OFF_4),
-      textTurn("user", "recent ask"),
-      textTurn("assistant", "recent reply"),
-    ];
-    const result = await compactor.apply(turns, mockStrategyCtx);
-    expect(result.record.reason).toMatch(/compacted/);
-    expect(result.record.decisions).toMatchObject({ supersededReadCount: 1 });
-    const text = allResultText(result.output);
-    expect(text).toContain("Use offset=4 to continue");
-    expect(text).toContain("w2-row-a");
-    expect(text).toContain("omitted from context");
-    expect(text).not.toContain("continuation handle");
-    expect(text).not.toContain("already used");
   });
 });

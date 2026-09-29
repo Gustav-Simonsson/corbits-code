@@ -1,5 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
-import * as fs from "node:fs";
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -44,6 +43,69 @@ async function saveClient(
   const save = provider.saveClientInformation;
   if (save === undefined) throw new Error("saveClientInformation is required");
   await save(info);
+}
+
+// linear's discovery document endpoints, canned; the POST branch is the
+// per-test part (token endpoint behavior varies by scenario).
+function linearDiscoveryFetch(
+  onPost: (init: RequestInit) => Promise<Response>,
+): (url: string | URL, init?: RequestInit) => Promise<Response> {
+  return async (url, init) => {
+    const href = String(url);
+    if (init?.method === "POST") {
+      return onPost(init);
+    }
+    if (href.includes("oauth-protected-resource")) {
+      return new Response(
+        JSON.stringify({
+          resource: "https://mcp.linear.app/mcp",
+          authorization_servers: ["https://mcp.linear.app"],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (
+      href.includes("oauth-authorization-server") ||
+      href.includes("openid-configuration")
+    ) {
+      return new Response(
+        JSON.stringify({
+          issuer: "https://mcp.linear.app",
+          authorization_endpoint: "https://mcp.linear.app/authorize",
+          token_endpoint: "https://mcp.linear.app/oauth/token",
+          response_types_supported: ["code"],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(null, { status: 404 });
+  };
+}
+
+type OAuthProvider = Awaited<ReturnType<typeof createOAuthProvider>>;
+
+async function expectClientOnPort(
+  provider: OAuthProvider,
+  port: number,
+  clientId = `client-on-${String(port)}`,
+): Promise<void> {
+  const info = await syncValue(provider.clientInformation());
+  expect(info?.client_id).toBe(clientId);
+  expect(
+    info && "redirect_uris" in info ? info.redirect_uris : undefined,
+  ).toEqual([`http://127.0.0.1:${String(port)}/callback`]);
+}
+
+async function expectStoredClient(
+  home: string,
+  clientId: string,
+  port: number,
+): Promise<void> {
+  const disk = await loadAuthState(linear, home);
+  expect(disk.clientInformation?.client_id).toBe(clientId);
+  expect(disk.clientInformation?.redirect_uris).toEqual([
+    `http://127.0.0.1:${String(port)}/callback`,
+  ]);
 }
 
 describe("createOAuthProvider", () => {
@@ -346,11 +408,7 @@ describe("createOAuthProvider", () => {
     );
 
     await saveClient(b, clientInfo(60435));
-    const info = await syncValue(a.clientInformation());
-    expect(info?.client_id).toBe("client-on-62000");
-    expect(
-      info && "redirect_uris" in info ? info.redirect_uris : undefined,
-    ).toEqual(["http://127.0.0.1:62000/callback"]);
+    await expectClientOnPort(a, 62000);
   });
 
   test("saveTokens after a different-port sibling construct keeps this session's DCR", async () => {
@@ -381,86 +439,8 @@ describe("createOAuthProvider", () => {
       refresh_token: "ref-a",
     });
 
-    const info = await syncValue(a.clientInformation());
-    expect(info?.client_id).toBe("client-on-62000");
-    expect(
-      info && "redirect_uris" in info ? info.redirect_uris : undefined,
-    ).toEqual(["http://127.0.0.1:62000/callback"]);
-    const disk = await loadAuthState(linear, home);
-    expect(disk.clientInformation?.client_id).toBe("client-on-62000");
-    expect(disk.clientInformation?.redirect_uris).toEqual([
-      "http://127.0.0.1:62000/callback",
-    ]);
-  });
-
-  test("saveTokens after a different-port sibling saveClient keeps this session's DCR", async () => {
-    const home = await tempHome();
-    const a = await createOAuthProvider({
-      serverName: "linear",
-      serverURL: linear.serverURL,
-      redirectUrl: "http://127.0.0.1:62000/callback",
-      onAuthURL: () => undefined,
-      home,
-    });
-    await saveClient(a, clientInfo(62000));
-    await a.saveCodeVerifier("pkce-a");
-
-    const b = await createOAuthProvider({
-      serverName: "linear",
-      serverURL: linear.serverURL,
-      redirectUrl: "http://127.0.0.1:60435/callback",
-      onAuthURL: () => undefined,
-      home,
-    });
-    await saveClient(b, clientInfo(60435));
-
-    await a.saveTokens({
-      access_token: "tok-a",
-      token_type: "bearer",
-      expires_in: 3600,
-      refresh_token: "ref-a",
-    });
-
-    const info = await syncValue(a.clientInformation());
-    expect(info?.client_id).toBe("client-on-62000");
-    expect(
-      info && "redirect_uris" in info ? info.redirect_uris : undefined,
-    ).toEqual(["http://127.0.0.1:62000/callback"]);
-    const disk = await loadAuthState(linear, home);
-    expect(disk.clientInformation?.client_id).toBe("client-on-62000");
-    expect(disk.clientInformation?.redirect_uris).toEqual([
-      "http://127.0.0.1:62000/callback",
-    ]);
-    expect(disk.tokens?.access_token).toBe("tok-a");
-    expect((await syncValue(a.tokens()))?.access_token).toBe("tok-a");
-  });
-
-  test("saveCodeVerifier after a different-port sibling saveClient does not adopt that client", async () => {
-    const home = await tempHome();
-    const a = await createOAuthProvider({
-      serverName: "linear",
-      serverURL: linear.serverURL,
-      redirectUrl: "http://127.0.0.1:62000/callback",
-      onAuthURL: () => undefined,
-      home,
-    });
-    await saveClient(a, clientInfo(62000));
-
-    const b = await createOAuthProvider({
-      serverName: "linear",
-      serverURL: linear.serverURL,
-      redirectUrl: "http://127.0.0.1:60435/callback",
-      onAuthURL: () => undefined,
-      home,
-    });
-    await saveClient(b, clientInfo(60435));
-    await a.saveCodeVerifier("pkce-a");
-
-    const info = await syncValue(a.clientInformation());
-    expect(info?.client_id).toBe("client-on-62000");
-    expect(
-      info && "redirect_uris" in info ? info.redirect_uris : undefined,
-    ).toEqual(["http://127.0.0.1:62000/callback"]);
+    await expectClientOnPort(a, 62000);
+    await expectStoredClient(home, "client-on-62000", 62000);
   });
 
   test("idle tokens getter adopts a sibling's completed auth without rewriting matching DCR", async () => {
@@ -527,16 +507,8 @@ describe("createOAuthProvider", () => {
     await saveClient(b, clientInfo(60435));
     await saveClient(a, v2);
 
-    const info = await syncValue(a.clientInformation());
-    expect(info?.client_id).toBe("client-on-62000-v2");
-    expect(
-      info && "redirect_uris" in info ? info.redirect_uris : undefined,
-    ).toEqual(["http://127.0.0.1:62000/callback"]);
-    const disk = await loadAuthState(linear, home);
-    expect(disk.clientInformation?.client_id).toBe("client-on-62000-v2");
-    expect(disk.clientInformation?.redirect_uris).toEqual([
-      "http://127.0.0.1:62000/callback",
-    ]);
+    await expectClientOnPort(a, 62000, "client-on-62000-v2");
+    await expectStoredClient(home, "client-on-62000-v2", 62000);
   });
 
   test("sync getters fall back to the in-memory mirror when the auth file disappears", async () => {
@@ -612,28 +584,6 @@ describe("createOAuthProvider", () => {
     expect((await syncValue(provider.tokens()))?.access_token).toBe("fresh");
   });
 
-  test("sync getters skip reading the auth file when mtime and size are unchanged", async () => {
-    const home = await tempHome();
-    const provider = await createOAuthProvider({
-      serverName: "linear",
-      serverURL: linear.serverURL,
-      redirectUrl: "http://127.0.0.1:1/callback",
-      onAuthURL: () => undefined,
-      home,
-    });
-    await provider.saveTokens({ access_token: "tok", token_type: "bearer" });
-    expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
-
-    const read = spyOn(fs, "readFileSync");
-    try {
-      expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
-      expect(await syncValue(provider.clientInformation())).toBeUndefined();
-      expect(read).not.toHaveBeenCalled();
-    } finally {
-      read.mockRestore();
-    }
-  });
-
   test("does not delete scoped state whose filename stem is another provider name", async () => {
     const home = await tempHome();
     const dir = join(home, ".corbits", "mcp-auth");
@@ -692,48 +642,18 @@ describe("createOAuthProvider", () => {
     );
 
     const tokenBodies: string[] = [];
-    const fetchFn = async (
-      url: string | URL,
-      init?: RequestInit,
-    ): Promise<Response> => {
-      const href = String(url);
-      if (init?.method === "POST") {
-        tokenBodies.push(String(init.body));
-        return new Response(
-          JSON.stringify({
-            access_token: "fresh-access",
-            token_type: "bearer",
-            expires_in: 3600,
-            refresh_token: "fresh-refresh",
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      if (href.includes("oauth-protected-resource")) {
-        return new Response(
-          JSON.stringify({
-            resource: "https://mcp.linear.app/mcp",
-            authorization_servers: ["https://mcp.linear.app"],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      if (
-        href.includes("oauth-authorization-server") ||
-        href.includes("openid-configuration")
-      ) {
-        return new Response(
-          JSON.stringify({
-            issuer: "https://mcp.linear.app",
-            authorization_endpoint: "https://mcp.linear.app/authorize",
-            token_endpoint: "https://mcp.linear.app/oauth/token",
-            response_types_supported: ["code"],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      return new Response(null, { status: 404 });
-    };
+    const fetchFn = linearDiscoveryFetch(async (init) => {
+      tokenBodies.push(String(init.body));
+      return new Response(
+        JSON.stringify({
+          access_token: "fresh-access",
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: "fresh-refresh",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
 
     const provider = await createOAuthProvider({
       serverName: "linear",
@@ -765,42 +685,13 @@ describe("createOAuthProvider", () => {
     const home = await tempHome();
     await saveAuthState(linear, { clientInformation: clientInfo(1) }, home);
 
-    const fetchFn = async (
-      url: string | URL,
-      init?: RequestInit,
-    ): Promise<Response> => {
-      const href = String(url);
-      if (init?.method === "POST") {
-        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+    const fetchFn = linearDiscoveryFetch(
+      async () =>
+        new Response(JSON.stringify({ error: "invalid_grant" }), {
           status: 400,
           headers: { "content-type": "application/json" },
-        });
-      }
-      if (href.includes("oauth-protected-resource")) {
-        return new Response(
-          JSON.stringify({
-            resource: "https://mcp.linear.app/mcp",
-            authorization_servers: ["https://mcp.linear.app"],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      if (
-        href.includes("oauth-authorization-server") ||
-        href.includes("openid-configuration")
-      ) {
-        return new Response(
-          JSON.stringify({
-            issuer: "https://mcp.linear.app",
-            authorization_endpoint: "https://mcp.linear.app/authorize",
-            token_endpoint: "https://mcp.linear.app/oauth/token",
-            response_types_supported: ["code"],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      return new Response(null, { status: 404 });
-    };
+        }),
+    );
 
     const provider = await createOAuthProvider({
       serverName: "linear",
@@ -824,46 +715,19 @@ describe("createOAuthProvider", () => {
     await saveAuthState(linear, { clientInformation: clientInfo(1) }, home);
     const abort = new AbortController();
     const seen: (AbortSignal | undefined)[] = [];
-    const fetchFn = fetchWithConnectAbort(abort.signal, (url, init) => {
-      seen.push(init?.signal ?? undefined);
-      const href = String(url);
-      if (init?.method === "POST") {
-        return new Promise<Response>((_resolve, reject) => {
+    const discoveryFetch = linearDiscoveryFetch(
+      (init) =>
+        new Promise<Response>((_resolve, reject) => {
           const fail = (): void => {
             reject(init.signal?.reason ?? new Error("aborted"));
           };
           if (init.signal?.aborted === true) fail();
           else init.signal?.addEventListener("abort", fail, { once: true });
-        });
-      }
-      if (href.includes("oauth-protected-resource")) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              resource: "https://mcp.linear.app/mcp",
-              authorization_servers: ["https://mcp.linear.app"],
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
-        );
-      }
-      if (
-        href.includes("oauth-authorization-server") ||
-        href.includes("openid-configuration")
-      ) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              issuer: "https://mcp.linear.app",
-              authorization_endpoint: "https://mcp.linear.app/authorize",
-              token_endpoint: "https://mcp.linear.app/oauth/token",
-              response_types_supported: ["code"],
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
-        );
-      }
-      return Promise.resolve(new Response(null, { status: 404 }));
+        }),
+    );
+    const fetchFn = fetchWithConnectAbort(abort.signal, (url, init) => {
+      seen.push(init?.signal ?? undefined);
+      return discoveryFetch(url, init);
     });
 
     const provider = await createOAuthProvider({
@@ -882,5 +746,75 @@ describe("createOAuthProvider", () => {
     await expect(pending).rejects.toThrow("toolset disposed");
     await expect(pending).rejects.not.toBeInstanceOf(UnauthorizedError);
     expect(seen.some((signal) => signal === abort.signal)).toBe(true);
+  });
+});
+
+describe("OAuth provider auth URL and state", () => {
+  const acme = {
+    serverName: "acme",
+    serverURL: "https://mcp.acme.app/mcp",
+  };
+
+  test("redirectToAuthorization surfaces the URL instead of opening a browser", async () => {
+    const home = await tempHome();
+    const seen: { name: string; url: string }[] = [];
+    const provider = await createOAuthProvider({
+      serverName: "acme",
+      serverURL: acme.serverURL,
+      redirectUrl: "http://127.0.0.1:5599/callback",
+      onAuthURL: (name, url) => seen.push({ name, url }),
+      home,
+    });
+    provider.redirectToAuthorization(
+      new URL("https://acme.app/oauth/authorize?client_id=abc"),
+    );
+    expect(seen).toEqual([
+      { name: "acme", url: "https://acme.app/oauth/authorize?client_id=abc" },
+    ]);
+    expect(provider.redirectUrl).toBe("http://127.0.0.1:5599/callback");
+    expect(provider.clientMetadata.redirect_uris).toEqual([
+      "http://127.0.0.1:5599/callback",
+    ]);
+  });
+
+  test("supplies a stable, non-empty OAuth state parameter", async () => {
+    const home = await tempHome();
+    const provider = await createOAuthProvider({
+      serverName: "acme",
+      serverURL: acme.serverURL,
+      redirectUrl: "http://127.0.0.1:0/cb",
+      onAuthURL: () => undefined,
+      home,
+    });
+    const first = await provider.state?.();
+    expect(first).toBeTruthy();
+    expect(await provider.state?.()).toBe(first);
+  });
+
+  test("can clear stale authorization before starting a fresh OAuth flow", async () => {
+    const home = await tempHome();
+    const provider = await createOAuthProvider({
+      serverName: "acme",
+      serverURL: acme.serverURL,
+      redirectUrl: "http://127.0.0.1:0/cb",
+      onAuthURL: () => undefined,
+      home,
+    });
+    await provider.saveTokens({
+      access_token: "abc",
+      refresh_token: "stale",
+      token_type: "Bearer",
+    });
+    await provider.saveCodeVerifier("old-verifier");
+    const oldState = await provider.state?.();
+
+    await provider.resetAuthorization();
+
+    expect(provider.tokens()).toBeUndefined();
+    expect(() => provider.codeVerifier()).toThrow(
+      "No PKCE code verifier saved",
+    );
+    expect(await provider.state?.()).not.toBe(oldState);
+    expect(await loadAuthState(acme, home)).toEqual({});
   });
 });

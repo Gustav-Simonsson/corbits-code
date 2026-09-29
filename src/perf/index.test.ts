@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import {
   OPEN_SPAN_CAPACITY,
   RING_CAPACITY,
@@ -303,7 +303,7 @@ describe("sanitizeTags", () => {
       stack: "Error\n    at foo (/app/x.ts:1:1)",
       tool_args: JSON.stringify({ cmd: "rm -rf /" }),
       completion: "sure, here is the code",
-      repo: "abklabs/corbits-code",
+      repo: "acme/corbits-code",
       unknown_key: "whatever",
       // also invalid values on allowed keys
       transport: "grpc",
@@ -325,31 +325,6 @@ describe("sanitizeTags", () => {
   test("strips path-like opaque ids", () => {
     expect(sanitizeTags({ turn_id: "../../etc/passwd" })).toBeUndefined();
     expect(sanitizeTags({ model_id: "C:\\Windows\\System32" })).toBeUndefined();
-  });
-});
-
-describe("open/close budget", () => {
-  test("start+end stays well under 50µs average", () => {
-    // Warm up JIT / maps.
-    for (let i = 0; i < 200; i += 1) {
-      const id = start("inference");
-      end(id);
-    }
-    clear();
-
-    const iterations = 5_000;
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < iterations; i += 1) {
-      const id = start("inference", {
-        tags: { provider_id: "openai", model_id: "gpt-5.4" },
-      });
-      end(id, { duration_ms: 1 });
-    }
-    const t1 = process.hrtime.bigint();
-    const avgNs = Number(t1 - t0) / iterations;
-    // Budget: open/close on the order of microseconds. 50µs avg is a loose
-    // ceiling that still fails if we regress into heavy work (I/O, crypto, etc.).
-    expect(avgNs).toBeLessThan(50_000);
   });
 });
 

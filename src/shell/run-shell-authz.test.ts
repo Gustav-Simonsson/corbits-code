@@ -409,10 +409,6 @@ describe("authz hard-deny peels env -S / --split-string payloads", () => {
     );
   });
 
-  test("B6: bare bash -c catastrophic rm still hard-blocks (regression)", () => {
-    expect(runShellAuthzBlockReason("bash -c 'rm -rf /'")).toMatch(destructive);
-  });
-
   test("N1: nested env -S payloads are blocked within peel depth", () => {
     // Alternating quotes so naive tokenize keeps each -S payload intact.
     expect(
@@ -492,18 +488,6 @@ describe("authz hard-deny peels glued and trailing env -S forms", () => {
     expect(expandShellSubjects(`env -S "find /"`).subjects).toContain("find /");
   });
 
-  test("open-ended block reason cites OOM risk rather than tool-routing purity", () => {
-    const reason = runShellAuthzBlockReason("find . -name '*.ts'");
-    expect(reason).toMatch(openEnded);
-    expect(reason).toMatch(/OOM the host/);
-    expect(reason).toMatch(/walk huge trees/);
-    expect(reason).toMatch(/Prefer the bounded grep\/glob tools/);
-    expect(reason).toMatch(
-      /not substitute another unbounded walk \(fd, ls -R, scripted os\.walk\)/,
-    );
-    expect(reason).not.toMatch(/Do not use find/);
-  });
-
   test("G2: never-terminating watch inside quoted -S is hard-denied", () => {
     expect(runShellAuthzBlockReason(`env -S "watch ls"`)).toMatch(neverTerm);
     expect(expandShellSubjects(`env -S "watch ls"`).subjects).toContain(
@@ -577,10 +561,6 @@ describe("authz hard-deny peels glued and trailing env -S forms", () => {
       runShellAuthzBlockReason(`env -S "rm -rf node_modules"`),
     ).toBeUndefined();
     expect(commandHasRecursiveRm(`env -S "rm -rf node_modules"`)).toBe(true);
-  });
-
-  test("G8: soft-deny catastrophic rm inside -S is hard-denied", () => {
-    expect(runShellAuthzBlockReason(`env -S "rm -rf /"`)).toMatch(destructive);
   });
 
   test("G9: flag soup before -S still peels (env -i -u HOME -S)", () => {

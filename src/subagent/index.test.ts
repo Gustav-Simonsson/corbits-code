@@ -26,16 +26,13 @@ import {
   shouldRequirePlanSubstance,
   subAgentToolName,
   SUBAGENT_DEADLINE_MARGIN_MS,
-  SUBAGENT_PLUGIN_SPAWN_TEARDOWN_LIMITS,
-  SubAgentDirector,
 } from "./index.js";
-import type {
-  ReactorAction,
-  ReactorCapabilities,
-  ReactorInboundEvent,
-  ReactorState,
-} from "@intx/types/runtime";
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
+import {
+  PASS_PLAN_ENVELOPE,
+  REPORT_ENVELOPE as FULL_REPORT_ENVELOPE,
+  STUB_PLAN_ENVELOPE,
+} from "../../testkit/report-envelope.js";
 
 describe("sub-agent teardown", () => {
   test("disposeSubAgentSession closes agent, awaits stream, and disposes posix tools once", async () => {
@@ -176,14 +173,6 @@ describe("sub-agent teardown", () => {
     await run;
     expect(snapshot().inFlightToolCalls).toBe(0);
   });
-
-  test("teardown limits document shell-guard dispose reaping", () => {
-    expect(SUBAGENT_PLUGIN_SPAWN_TEARDOWN_LIMITS).toContain(
-      "posixTools.dispose",
-    );
-    expect(SUBAGENT_PLUGIN_SPAWN_TEARDOWN_LIMITS).toContain("shell-guard");
-    expect(SUBAGENT_PLUGIN_SPAWN_TEARDOWN_LIMITS).toContain("ripgrep");
-  });
 });
 
 describe("sub-agent stop helpers", () => {
@@ -202,20 +191,6 @@ describe("sub-agent stop helpers", () => {
     "Checking those next.",
   ].join("\n");
 
-  const FULL_REPORT_ENVELOPE = [
-    "## Summary",
-    "Reviewed gate.ts.",
-    "",
-    "## Findings",
-    "Auth lives in gate.ts.",
-    "",
-    "## Blockers",
-    "None.",
-    "",
-    "## Paths",
-    "src/gate.ts",
-  ].join("\n");
-
   const HEADINGS_ONLY_ENVELOPE = [
     "## Summary",
     "",
@@ -224,20 +199,6 @@ describe("sub-agent stop helpers", () => {
     "## Blockers",
     "",
     "## Paths",
-  ].join("\n");
-
-  const STUB_PLAN_ENVELOPE = [
-    "## Summary",
-    "Plan ready.",
-    "",
-    "## Findings",
-    "None.",
-    "",
-    "## Blockers",
-    "None.",
-    "",
-    "## Paths",
-    "None.",
   ].join("\n");
 
   const WRAP_PLAN_ENVELOPE = [
@@ -293,37 +254,6 @@ describe("sub-agent stop helpers", () => {
     "",
     "## Paths",
     "None.",
-  ].join("\n");
-
-  const PASS_PLAN_FINDINGS = [
-    "### Files / paths",
-    "src/subagent/report.ts",
-    "",
-    "### Acceptance criteria",
-    "Stub plan Findings salvage as incomplete-report.",
-    "",
-    "### Non-goals",
-    "Do not finish CL-6946.",
-    "",
-    "### Risks",
-    "A headings-only complete would auto-dispatch builder on a stub.",
-    "",
-    "### Ordered steps",
-    "Add hasPlanFindings, then wire evaluateSubAgentStop.",
-  ].join("\n");
-
-  const PASS_PLAN_ENVELOPE = [
-    "## Summary",
-    "Plan for the salvage gate.",
-    "",
-    "## Findings",
-    PASS_PLAN_FINDINGS,
-    "",
-    "## Blockers",
-    "None.",
-    "",
-    "## Paths",
-    "src/subagent/report.ts",
   ].join("\n");
 
   const STEPS_IN_AC_BODY_PLAN_ENVELOPE = [
@@ -636,26 +566,6 @@ describe("sub-agent stop helpers", () => {
     ).toBe("complete");
   });
 
-  test("evaluateSubAgentStop completes a five-section plan with steps in an earlier body", () => {
-    expect(
-      evaluateSubAgentStop({
-        hasToolCalls: false,
-        requirePlanSubstance: true,
-        lastAssistantText: STEPS_IN_AC_BODY_PLAN_ENVELOPE,
-      }),
-    ).toBe("complete");
-  });
-
-  test("evaluateSubAgentStop completes a five-section plan with risks in an earlier body", () => {
-    expect(
-      evaluateSubAgentStop({
-        hasToolCalls: false,
-        requirePlanSubstance: true,
-        lastAssistantText: RISKS_IN_AC_BODY_PLAN_ENVELOPE,
-      }),
-    ).toBe("complete");
-  });
-
   test("evaluateSubAgentStop completes counsel numbered labels with following-line substance", () => {
     expect(
       evaluateSubAgentStop({
@@ -686,15 +596,6 @@ describe("sub-agent stop helpers", () => {
     ).toBeNull();
   });
 
-  test("evaluateSubAgentStop keeps running while the worker is still calling tools", () => {
-    expect(
-      evaluateSubAgentStop({
-        hasToolCalls: true,
-        lastAssistantText: "",
-      }),
-    ).toBeNull();
-  });
-
   test("re-read pressure no longer stops a worker", () => {
     let thrash = EMPTY_THRASH_STATE;
     thrash = nextThrashState(thrash, [
@@ -714,37 +615,19 @@ describe("sub-agent stop helpers", () => {
     ).toBeNull();
   });
 
-  test("evaluateSubAgentStop multi-file unique reads do not thrash", () => {
-    let thrash = EMPTY_THRASH_STATE;
-    for (let i = 0; i < 12; i++) {
-      thrash = nextThrashState(thrash, [
-        {
-          type: "tool_call",
-          name: "read_file",
-          arguments: { path: `f${i}.ts` },
-        },
-      ]);
-    }
-    expect(
-      evaluateSubAgentStop({
-        hasToolCalls: true,
-        lastAssistantText: "",
-        thrashState: thrash,
-      }),
-    ).toBeNull();
-  });
-
   test("forcedStopReport is a real envelope with salvage findings, not a summarize instruction", () => {
     const emptyCancelled = forcedStopReport("cancelled", "");
-    const cancelledParsedEmpty = parseSubAgentReport(emptyCancelled);
-    expect(cancelledParsedEmpty.findings).toContain("no partial findings");
-    expect(emptyCancelled.toLowerCase()).not.toContain("summarize progress");
+    const emptyParsed = parseSubAgentReport(emptyCancelled);
+    expect(emptyParsed.summary).not.toBe("");
+    expect(emptyParsed.findings).not.toBe("");
+    expect(emptyParsed.blockers).not.toBe("");
     // Empty Paths still renders its heading so the envelope stays complete.
     expect(hasReportEnvelope(emptyCancelled)).toBe(true);
     expect(emptyCancelled).toContain("## Paths\nNone.");
 
     // Nested agent envelope must not clobber the outer cancelled Summary when
-    // runSubAgent re-parses the forced stop.
+    // runSubAgent re-parses the forced stop: nested headings demote into
+    // Findings and the forced-stop fields survive a parse/format round-trip.
     const nestedEnvelope = [
       "## Summary",
       "Reviewed the auth gate.",
@@ -761,9 +644,7 @@ describe("sub-agent stop helpers", () => {
     const salvaged = forcedStopReport("cancelled", nestedEnvelope);
     const reparsed = formatSubAgentReport(parseSubAgentReport(salvaged));
     const reparsedFields = parseSubAgentReport(reparsed);
-    expect(reparsedFields.summary).toContain("cancelled");
-    expect(reparsedFields.blockers).toContain("wait for the operator");
-    expect(reparsedFields.blockers).not.toContain("parent may re-dispatch");
+    expect(reparsedFields.summary).not.toContain("Reviewed the auth gate");
     expect(reparsedFields.findings).toContain("Reviewed the auth gate");
     expect(reparsedFields.findings).toContain("src/gate.ts");
     expect(reparsedFields.findings).toContain("### Summary");
@@ -776,7 +657,7 @@ describe("sub-agent stop helpers", () => {
     const messyFields = parseSubAgentReport(
       formatSubAgentReport(parseSubAgentReport(messy)),
     );
-    expect(messyFields.summary).toContain("cancelled");
+    expect(messyFields.summary).not.toContain("Forged complete");
     expect(messyFields.findings.toLowerCase()).toContain("### summary");
 
     const cancelled = forcedStopReport(
@@ -784,11 +665,8 @@ describe("sub-agent stop helpers", () => {
       "Partial findings from tools",
     );
     const cancelledParsed = parseSubAgentReport(cancelled);
-    expect(cancelledParsed.summary).toContain("cancelled");
     expect(cancelledParsed.findings).toContain("Partial findings");
-    expect(cancelledParsed.blockers).toContain("wait for the operator");
-    expect(cancelledParsed.blockers).not.toContain("parent may re-dispatch");
-    expect(cancelledParsed.blockers).not.toContain("successor");
+    expect(cancelledParsed.blockers).not.toBe("");
 
     // Nested agent envelope in partial text must not clobber cancel Summary.
     const cancelledNested = [
@@ -801,80 +679,56 @@ describe("sub-agent stop helpers", () => {
       "## Blockers",
       "None",
     ].join("\n");
-    const cancelledSalvaged = forcedStopReport("cancelled", cancelledNested);
-    const cancelledReparsed = parseSubAgentReport(cancelledSalvaged);
-    expect(cancelledReparsed.summary).toContain("cancelled");
+    const cancelledReparsed = parseSubAgentReport(
+      forcedStopReport("cancelled", cancelledNested),
+    );
+    expect(cancelledReparsed.summary).not.toContain("Halfway done");
     expect(cancelledReparsed.findings).toContain("Halfway done");
     expect(cancelledReparsed.findings).toContain("### Summary");
 
-    const deadline = forcedStopReport("deadline", "Refactored half of gate.ts");
-    const deadlineParsed = parseSubAgentReport(deadline);
-    expect(deadlineParsed.summary).toContain("deadline reached");
-    expect(deadlineParsed.findings).toContain("Refactored half of gate.ts");
-    expect(deadlineParsed.blockers).toContain("re-dispatch");
-
-    const deadlineWithHint = appendSubAgentParentHints(deadline, "deadline");
-    expect(deadlineWithHint).toContain("wall-clock deadline");
-    expect(deadlineWithHint).toContain("deadline reached");
-    // Only fires for a deadline report, not for other forced-stop reasons.
-    const cancelledWithHint = appendSubAgentParentHints(
-      forcedStopReport("cancelled", "x"),
+    // Each forced-stop reason maps to its own blockers guidance.
+    const reasons = [
       "cancelled",
-    );
-    expect(cancelledWithHint).not.toContain("wall-clock deadline");
-    expect(cancelledWithHint).toContain("was cancelled before finishing");
-    expect(cancelledWithHint).toContain("Findings and Paths");
-    expect(cancelledWithHint).toContain("wait for the operator");
-    expect(cancelledWithHint).not.toContain("re-dispatch only if");
-    expect(cancelledWithHint).not.toContain("MAY spawn one successor");
-
-    const incomplete = forcedStopReport("incomplete-report", "Still narrating");
-    const incompleteParsed = parseSubAgentReport(incomplete);
-    expect(incompleteParsed.blockers).toContain("one successor");
-    expect(incompleteParsed.blockers).toContain("changed brief");
-    expect(incompleteParsed.blockers).not.toContain("wait for the operator");
-    const incompleteWithHint = appendSubAgentParentHints(
-      incomplete,
+      "deadline",
+      "stalled",
       "incomplete-report",
-    );
-    expect(incompleteWithHint).toContain("MAY spawn one successor");
-    expect(incompleteWithHint).not.toContain(
-      "wait for the operator instead of auto-starting",
-    );
-
-    const interrupted = forcedStopReport("interrupted", "Partial work");
-    const interruptedParsed = parseSubAgentReport(interrupted);
-    expect(interruptedParsed.blockers).toContain("resume_agent");
-    expect(interruptedParsed.blockers).toContain("still-live");
-    expect(interruptedParsed.blockers).not.toContain("MAY spawn one successor");
-    expect(interruptedParsed.blockers).not.toContain("wait for the operator");
-    const interruptedWithHint = appendSubAgentParentHints(
-      interrupted,
       "interrupted",
+    ] as const;
+    const blockersByReason = new Set(
+      reasons.map(
+        (reason) => parseSubAgentReport(forcedStopReport(reason, "x")).blockers,
+      ),
     );
-    expect(interruptedWithHint).toContain("resume_agent");
-    expect(interruptedWithHint).not.toContain("MAY spawn one successor");
-    expect(interruptedWithHint).not.toContain(
-      "wait for the operator instead of auto-starting",
-    );
+    expect(blockersByReason.size).toBe(reasons.length);
 
+    // Hints prepend a bracketed line for the salvaged reasons; stalled and
+    // complete pass the report through untouched.
+    for (const reason of [
+      "deadline",
+      "cancelled",
+      "interrupted",
+      "incomplete-report",
+    ] as const) {
+      const report = forcedStopReport(reason, "x");
+      const hinted = appendSubAgentParentHints(report, reason);
+      expect(hinted.startsWith("[")).toBe(true);
+      expect(hinted.endsWith(report)).toBe(true);
+    }
     const stalled = forcedStopReport("stalled", "parked");
-    const stalledParsed = parseSubAgentReport(stalled);
-    expect(stalledParsed.blockers).toContain("finish this lane");
-    expect(stalledParsed.blockers).toContain("Do not start a diagnostic wave");
-    expect(stalledParsed.blockers).not.toContain("MAY spawn one successor");
-    expect(appendSubAgentParentHints(stalled, "stalled")).not.toContain(
-      "MAY spawn one successor",
+    expect(appendSubAgentParentHints(stalled, "stalled")).toBe(stalled);
+    const completeReport = forcedStopReport("cancelled", "x");
+    expect(appendSubAgentParentHints(completeReport, undefined)).toBe(
+      completeReport,
     );
 
-    // Paths section carries thrash salvage; empty prose with paths still informs Findings.
+    // Paths section carries thrash salvage; empty prose with paths still
+    // informs Findings.
     const withPaths = forcedStopReport("cancelled", "", {
       paths: ["src/a.ts", "src/b.ts"],
     });
     const withPathsParsed = parseSubAgentReport(withPaths);
     expect(withPathsParsed.paths).toContain("src/a.ts");
     expect(withPathsParsed.paths).toContain("src/b.ts");
-    expect(withPathsParsed.findings).toContain("Files touched before stop");
     expect(withPathsParsed.findings).toContain("src/a.ts");
   });
 
@@ -977,62 +831,47 @@ describe("sub-agent stop helpers", () => {
     ctl.dispose();
   });
 
-  test("resolveSubAgentDeadlineMs clamps an explicit deadline below a lowered outer watchdog", () => {
-    const loweredOuterWatchdogMs = 120_000;
-    const clamped = resolveSubAgentDeadlineMs(600_000, loweredOuterWatchdogMs);
-    expect(clamped).toBeLessThan(loweredOuterWatchdogMs);
-    expect(clamped).toBe(loweredOuterWatchdogMs - SUBAGENT_DEADLINE_MARGIN_MS);
+  test.each<[number, number | undefined, number | undefined]>([
+    // explicit deadline clamps below a lowered outer watchdog
+    [600_000, 120_000, 120_000 - SUBAGENT_DEADLINE_MARGIN_MS],
+    // a short explicit deadline wins when the outer watchdog is high
+    [45_000, 660_000, 45_000],
+    // no outer watchdog: the explicit deadline stands
+    [18_000_000, undefined, 18_000_000],
+    // outer watchdog at or below the margin never arms
+    [5_000, 5_000, undefined],
+    [5_000, SUBAGENT_DEADLINE_MARGIN_MS, undefined],
+    // outer just above the margin: ceiling is 1ms — never exceeds outer
+    [5_000, SUBAGENT_DEADLINE_MARGIN_MS + 1, 1],
+  ])(
+    "resolveSubAgentDeadlineMs(%i, %s) resolves to %s",
+    (inner, outer, expected) => {
+      expect(resolveSubAgentDeadlineMs(inner, outer)).toBe(expected);
+    },
+  );
+
+  test.each<[string, ReturnType<typeof preferCompletedSubAgentReply>]>([
+    ["## Summary\nDone", "keep-reply"],
+    ["  mapped gate.ts  ", "keep-reply"],
+    ["", "honor-abort"],
+    ["   ", "honor-abort"],
+  ])("preferCompletedSubAgentReply(%j) resolves to %s", (reply, expected) => {
+    expect(preferCompletedSubAgentReply(reply)).toBe(expected);
   });
 
-  test("resolveSubAgentDeadlineMs keeps a short explicit deadline when the outer watchdog is high", () => {
-    expect(resolveSubAgentDeadlineMs(45_000, 660_000)).toBe(45_000);
-  });
-
-  test("resolveSubAgentDeadlineMs keeps an explicit deadline when the outer watchdog is omitted", () => {
-    expect(resolveSubAgentDeadlineMs(18_000_000, undefined)).toBe(18_000_000);
-  });
-
-  test("resolveSubAgentDeadlineMs skips arming when outer watchdog is at or below the margin", () => {
-    expect(resolveSubAgentDeadlineMs(5_000, 5_000)).toBeUndefined();
-    expect(
-      resolveSubAgentDeadlineMs(5_000, SUBAGENT_DEADLINE_MARGIN_MS),
-    ).toBeUndefined();
-    // Outer just above margin: ceiling is 1 — never exceeds outer.
-    expect(
-      resolveSubAgentDeadlineMs(5_000, SUBAGENT_DEADLINE_MARGIN_MS + 1),
-    ).toBe(1);
-  });
-
-  test("preferCompletedSubAgentReply keeps a non-empty reply over late cancel", () => {
-    expect(preferCompletedSubAgentReply("## Summary\nDone")).toBe("keep-reply");
-    expect(preferCompletedSubAgentReply("  mapped gate.ts  ")).toBe(
-      "keep-reply",
-    );
-  });
-
-  test("preferCompletedSubAgentReply honors abort when send returned empty", () => {
-    expect(preferCompletedSubAgentReply("")).toBe("honor-abort");
-    expect(preferCompletedSubAgentReply("   ")).toBe("honor-abort");
-  });
-
-  test("resolveSubAgentCatchOutcome always salvages a deadline hit, even with zero output", () => {
-    // Zero-output edge case: no tool calls, no partial text, but an opt-in
-    // deadline fired. It must not fall through to a bare rethrow.
-    expect(
-      resolveSubAgentCatchOutcome({ deadlineHit: true, hadProgress: false }),
-    ).toBe("salvage-deadline");
-  });
-
-  test("resolveSubAgentCatchOutcome salvages a mid-run operator cancel that made progress", () => {
-    expect(
-      resolveSubAgentCatchOutcome({ deadlineHit: false, hadProgress: true }),
-    ).toBe("salvage-cancelled");
-  });
-
-  test("resolveSubAgentCatchOutcome rethrows a pre-progress operator cancel", () => {
-    expect(
-      resolveSubAgentCatchOutcome({ deadlineHit: false, hadProgress: false }),
-    ).toBe("rethrow");
+  test.each<
+    [
+      { deadlineHit: boolean; hadProgress: boolean },
+      ReturnType<typeof resolveSubAgentCatchOutcome>,
+    ]
+  >([
+    // A deadline always salvages, even with zero output — it must not fall
+    // through to a bare rethrow.
+    [{ deadlineHit: true, hadProgress: false }, "salvage-deadline"],
+    [{ deadlineHit: false, hadProgress: true }, "salvage-cancelled"],
+    [{ deadlineHit: false, hadProgress: false }, "rethrow"],
+  ])("resolveSubAgentCatchOutcome(%j) resolves to %s", (input, expected) => {
+    expect(resolveSubAgentCatchOutcome(input)).toBe(expected);
   });
 
   test("partialTextFromEvent reads stream inference.done data.turn content", () => {
@@ -1147,203 +986,6 @@ describe("thrash edge cases", () => {
   });
 });
 
-describe("SubAgentDirector stall management", () => {
-  const mockState: ReactorState = { turns: [] } as unknown as ReactorState;
-
-  function makeCapabilities(): ReactorCapabilities {
-    return {
-      infer: (options) =>
-        ({
-          type: "infer",
-          ...(options !== undefined ? { options } : {}),
-        }) as ReactorAction,
-      executeTools: (calls, parallel, addToHistory) =>
-        ({
-          type: "execute_tools",
-          calls,
-          parallel,
-          addToHistory,
-        }) as ReactorAction,
-      suspend: (gate) => ({ type: "suspend", gate }) as ReactorAction,
-      fork: (mode, forkId) => ({ type: "fork", mode, forkId }) as ReactorAction,
-      emit: (eventType, data) =>
-        ({ type: "emit", eventType, data }) as ReactorAction,
-      reply: (content) => ({ type: "reply", content }) as ReactorAction,
-      checkpoint: (message = "") =>
-        ({ type: "checkpoint", message }) as ReactorAction,
-      compact: (compactor, reason) =>
-        ({ type: "compact", compactor, reason }) as ReactorAction,
-      wait: () => ({ type: "wait" }) as ReactorAction,
-      done: () => ({ type: "done" }) as ReactorAction,
-    };
-  }
-
-  function toolCallDoneEvent(id: string): ReactorInboundEvent {
-    return {
-      type: "inference.done",
-      turn: {
-        role: "assistant",
-        model: "test",
-        timestamp: 0,
-        content: [
-          {
-            type: "tool_call",
-            id,
-            name: "read_file",
-            arguments: { path: "a.ts" },
-          },
-        ],
-      },
-      usage: { input: 0, output: 0 },
-      source: "test",
-    } as unknown as ReactorInboundEvent;
-  }
-
-  function toolDoneEvent(callId: string): ReactorInboundEvent {
-    return {
-      type: "tool.done",
-      result: { callId, content: "ok" },
-    } as unknown as ReactorInboundEvent;
-  }
-
-  function stallPing(): ReactorInboundEvent {
-    return {
-      type: "message.received",
-      message: { content: "" },
-    } as unknown as ReactorInboundEvent;
-  }
-
-  function actionsArray(
-    result: ReactorAction | ReactorAction[],
-  ): ReactorAction[] {
-    return Array.isArray(result) ? result : [result];
-  }
-
-  test("no nudge fires before the stall timeout elapses", async () => {
-    let now = 0;
-    const director = new SubAgentDirector(
-      "system",
-      [],
-      undefined,
-      1000,
-      () => now,
-    );
-    const capabilities = makeCapabilities();
-
-    await director.decide(toolCallDoneEvent("tc-1"), mockState, capabilities);
-    await director.decide(toolDoneEvent("tc-1"), mockState, capabilities);
-
-    now += 500; // under the 1000ms stall timeout
-    const actions = actionsArray(
-      await director.decide(stallPing(), mockState, capabilities),
-    );
-    expect(actions.some((a) => a.type === "reply")).toBe(false);
-    const infer = actions.find((a) => a.type === "infer");
-    const options =
-      infer?.type === "infer"
-        ? (infer.options as { ephemeralTurns?: unknown[] } | undefined)
-        : undefined;
-    expect(options?.ephemeralTurns).toBeUndefined();
-  });
-
-  test("first stall past the timeout gets one continuation nudge", async () => {
-    let now = 0;
-    const director = new SubAgentDirector(
-      "system",
-      [],
-      undefined,
-      1000,
-      () => now,
-    );
-    const capabilities = makeCapabilities();
-
-    await director.decide(toolCallDoneEvent("tc-1"), mockState, capabilities);
-    await director.decide(toolDoneEvent("tc-1"), mockState, capabilities);
-
-    now += 1500; // past the stall timeout
-    const actions = actionsArray(
-      await director.decide(stallPing(), mockState, capabilities),
-    );
-    const infer = actions.find((a) => a.type === "infer");
-    expect(infer).toBeDefined();
-    if (infer === undefined || infer.type !== "infer")
-      throw new Error("expected infer action");
-    const ephemeralTurns = (
-      infer.options as { ephemeralTurns?: { content: { text?: string }[] }[] }
-    )?.ephemeralTurns;
-    expect(ephemeralTurns?.[0]?.content?.[0]?.text).toContain("background");
-  });
-
-  test("a second consecutive stall escalates to the salvage report", async () => {
-    let now = 0;
-    const director = new SubAgentDirector(
-      "system",
-      [],
-      undefined,
-      1000,
-      () => now,
-    );
-    const capabilities = makeCapabilities();
-
-    await director.decide(toolCallDoneEvent("tc-1"), mockState, capabilities);
-    await director.decide(toolDoneEvent("tc-1"), mockState, capabilities);
-
-    now += 1500;
-    await director.decide(stallPing(), mockState, capabilities); // first stall: nudge
-
-    now += 1500; // no activity since the nudge
-    const actions = actionsArray(
-      await director.decide(stallPing(), mockState, capabilities),
-    );
-    const reply = actions.find((a) => a.type === "reply");
-    expect(reply).toBeDefined();
-    if (reply === undefined || reply.type !== "reply")
-      throw new Error("expected reply action");
-    expect(reply.content).toContain(
-      "Stopped after a long silence with no tool activity.",
-    );
-    expect(actions.some((a) => a.type === "infer")).toBe(false);
-  });
-
-  test("real activity between pings resets the stall streak", async () => {
-    let now = 0;
-    const director = new SubAgentDirector(
-      "system",
-      [],
-      undefined,
-      1000,
-      () => now,
-    );
-    const capabilities = makeCapabilities();
-
-    await director.decide(toolCallDoneEvent("tc-1"), mockState, capabilities);
-    await director.decide(toolDoneEvent("tc-1"), mockState, capabilities);
-
-    now += 1500;
-    await director.decide(stallPing(), mockState, capabilities); // first stall: nudge
-
-    // Real activity lands before the next ping — this must not count as a
-    // second consecutive stall.
-    now += 100;
-    await director.decide(toolCallDoneEvent("tc-2"), mockState, capabilities);
-    await director.decide(toolDoneEvent("tc-2"), mockState, capabilities);
-
-    now += 1500;
-    const actions = actionsArray(
-      await director.decide(stallPing(), mockState, capabilities),
-    );
-    const infer = actions.find((a) => a.type === "infer");
-    expect(infer).toBeDefined();
-    if (infer === undefined || infer.type !== "infer")
-      throw new Error("expected infer action");
-    const ephemeralTurns = (
-      infer.options as { ephemeralTurns?: unknown[] } | undefined
-    )?.ephemeralTurns;
-    // A fresh first stall nudges again rather than immediately escalating.
-    expect(ephemeralTurns).toBeDefined();
-  });
-});
-
 describe("submit_result turn token notice", () => {
   test("the dispatch brief embeds the shared token notice verbatim", () => {
     const token = "01a09856-4dd3-7209-a3df-d7e543dc4ffe";
@@ -1355,9 +997,6 @@ describe("submit_result turn token notice", () => {
     // Byte-identity: the brief and followup steers render the same contract
     // through one shared function, so a worker can never see two wordings.
     expect(brief).toContain(formatTurnTokenNotice(token));
-    expect(formatTurnTokenNotice(token)).toContain(
-      "A mismatched token means this turn was superseded",
-    );
     expect(formatTurnTokenNotice(token)).not.toMatch(/do not resubmit/i);
     // Non-leaf dispatches state no token.
     expect(

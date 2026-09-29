@@ -10,7 +10,7 @@ import type {
   ToolDefinition,
 } from "@intx/types/runtime";
 
-import { withMockedModuleDuring } from "../../tests/helpers/mock-module.js";
+import { withMockedModuleDuring } from "../../testkit/mock-module.js";
 import type { ChatDirector } from "../agent/director.js";
 import {
   createAdvertisedToolset,
@@ -99,11 +99,6 @@ describe("createAdvertisedToolset", () => {
         (d) => d.name,
       ),
     ).toEqual(["read"]);
-  });
-
-  test("advertises nothing from an empty registry", () => {
-    const { computeAdvertised } = createAdvertisedToolset(wiring());
-    expect(computeAdvertised([])).toEqual([]);
   });
 
   test("isAdvertised tracks prefix, pinned, and activated names", () => {

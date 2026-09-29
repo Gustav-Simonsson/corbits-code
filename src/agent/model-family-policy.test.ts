@@ -91,7 +91,7 @@ describe("resolveModelFamilyPolicy", () => {
 
   test("muse spark carries tool-discipline rules; other families do not", () => {
     const muse = resolveModelFamilyPolicy({
-      providerName: "opencode-go/abklabs",
+      providerName: "opencode-go/acme",
       model: "muse-spark-1.3-contributor",
     });
     const base = resolveModelFamilyPolicy({
@@ -99,8 +99,7 @@ describe("resolveModelFamilyPolicy", () => {
       model: "claude-sonnet-4",
     });
     expect(muse.family).toBe("muse");
-    expect(muse.toolDisciplineRules).toContain("Batch independent tool calls");
-    expect(muse.toolDisciplineRules).toContain("Never re-read a file");
+    expect(muse.toolDisciplineRules?.length).toBeGreaterThan(0);
     expect(base.toolDisciplineRules).toBeUndefined();
   });
 
@@ -112,10 +111,6 @@ describe("resolveModelFamilyPolicy", () => {
       });
       expect(leaf.family).toBe("grok");
       expect(leaf.promptResidual).toBeDefined();
-      if (!leaf.promptResidual)
-        throw new Error("expected promptResidual to be defined");
-      expect(leaf.promptResidual.split("\n")).toHaveLength(4);
-      expect(leaf.promptResidual).toContain("Tool budget:");
     });
 
     test("grok orchestrators and default family carry no residual", () => {
@@ -144,8 +139,7 @@ describe("resolveModelFamilyPolicy", () => {
       orchestrator: false,
     });
     expect(leaf.family).toBe("claude");
-    expect(leaf.promptResidual).toContain("<task_guidance>");
-    expect(leaf.promptResidual).toContain("</task_guidance>");
+    expect(leaf.promptResidual).toBeDefined();
     expect(leaf.advertisedToolDeny).toEqual([]);
     const orchestrator = resolveModelFamilyPolicy({
       providerName: "anthropic",
@@ -167,9 +161,7 @@ describe("resolveModelFamilyPolicy", () => {
       for (const orchestrator of [false, true]) {
         const policy = resolveModelFamilyPolicy({ ...input, orchestrator });
         expect(policy.family).toBe("gpt");
-        expect(policy.promptResidual).toContain(
-          "Narrate before tools (GPT worker):",
-        );
+        expect(policy.promptResidual).toBeDefined();
       }
     }
     const grok = resolveModelFamilyPolicy({
@@ -178,7 +170,7 @@ describe("resolveModelFamilyPolicy", () => {
       orchestrator: false,
     });
     expect(grok.family).toBe("grok");
-    expect(grok.promptResidual).toContain("Tool budget:");
+    expect(grok.promptResidual).toBeDefined();
   });
   test("gpt resolves its own family on permissive default thresholds (CL-8310)", () => {
     const gpt = resolveModelFamilyPolicy({

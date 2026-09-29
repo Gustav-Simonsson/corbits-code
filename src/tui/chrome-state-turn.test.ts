@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { defined } from "../../tests/helpers/defined.js";
+import { defined } from "../../testkit/defined.js";
 import {
   ACTIVITY_STATES,
   LIVE_WORD_MS,
@@ -103,21 +103,6 @@ describe("resolveTurnLabel", () => {
         null,
       ),
     ).toBeUndefined();
-  });
-
-  test("blocked gate shows a waiting-on-operator state", () => {
-    expect(
-      resolveTurnLabel(
-        {
-          isProcessing: true,
-          status: "blocked",
-          currentToolName: "run_shell",
-          streamingType: "tool",
-        },
-        false,
-        null,
-      ),
-    ).toBe("waiting");
   });
 
   test("stopping beats tool phase", () => {

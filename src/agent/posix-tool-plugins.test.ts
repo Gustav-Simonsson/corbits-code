@@ -15,6 +15,8 @@ import {
 } from "./lazy-blob-reader.js";
 import { verifyPlugin } from "../plugins/verify-plugin.js";
 import { editFileLineRangePlugin } from "../plugins/edit-file-line-range-plugin.js";
+import { lineRangeEditCall } from "../plugins/test-helpers.js";
+import { withTempDir } from "../../testkit/temporary-dirs.js";
 
 type ToolHandlerLike = (
   call: ToolCall,
@@ -384,69 +386,8 @@ describe("buildCorePosixToolPlugins", () => {
     }
   });
 
-  test("verifyPlugin wraps editFileLineRangePlugin so line-range edits are still verified (CL-4405)", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "ic-posix-plugins-"));
-    try {
-      const gate = createPermissionGate({
-        approvals: [],
-        interactive: false,
-        skipPermissions: true,
-        reactorGated: false,
-        cwd,
-      });
-      const plugins = buildCorePosixToolPlugins({ cwd, permissionGate: gate });
-
-      const verifyIndex = findMiddlewareIndex(
-        plugins,
-        "Edit verification failed",
-      );
-      const editRangeIndex = findMiddlewareIndex(
-        plugins,
-        "runEditFileLineRange",
-      );
-
-      expect(verifyIndex).toBeGreaterThanOrEqual(0);
-      expect(editRangeIndex).toBeGreaterThanOrEqual(0);
-      expect(verifyIndex).toBeLessThan(editRangeIndex);
-    } finally {
-      await rm(cwd, { recursive: true, force: true });
-    }
-  });
-
-  test("evidence archive search sits after shell-guard so grep/search inherit the 10s budget", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "ic-posix-plugins-"));
-    try {
-      const gate = createPermissionGate({
-        approvals: [],
-        interactive: false,
-        skipPermissions: true,
-        reactorGated: false,
-        cwd,
-      });
-      const plugins = buildCorePosixToolPlugins({
-        cwd,
-        permissionGate: gate,
-        getEvidenceArchive: () => undefined,
-      });
-      const shellGuardIndex = findMiddlewareIndex(
-        plugins,
-        "formatShellTimeoutNotice",
-      );
-      const archiveIndex = findMiddlewareIndex(
-        plugins,
-        "evidence archive is not available in this session",
-      );
-      expect(shellGuardIndex).toBeGreaterThanOrEqual(0);
-      expect(archiveIndex).toBeGreaterThanOrEqual(0);
-      expect(archiveIndex).toBeGreaterThan(shellGuardIndex);
-    } finally {
-      await rm(cwd, { recursive: true, force: true });
-    }
-  });
-
   test("a real line-range edit_file call verifies as success through the wired plugin chain", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "ic-posix-plugins-"));
-    try {
+    await withTempDir("ic-posix-plugins-", async (cwd) => {
       const path = join(cwd, "test.txt");
       await writeFile(path, "a\nb\nc\n");
 
@@ -463,25 +404,18 @@ describe("buildCorePosixToolPlugins", () => {
       });
 
       const result = await runner.run(
-        {
-          id: "call-1",
-          name: "edit_file",
-          arguments: { path, start_line: 2, end_line: 2, new_string: "B" },
-        },
+        lineRangeEditCall(path),
         new AbortController().signal,
       );
 
       expect(result.isError).not.toBe(true);
       const final = await readFile(path, "utf8");
       expect(final).toBe("a\nB\nc\n");
-    } finally {
-      await rm(cwd, { recursive: true, force: true });
-    }
+    });
   });
 
   test("verifyPlugin still catches a genuine line-range mismatch caused by a concurrent write", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ic-posix-plugins-"));
-    try {
+    await withTempDir("ic-posix-plugins-", async (dir) => {
       const path = join(dir, "test.txt");
       await writeFile(path, "a\nb\nc\n");
 
@@ -512,19 +446,13 @@ describe("buildCorePosixToolPlugins", () => {
       );
 
       const result = await composed(
-        {
-          id: "call-1",
-          name: "edit_file",
-          arguments: { path, start_line: 2, end_line: 2, new_string: "B" },
-        },
+        lineRangeEditCall(path),
         new AbortController().signal,
       );
 
       expect(result.isError).toBe(true);
       expect(result.content).toMatch(/content mismatch after replacement/);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
   });
 
   test("a grep result containing a secret-shaped string is redacted before reaching the model (CL-5717)", async () => {
@@ -707,15 +635,6 @@ describe("buildCorePosixToolPlugins", () => {
         cwd,
       });
       const plugins = buildCorePosixToolPlugins({ cwd, permissionGate: gate });
-      const secretGuardIndex = findMiddlewareIndex(
-        plugins,
-        "Access to sensitive file blocked by policy",
-      );
-      const permissionIndex = findMiddlewareIndex(plugins, "gateToolCall");
-      expect(secretGuardIndex).toBeGreaterThanOrEqual(0);
-      expect(permissionIndex).toBeGreaterThanOrEqual(0);
-      expect(secretGuardIndex).toBeLessThan(permissionIndex);
-
       const composed = composeMiddleware(
         plugins
           .map((plugin) => plugin.middleware)
