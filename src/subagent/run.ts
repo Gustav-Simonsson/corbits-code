@@ -74,6 +74,7 @@ import {
 import {
   advertisedToolName,
   projectToolDefinitions,
+  withAuthzParityDefinitions,
 } from "../agent/tool-aliases.js";
 
 import {
@@ -1156,11 +1157,11 @@ async function runSubAgentInner(
           tools,
           toolWatchdogFromSettings(params.settings),
         );
-        return {
+        return withAuthzParityDefinitions({
           ...runner,
           run: (call, signal) =>
             withWorkerIdentity(() => runner.run(call, signal)),
-        };
+        });
       },
     });
 
