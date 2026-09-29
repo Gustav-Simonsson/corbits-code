@@ -126,7 +126,7 @@ describe("readFileBounded", () => {
     );
     expect(isError).toBe(true);
     expect(content).toContain("binary");
-    expect(content).toContain("not a missing-tool");
+    expect(content).toContain("Not a missing-tool");
   });
 
   test("a PDF without pdftotext names the missing extractor, not a malformed file", async () => {
@@ -140,7 +140,7 @@ describe("readFileBounded", () => {
     );
     expect(isError).toBe(true);
     expect(content).toContain("pdftotext");
-    expect(content).toContain("missing");
+    expect(content).toContain("Missing PDF extractor");
     expect(content).toContain("not a malformed file");
     expect(content).not.toContain("permission boundary");
   });
@@ -159,7 +159,7 @@ describe("readFileBounded", () => {
     );
     expect(isError).toBe(true);
     expect(content).toContain("installed");
-    expect(content).toContain("permission boundary");
+    expect(content).toContain("Permission boundary");
     expect(content).toContain("run_shell");
     expect(content).toContain("not a malformed file");
   });
@@ -174,9 +174,25 @@ describe("readFileBounded", () => {
       { whichExtractor: () => null, canExecuteHostCommands: () => false },
     );
     expect(isError).toBe(true);
-    expect(content).toContain("not a valid PDF");
+    expect(content).toContain("Malformed PDF");
     expect(content).toContain("not a missing extractor");
     expect(content).not.toContain("brew install");
+  });
+
+  test("UTF-8 .pdf without magic still reads as text", async () => {
+    const p = await fixture("utf8.pdf", "plain utf-8 notes\nsecond line");
+    const { content, isError } = await readFileBounded(
+      p,
+      0,
+      2000,
+      neverAbort(),
+      { whichExtractor: () => null, canExecuteHostCommands: () => false },
+    );
+    expect(isError).toBeUndefined();
+    expect(content).toContain("plain utf-8 notes");
+    expect(content).toContain("second line");
+    expect(content).not.toContain("not a valid PDF");
+    expect(content).not.toContain("malformed");
   });
 
   test("a NUL deep in an otherwise-valid file does not discard streamed content", async () => {
@@ -807,8 +823,9 @@ describe("readFileGuardPlugin", () => {
     );
     expect(missingResult.isError).toBe(true);
     expect(String(missingResult.content)).toContain("pdftotext");
-    expect(String(missingResult.content)).toContain("missing");
+    expect(String(missingResult.content)).toContain("Missing PDF extractor");
     expect(String(missingResult.content)).toContain("not a malformed file");
+    expect(String(missingResult.content)).toContain("flow.pdf");
 
     const blocked = readFileGuardPlugin(dir, {
       whichExtractor: () => "/opt/homebrew/bin/pdftotext",
@@ -820,9 +837,40 @@ describe("readFileGuardPlugin", () => {
     );
     expect(blockedResult.isError).toBe(true);
     expect(String(blockedResult.content)).toContain("installed");
-    expect(String(blockedResult.content)).toContain("permission boundary");
+    expect(String(blockedResult.content)).toContain("Permission boundary");
     expect(String(blockedResult.content)).toContain("run_shell");
     expect(String(blockedResult.content)).not.toContain("brew install");
+  });
+
+  test("UTF-8 .pdf without magic still reads as text through the plugin", async () => {
+    await fixture("notes.pdf", "hello from a misnamed text file");
+    const result = await run({
+      id: "utf8-pdf",
+      name: "read_file",
+      arguments: { path: "notes.pdf" },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toContain("hello from a misnamed text file");
+    expect(String(result.content)).not.toContain("not a valid PDF");
+    expect(String(result.content)).not.toContain("malformed");
+  });
+
+  test("extractor_ready quotes a PDF path that contains spaces", async () => {
+    await fixture("my report.pdf", Buffer.from("%PDF-1.4\n"));
+    const plugin = readFileGuardPlugin(dir, {
+      whichExtractor: () => "/usr/bin/pdftotext",
+      canExecuteHostCommands: () => true,
+    });
+    const result = await defined(plugin.middleware)(fallback)(
+      {
+        id: "quoted-pdf",
+        name: "read_file",
+        arguments: { path: "my report.pdf" },
+      },
+      neverAbort(),
+    );
+    expect(result.isError).toBe(true);
+    expect(String(result.content)).toContain(`pdftotext 'my report.pdf' -`);
   });
 });
 
