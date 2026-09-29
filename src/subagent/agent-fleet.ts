@@ -1561,7 +1561,7 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
               : {}),
             persist: deps.persist !== false,
             askDirectorPort: {
-              register: ({ question, questionId }) => {
+              register: ({ question, questionId, grantRequestId }) => {
                 const hold: {
                   resolve?: (answer: string) => void;
                   reject?: (reason: unknown) => void;
@@ -1581,6 +1581,7 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
                 const ok = deps.sessions.registerAsk(session.id, {
                   question,
                   questionId,
+                  ...(grantRequestId !== undefined ? { grantRequestId } : {}),
                   resolve: hold.resolve,
                   reject: hold.reject,
                 });

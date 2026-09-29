@@ -222,6 +222,7 @@ export type RunSubAgentParams = {
     register: (input: {
       question: string;
       questionId: string;
+      grantRequestId?: string;
     }) => Promise<string>;
     cancel: (reason: string) => void;
   };
