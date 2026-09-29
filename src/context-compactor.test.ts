@@ -9,7 +9,11 @@ import {
   LEGACY_COMPACT_SPACER_TEXT,
   HARNESS_COMPACT_SPACER_MODEL,
   isHarnessCompactSpacer,
+  DEFAULT_TAIL_COMPACTION_SHAPE,
 } from "./session/compactor.js";
+import { HANDOFF_LATEST_KEY } from "./session/compaction-handoff.js";
+import { compactionThresholdFor } from "./provider/context-window.js";
+import { estimateContextTokens } from "./agent/context-estimate.js";
 import { createModelSummarizer } from "./session/summarizer.js";
 import {
   createCompactionGovernor,
@@ -47,15 +51,21 @@ function allText(turns: ConversationTurn[]): string {
     .join("\n");
 }
 
+function handoffFile(
+  blobs: { key: string; bytes: Uint8Array }[] | undefined,
+): string {
+  const blob = blobs?.find((b) => b.key === HANDOFF_LATEST_KEY);
+  return blob === undefined ? "" : new TextDecoder().decode(blob.bytes);
+}
+
 function hasConsecutiveSameRole(turns: ConversationTurn[]): boolean {
   return turns.some((t, i) => i > 0 && defined(turns[i - 1]).role === t.role);
 }
 
 type CompactorConfig = Parameters<typeof createPruningCompactor>[0];
 
-// CL-9007: every test pins a tiny tail budget so the fold covers the same
-// older region the old keepRecentTurns cut folded (tailBudgetTokens: 1 keeps
-// only the mandatory floor live). Pass tailBudgetTokens instead of a full
+// CL-9489: every test pins a tiny tail budget so the fold covers older
+// turns the token cap leaves out. Pass tailBudgetTokens instead of a full
 // compactionShape.
 function smallCompactor(
   cfg: Omit<NonNullable<CompactorConfig>, "compactionShape"> & {
@@ -72,7 +82,6 @@ function smallCompactor(
 describe("createPruningCompactor", () => {
   test("returns turns unchanged when under the keep threshold", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 5,
       summaryMaxChars: 500,
     });
     const turns: ConversationTurn[] = [
@@ -89,12 +98,10 @@ describe("createPruningCompactor", () => {
     // from this function so it never arms a compaction guaranteed to no-op.
     // Anyone changing apply()'s no-op condition without updating
     // compactorNoOpFloor accordingly breaks that guarantee silently.
-    const keepRecentTurns = 3;
     const compactor = smallCompactor({
-      keepRecentTurns,
       summaryMaxChars: 500,
     });
-    const floor = compactorNoOpFloor(keepRecentTurns);
+    const floor = compactorNoOpFloor();
 
     // Bodies exceed the pinned tail budget, so past-floor always has a folded
     // region while at-floor still no-ops on the count check alone.
@@ -105,7 +112,9 @@ describe("createPruningCompactor", () => {
         content: [{ type: "text", text: body(i) }],
       }),
     );
-    const pastFloor = Array.from({ length: floor + 1 }, (_, i) =>
+    // Past the count floor AND past the tail budget: initiating + middle + tail
+    // so there is a summarized region, not a keep-set no-op.
+    const pastFloor = Array.from({ length: floor + 3 }, (_, i) =>
       makeTurn({
         role: i % 2 === 0 ? "user" : "assistant",
         content: [{ type: "text", text: body(i) }],
@@ -122,7 +131,6 @@ describe("createPruningCompactor", () => {
 
   test("compacts old turns and preserves recent ones", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 2,
       summaryMaxChars: 500,
     });
     const turns: ConversationTurn[] = [
@@ -169,7 +177,6 @@ describe("createPruningCompactor — initiating task preservation", () => {
   test("emits the compaction summary as a user turn, never system", async () => {
     const compactor = smallCompactor({
       tailBudgetTokens: 1,
-      keepRecentTurns: 1,
       summaryMaxChars: 500,
     });
     const turns: ConversationTurn[] = [
@@ -184,7 +191,6 @@ describe("createPruningCompactor — initiating task preservation", () => {
 
   test("keeps alternating roles when a tool_result user turn abuts a plain user turn", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 1,
       maxAnchorTurns: 3,
       summaryMaxChars: 500,
     });
@@ -225,18 +231,15 @@ describe("createPruningCompactor — initiating task preservation", () => {
     ];
     const result = await compactor.apply(turns, mockStrategyCtx);
     // The summarized assistant turn would leave the tool_result user turn next
-    // to the recent user turn; coalescing must still alternate.
+    // to the recent user turn; coalescing must still alternate. The edit pair
+    // folds into the fat handoff rather than riding live as an unexcerpted body.
     expect(hasConsecutiveSameRole(result.output)).toBe(false);
-    // The tool_result stays paired with its tool_call.
-    const callTurnIdx = result.output.findIndex((t) =>
-      t.content.some((b) => b.type === "tool_call" && b.id === "c1"),
-    );
-    const resultTurn = result.output[callTurnIdx + 1];
     expect(
-      resultTurn?.content.some(
-        (b) => b.type === "tool_result" && b.callId === "c1",
+      result.output.some((t) =>
+        t.content.some((b) => b.type === "tool_call" && b.id === "c1"),
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(handoffFile(result.blobs)).toContain("src/a.ts");
   });
 });
 
@@ -252,7 +255,6 @@ describe("createPruningCompactor — image aging", () => {
 
   test("strips image bytes from an anchored (aged) turn but keeps its text", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 2,
       maxAnchorTurns: 1,
       summaryMaxChars: 500,
     });
@@ -293,33 +295,28 @@ describe("createPruningCompactor — image aging", () => {
     expect(
       result.output.some((t) => t.content.some((b) => b.type === "image")),
     ).toBe(false);
-    // The turn's text content, and a rehydratable attachment URI, still survive.
-    const initiatingTurn = result.output.find((t) =>
-      t.content.some(
-        (b) => b.type === "text" && b.text === "here's a screenshot of the bug",
-      ),
+    // The initiating screenshot is outside the tail: it ages into a blob and
+    // folds into the handoff rather than riding live.
+    expect(handoffFile(result.blobs)).toContain(
+      "here's a screenshot of the bug",
     );
-    expect(initiatingTurn).toBeDefined();
-    expect(
-      initiatingTurn?.content.some(
-        (b) =>
-          b.type === "text" &&
-          b.text.includes("attachment:///") &&
-          b.text.includes("aged"),
-      ),
-    ).toBe(true);
     expect(result.blobs).toBeDefined();
     expect(defined(result.blobs).length).toBeGreaterThanOrEqual(1);
-    expect(defined(defined(result.blobs)[0]).contentType).toBe("image/png");
-    // Blob payload is the original base64 (UTF-8), not lost.
     expect(
-      new TextDecoder().decode(defined(defined(result.blobs)[0]).bytes),
+      defined(result.blobs).some((b) => b.contentType === "image/png"),
+    ).toBe(true);
+    expect(
+      new TextDecoder().decode(
+        defined(
+          defined(result.blobs).find((b) => b.contentType === "image/png"),
+        ).bytes,
+      ),
     ).toBe("iVBORw0KGgo=");
   });
 
-  test("keeps an image intact when its turn is still within the recent window", async () => {
+  test("keeps an image intact when its turn is in the budgeted tail", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 3,
+      tailBudgetTokens: 500,
       summaryMaxChars: 500,
     });
     const turns: ConversationTurn[] = [
@@ -347,11 +344,10 @@ describe("createPruningCompactor — image aging", () => {
     expect(JSON.stringify(result.output)).toContain("iVBORw0KGgo=");
   });
 
-  test("ages images outside the keep window even when total length is under the compact threshold", async () => {
-    // With few turns, full pruning is a no-op, but images outside keepRecentTurns
-    // must still spill so they are not resent as base64 forever.
+  test("ages images outside the budgeted tail", async () => {
+    // Tiny tail budget keeps only the newest text; the older screenshot ages.
     const compactor = smallCompactor({
-      keepRecentTurns: 2,
+      tailBudgetTokens: 1,
       summaryMaxChars: 500,
     });
     const turns: ConversationTurn[] = [
@@ -379,14 +375,7 @@ describe("createPruningCompactor — image aging", () => {
     expect(result.blobs).toBeDefined();
     expect(defined(result.blobs).length).toBeGreaterThanOrEqual(1);
     expect(
-      result.output.some((t) =>
-        t.content.some(
-          (b) =>
-            b.type === "text" &&
-            b.text.includes("attachment:///") &&
-            b.text.includes("aged"),
-        ),
-      ),
+      defined(result.blobs).some((b) => b.contentType === "image/png"),
     ).toBe(true);
   });
 });
@@ -432,7 +421,6 @@ describe("createPruningCompactor — error anchoring (CL-6906)", () => {
       ...padding(8, "after"),
     ];
     const compactor = smallCompactor({
-      keepRecentTurns: 6,
       maxAnchorTurns: 8,
       summaryMaxChars: 2000,
     });
@@ -479,18 +467,17 @@ describe("createPruningCompactor — error anchoring (CL-6906)", () => {
       ...padding(8, "after"),
     ];
     const compactor = smallCompactor({
-      keepRecentTurns: 6,
       maxAnchorTurns: 8,
       summaryMaxChars: 2000,
     });
-    const { output } = await compactor.apply(turns, mockStrategyCtx);
+    const { output, blobs } = await compactor.apply(turns, mockStrategyCtx);
     const kept = output.find((t) =>
       t.content.some((b) => b.type === "tool_result" && b.callId === "d1"),
     );
-    expect(kept).toBeDefined();
-    expect(
-      kept?.content.some((b) => b.type === "tool_result" && b.callId === "d2"),
-    ).toBe(true);
+    expect(kept).toBeUndefined();
+    const file = handoffFile(blobs);
+    expect(file).toContain("Error: build failed");
+    expect(file).toContain("Error: no matches found");
   });
 
   test("repeated identical errors collapse to one representative before anchor selection", async () => {
@@ -540,7 +527,6 @@ describe("createPruningCompactor — error anchoring (CL-6906)", () => {
       ...padding(8, "after"),
     ];
     const compactor = smallCompactor({
-      keepRecentTurns: 6,
       maxAnchorTurns: 8,
       summaryMaxChars: 2000,
     });
@@ -565,7 +551,6 @@ describe("createPruningCompactor — summarize receives the workflow context (CL
     const workflowCtx = { workflow: { name: "build", stepIndex: 2, total: 7 } };
     const compactor = smallCompactor({
       tailBudgetTokens: 1,
-      keepRecentTurns: 1,
       summaryMaxChars: 500,
       summaryContext: () => workflowCtx,
       summarize: async (_turns, ctx) => {
@@ -586,7 +571,6 @@ describe("createPruningCompactor — summarize receives the workflow context (CL
 describe("createPruningCompactor — operator extra instructions", () => {
   test("stores extra instructions on the compact record", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 1,
       summaryMaxChars: 500,
       summaryContext: () => ({ extraInstructions: "keep the auth discussion" }),
       summarize: async () => "summary text",
@@ -610,7 +594,6 @@ describe("createPruningCompactor — operator extra instructions", () => {
     ];
     const written = await smallCompactor({
       tailBudgetTokens: 1,
-      keepRecentTurns: 1,
       summaryMaxChars: 500,
       summaryContext: () => ({ extraInstructions: "keep the auth discussion" }),
       summarize: async () => "summary text",
@@ -624,7 +607,6 @@ describe("createPruningCompactor — operator extra instructions", () => {
     let captured: { extraInstructions?: string } | undefined;
     const next = await smallCompactor({
       tailBudgetTokens: 1,
-      keepRecentTurns: 1,
       summaryMaxChars: 500,
       summaryContext: () => {
         const extra = rebuilt.extraInstructions;
@@ -670,9 +652,8 @@ describe("createPruningCompactor — consolidated handoff (CL-7521)", () => {
     return [...base, ...extra];
   }
 
-  test("second apply keeps the initiating task as its own user turn", async () => {
+  test("second apply keeps the initiating task in the handoff, not as a live user turn", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 2,
       maxAnchorTurns: 1,
       summaryMaxChars: 500,
     });
@@ -708,41 +689,44 @@ describe("createPruningCompactor — consolidated handoff (CL-7521)", () => {
     );
 
     const output1 = (await compactor.apply(turns, mockStrategyCtx)).output;
-    expect(
-      output1.some(
-        (t) =>
-          t.role === "user" &&
-          t.content.some((b) => b.type === "text" && b.text === goal),
-      ),
-    ).toBe(true);
+    expect(allText(output1)).toContain(goal);
 
-    const output2 = (
-      await compactor.apply(grow(output1, 16, "round2"), mockStrategyCtx)
-    ).output;
-    expect(compactedTurns(output2)).toHaveLength(1);
-    expect(
-      output2.some(
-        (t) =>
-          t.role === "user" &&
-          !firstText(t).startsWith(COMPACTED_PREFIX) &&
-          t.content.some((b) => b.type === "text" && b.text === goal),
-      ),
-    ).toBe(true);
-    expect(hasConsecutiveSameRole(output2)).toBe(false);
+    const result2 = await compactor.apply(
+      grow(output1, 16, "round2"),
+      mockStrategyCtx,
+    );
+    expect(compactedTurns(result2.output)).toHaveLength(1);
+    expect(handoffFile(result2.blobs)).toContain(goal);
+    expect(hasConsecutiveSameRole(result2.output)).toBe(false);
   });
 
   test("harness spacer is stamped with the reserved producer id and a visible sentinel", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 2,
+      tailBudgetTokens: 1,
       summaryMaxChars: 500,
     });
-    const output1 = (
-      await compactor.apply(grow([], 16, "round1"), mockStrategyCtx)
-    ).output;
-    const output2 = (
-      await compactor.apply(grow(output1, 16, "round2"), mockStrategyCtx)
-    ).output;
-    const spacer = output2.find(isHarnessCompactSpacer);
+    const turns: ConversationTurn[] = [
+      makeTurn({
+        role: "user",
+        content: [{ type: "text", text: "the initiating task" }],
+      }),
+    ];
+    for (let i = 0; i < 8; i++) {
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [{ type: "text", text: `step ${i}` }],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [{ type: "text", text: "recent ask" }],
+      }),
+    );
+    const output = (await compactor.apply(turns, mockStrategyCtx)).output;
+    const spacer = output.find(isHarnessCompactSpacer);
     expect(spacer).toBeDefined();
     expect(defined(spacer).model).toBe(HARNESS_COMPACT_SPACER_MODEL);
     expect(firstText(defined(spacer))).toBe(COMPACT_SPACER_TEXT);
@@ -774,7 +758,7 @@ describe("createPruningCompactor — consolidated handoff (CL-7521)", () => {
 
   test("empty-fold keep-set returns the input unchanged", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 1,
+      tailBudgetTokens: 500,
       maxAnchorTurns: 8,
       summaryMaxChars: 500,
     });
@@ -819,7 +803,6 @@ describe("createPruningCompactor — consolidated handoff (CL-7521)", () => {
       },
     });
     const compactor = smallCompactor({
-      keepRecentTurns: 2,
       summaryMaxChars: 500,
       summarize,
     });
@@ -872,7 +855,6 @@ describe("createPruningCompactor — consolidated handoff (CL-7521)", () => {
       onFailure: (text) => notices.push(text),
     });
     const result = await smallCompactor({
-      keepRecentTurns: 2,
       summaryMaxChars: 500,
       summarize,
     }).apply(grow([], 16, "empty"), mockStrategyCtx);
@@ -890,7 +872,6 @@ describe("createPruningCompactor — consolidated handoff (CL-7521)", () => {
     err.name = "AbortError";
     const turns = grow([], 16, "abort");
     const result = await smallCompactor({
-      keepRecentTurns: 2,
       summaryMaxChars: 500,
       summarize: async () => {
         throw err;
@@ -906,7 +887,6 @@ describe("createPruningCompactor — consolidated handoff (CL-7521)", () => {
 describe("buildTurnSummary via createPruningCompactor", () => {
   test("summarizes tool_call and tool_result blocks in compacted turns", async () => {
     const compactor = smallCompactor({
-      keepRecentTurns: 1,
       summaryMaxChars: 2000,
     });
     const turns: ConversationTurn[] = [
@@ -972,5 +952,242 @@ describe("buildTurnSummary via createPruningCompactor", () => {
     const summary = buildTurnSummary(turns, maxChars);
     expect(summary.endsWith("...")).toBe(true);
     expect(summary.length).toBe(maxChars);
+  });
+});
+
+describe("CL-9489 zero-verbatim fold", () => {
+  function liveTokenEstimate(turns: ConversationTurn[]): number {
+    let chars = 0;
+    for (const turn of turns) {
+      for (const block of turn.content) {
+        if (block.type === "text") chars += block.text.length;
+        else if (block.type === "tool_call")
+          chars += JSON.stringify(block.arguments).length;
+        else if (block.type === "tool_result") {
+          for (const part of block.content) {
+            if (part.type === "text") chars += part.text.length;
+          }
+        }
+      }
+    }
+    return Math.ceil(chars / 4);
+  }
+
+  test("a large recent-tool-result session folds under the 60% trigger", async () => {
+    const dump = "z".repeat(20_000);
+    const turns: ConversationTurn[] = [
+      makeTurn({
+        role: "user",
+        content: [{ type: "text", text: "audit the deployment logs" }],
+      }),
+    ];
+    for (let i = 0; i < 20; i++) {
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              id: `r${i}`,
+              name: "read_file",
+              arguments: { path: `src/f${i}.ts` },
+            },
+          ],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              callId: `r${i}`,
+              content: [{ type: "text", text: dump }],
+            },
+          ],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [{ type: "text", text: "newest ask" }],
+      }),
+    );
+
+    const before = liveTokenEstimate(turns);
+    expect(before).toBeGreaterThan(compactionThresholdFor(undefined));
+
+    const result = await createPruningCompactor({
+      summarize: async () =>
+        "Audited deployment logs. Next: keep newest ask whole.",
+    }).apply(turns, mockStrategyCtx);
+
+    expect(result.record.reason.startsWith("compacted")).toBe(true);
+    expect(allText(result.output)).toContain(COMPACTED_PREFIX);
+    expect(allText(result.output)).toContain("Handoff: tool-output:///");
+    const after = liveTokenEstimate(result.output);
+    expect(after).toBeLessThan(compactionThresholdFor(undefined));
+    expect(Number(result.record.decisions["tailBudgetTokens"])).toBe(
+      DEFAULT_TAIL_COMPACTION_SHAPE.tailBudgetTokens,
+    );
+    expect(
+      Number(result.record.decisions["tailTokenEstimate"]),
+    ).toBeLessThanOrEqual(DEFAULT_TAIL_COMPACTION_SHAPE.tailBudgetTokens + 50);
+    const liveBodies = result.output
+      .flatMap((t) =>
+        t.content.flatMap((b) => {
+          if (b.type === "tool_result")
+            return b.content.map((c) => (c.type === "text" ? c.text : ""));
+          return [];
+        }),
+      )
+      .join("\n");
+    expect(liveBodies).not.toContain(dump);
+  });
+
+  test("fat edit_file anchors fold into the handoff, not the live prompt", async () => {
+    const body = "x".repeat(20_000);
+    const turns: ConversationTurn[] = [
+      makeTurn({
+        role: "user",
+        content: [{ type: "text", text: "patch eight files" }],
+      }),
+    ];
+    for (let i = 0; i < 8; i++) {
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              id: `e${i}`,
+              name: "edit_file",
+              arguments: { path: `src/f${i}.ts`, oldText: body, newText: body },
+            },
+          ],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              callId: `e${i}`,
+              content: [{ type: "text", text: `applied ${i}` }],
+            },
+          ],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [{ type: "text", text: "newest ask" }],
+      }),
+    );
+
+    const before = estimateContextTokens(turns);
+    expect(before).toBeGreaterThan(compactionThresholdFor(undefined));
+
+    const result = await createPruningCompactor({
+      summarize: async () => "Patched eight files. Next: newest ask.",
+    }).apply(turns, mockStrategyCtx);
+
+    expect(result.record.reason.startsWith("compacted")).toBe(true);
+    expect(Number(result.record.decisions["anchorTurnCount"])).toBe(0);
+    const liveEdit = result.output.some((t) =>
+      t.content.some(
+        (b) =>
+          b.type === "tool_call" &&
+          b.name === "edit_file" &&
+          JSON.stringify(b.arguments).includes(body),
+      ),
+    );
+    expect(liveEdit).toBe(false);
+    expect(handoffFile(result.blobs)).toContain("src/f0.ts");
+    const after = estimateContextTokens(result.output);
+    expect(after).toBeLessThan(compactionThresholdFor(undefined));
+    expect(after).toBeLessThan(76_800);
+  });
+
+  test("a huge newest screenshot counts against the tail budget", async () => {
+    const dump = "z".repeat(20_000);
+    const screenshot = "A".repeat(20_000);
+    const turns: ConversationTurn[] = [
+      makeTurn({
+        role: "user",
+        content: [{ type: "text", text: "audit the logs" }],
+      }),
+    ];
+    for (let i = 0; i < 8; i++) {
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              id: `r${i}`,
+              name: "read_file",
+              arguments: { path: `src/f${i}.ts` },
+            },
+          ],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              callId: `r${i}`,
+              content: [{ type: "text", text: dump }],
+            },
+          ],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [
+          { type: "text", text: "look at this screenshot" },
+          {
+            type: "image",
+            source: {
+              kind: "base64",
+              mimeType: "image/png",
+              data: screenshot,
+            },
+          },
+        ],
+      }),
+    );
+
+    const result = await createPruningCompactor({
+      summarize: async () => "Audited logs. Next: inspect the screenshot.",
+    }).apply(turns, mockStrategyCtx);
+
+    expect(result.record.reason.startsWith("compacted")).toBe(true);
+    const tailTokens = Number(result.record.decisions["tailTokenEstimate"]);
+    expect(tailTokens).toBeGreaterThan(1000);
+    expect(tailTokens).toBeLessThanOrEqual(
+      DEFAULT_TAIL_COMPACTION_SHAPE.tailBudgetTokens + 50,
+    );
+    const liveBodies = result.output
+      .flatMap((t) =>
+        t.content.flatMap((b) => {
+          if (b.type === "tool_result")
+            return b.content.map((c) => (c.type === "text" ? c.text : ""));
+          return [];
+        }),
+      )
+      .join("\n");
+    expect(liveBodies).not.toContain(dump);
+    expect(JSON.stringify(result.output)).toContain(screenshot);
+    expect(estimateContextTokens(result.output)).toBeLessThan(
+      compactionThresholdFor(undefined),
+    );
   });
 });

@@ -21,7 +21,6 @@ import { createAgentToolset } from "./tools.js";
 import { createAdvertisedToolset } from "../session/assemble-runtime.js";
 import { createPermissionGate } from "../permission/gate.js";
 import {
-  COMPACTOR_KEEP_RECENT_TURNS,
   COMPACT_SPACER_TEXT,
   LEGACY_COMPACT_SPACER_TEXT,
   compactorNoOpFloor,
@@ -802,14 +801,11 @@ function makeToolErrorEvent(callId: string, content: string) {
 // One turn past createPruningCompactor's own no-op floor (session/compactor.ts),
 // so the arming check finds a history actually worth compacting.
 const longState = {
-  turns: Array.from(
-    { length: compactorNoOpFloor(COMPACTOR_KEEP_RECENT_TURNS) + 1 },
-    () => ({
-      role: "user",
-      content: [],
-      timestamp: 0,
-    }),
-  ),
+  turns: Array.from({ length: compactorNoOpFloor() + 1 }, () => ({
+    role: "user",
+    content: [],
+    timestamp: 0,
+  })),
 } as unknown as ReactorState;
 
 function messageReceived(content: string): ReactorInboundEvent {
@@ -1594,14 +1590,11 @@ describe("chatDirector compaction", () => {
 
   test("idle empty compact makes the post-compact estimate authoritative without inferring", async () => {
     const director = createChatDirector("", [], {});
-    const largeTurns = Array.from(
-      { length: compactorNoOpFloor(COMPACTOR_KEEP_RECENT_TURNS) + 1 },
-      (_, i) => ({
-        role: i % 2 === 0 ? "user" : "assistant",
-        content: [{ type: "text", text: "x".repeat(200) }],
-        timestamp: i,
-      }),
-    );
+    const largeTurns = Array.from({ length: 8 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: [{ type: "text", text: "x".repeat(200) }],
+      timestamp: i,
+    }));
     const longTurnsState = { turns: largeTurns } as unknown as ReactorState;
 
     await director.decide(

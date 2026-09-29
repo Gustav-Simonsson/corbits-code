@@ -6,10 +6,7 @@ import type {
   ReactorState,
 } from "@intx/types/runtime";
 import { createCorbitsRetryPolicy } from "../agent/retry-policy.js";
-import {
-  COMPACTOR_KEEP_RECENT_TURNS,
-  compactorNoOpFloor,
-} from "../session/compactor.js";
+import { compactorNoOpFloor } from "../session/compactor.js";
 import { SubAgentDirector } from "./nudge-director.js";
 import type { AdmissionQueue } from "./admission.js";
 import { createTestCapabilities } from "./director-test-harness.js";
@@ -22,14 +19,11 @@ import {
 
 const state = { turns: [] } as unknown as ReactorState;
 const longState = {
-  turns: Array.from(
-    { length: compactorNoOpFloor(COMPACTOR_KEEP_RECENT_TURNS) + 1 },
-    () => ({
-      role: "user",
-      content: [],
-      timestamp: 0,
-    }),
-  ),
+  turns: Array.from({ length: compactorNoOpFloor() + 1 }, () => ({
+    role: "user",
+    content: [],
+    timestamp: 0,
+  })),
 } as unknown as ReactorState;
 
 // These tests are not about stall timing. With the default real clock, a
