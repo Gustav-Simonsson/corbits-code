@@ -20,6 +20,43 @@ release that deserves narration. Passing `--notes <file>` overrides both for
 the GitHub body. Sections below this line predate generation and were written
 by hand.
 
+## [0.3.32] - 2026-09-29
+
+### What's Changed
+* fix(exec): show MCP spawn args in trust prompt by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1165
+* refactor(shell): share transparent command peeling by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1166
+* fix(permissions): auto-allow fleet continuation tools by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1168
+* fix(permissions): make yolo override auto mode by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1169
+* fix(mcp): surface tool failures and structured content by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1170
+* CL-8978: prevent recoverable subagent failures from stalling parent by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1171
+* CL-8792: allow-once no longer stalls a second destructive command without re-prompt by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1173
+* CL-9006: fix automatic compaction governor so post-compact above-threshold sessions latch by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1175
+* CL-9007: ship shared summary-plus-small-tail pipeline for automatic and manual compaction by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1177
+* CL-8980: resume truncated reads by same path plus offset by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1179
+* CL-8905: lock MCP promotion schema fidelity for optional and required arguments by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1181
+* CL-9026: stop writing duplicate prompt snapshot when identical to live turns by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1178
+* CL-9362: resolve restricted-worktree carve-out for agentId-targeted fleet calls by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1184
+* CL-8990: fix MCP HTTP auth recovery ignoring abort on callBlocks by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1174
+* fix(permissions): restore /yolo off hint for default-source skip warning (CL-9385) by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1185
+* CL-9361: quote whitespace args in shared MCP trust prompt helper (TTY + TUI) by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1183
+* feat(tools): advertise one posix wire set by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1182
+* CL-7802: start gated tool elapsed at grant, not announcement by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1176
+* fix(auth): recover from provider credential failures by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1188
+* CL-9384: migrate persisted approval stores to purge update_plan keys by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1186
+* CL-8979: page large read_file responses through to the end by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1180
+* CL-9386: runtime-denylist the active --config path holding skip by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1187
+* fix(secret-guard): protect envrc and flaskenv files by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1167
+* test(compaction): force a fold so path-offset resume cases compact by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1189
+* chore(auth): pin oauth-core to npm 0.2.0 by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1190
+* chore(deps): pin Codex provider to published npm 0.1.1 by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1192
+* chore(deps): pin xai-provider to npm 0.1.1 by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1191
+* chore(deps): pin openai-responses to npm 0.2.1 by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1193
+* fix(search): fail closed on unbounded workspace-root search_files by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1225
+* test: add scripted-inference e2e layer and slim the unit suite by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1221
+
+
+**Full Changelog**: https://github.com/corbitsdev/corbits-code/compare/v0.3.31...v0.3.32
+
 ## [0.3.31] - 2026-09-25
 
 ### What's Changed
