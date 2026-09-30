@@ -808,7 +808,7 @@ describe("SubAgentDirector incomplete-report wiring", () => {
         inferenceDoneText(
           [
             "## Summary",
-            "Checking whether Skywalker write-tool unmount is tested...",
+            "Checking whether dispatch write-tool unmount is tested...",
             "Checking those next.",
           ].join("\n"),
         ),

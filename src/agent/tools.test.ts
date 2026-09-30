@@ -244,7 +244,7 @@ test("dynamicRunner contains posix tool names plus ask_operator", async () => {
   const names = toolset.dynamicRunner.currentDefinitions().map((d) => d.name);
   expect(names).toContain("read_file");
   expect(names).toContain("ask_operator");
-  // Primary Skywalker mounts product mutation tools for DIY tiny/bounded edits.
+  // Primary dispatch mounts product mutation tools for DIY tiny/bounded edits.
   expect(names).toContain("write_file");
   expect(names).toContain("edit_file");
   expect(names).toContain("delete_file");

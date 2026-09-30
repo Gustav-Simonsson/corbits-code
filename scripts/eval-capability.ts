@@ -102,7 +102,7 @@ interface CliOptions {
   allowProviderFallback: boolean;
   /**
    * Exec overlay: run the product path as this closed-fleet director.
-   * Eval/CI override, not single-agent mode. Omitted = skywalker default.
+   * Eval/CI override, not single-agent mode. Omitted = dispatch default.
    */
   director?: string;
 }
@@ -130,7 +130,7 @@ function printUsage(): void {
   --dry-run             List cases × variants only (still requires --provider/--model or --matrix)
   --allow-provider-fallback  Allow resolved provider/model to differ from
                              what was requested (default: hard-fail)
-  --director <id>       Exec overlay: run as this director (default: skywalker).
+  --director <id>       Exec overlay: run as this director (default: dispatch).
                         Eval/CI override, not single-agent mode
   -h, --help            Show help
 `);

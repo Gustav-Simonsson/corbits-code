@@ -187,7 +187,7 @@ describe("sub-agent stop helpers", () => {
 
   const SUMMARY_ONLY_NARRATION = [
     "## Summary",
-    "Checking whether Skywalker write-tool unmount is tested...",
+    "Checking whether dispatch write-tool unmount is tested...",
     "Checking those next.",
   ].join("\n");
 
