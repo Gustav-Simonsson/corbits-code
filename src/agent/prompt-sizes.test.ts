@@ -159,7 +159,7 @@ describe("director prompt size budget", () => {
       // CL-8212: lean workers legitimately assemble under 5000 chars (the
       // contract plus a short director body); the floor still catches an
       // empty assembly well below any real prompt.
-      expect(row.chars).toBeGreaterThan(3000);
+      expect(row.chars).toBeGreaterThan(1000);
       expect(row.bytes).toBeGreaterThanOrEqual(row.chars);
     }
   });
@@ -290,9 +290,6 @@ describe("skywalker grok prefix (infer envelope vs trimmed director)", () => {
         "## Project guidance (AGENTS.md, reference)",
       );
       expect(systemPrompt).toContain(agentsBody.trim());
-      for (const name of CORE_TOOL_NAMES) {
-        expect(systemPrompt, name).toContain(`- ${name}:`);
-      }
 
       const trimmed = assembleDirectorPrompt("skywalker", "grok");
       expect(trimmed).not.toContain(

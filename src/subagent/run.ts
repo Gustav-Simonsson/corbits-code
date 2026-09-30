@@ -89,7 +89,6 @@ import {
   createBackgroundShellRegistry,
   type BackgroundShellExit,
 } from "../shell/background-shell.js";
-import { createShellCollectTool } from "../agent/background-shell-tool.js";
 import { createAttachmentRehydrateTransform } from "../session/attachment-store.js";
 import { tryReadPriorHandoffFile } from "../session/compaction-handoff.js";
 import { gatherEnvironmentCached } from "../agent/environment.js";
@@ -756,11 +755,7 @@ async function runSubAgentInner(
     }));
 
     const inherited = params.inheritMcpTools?.(permissionGate) ?? [];
-    tools = [
-      ...tools,
-      ...coreSubAgentWebTools(inherited),
-      stringTool(createShellCollectTool(backgroundShells)),
-    ];
+    tools = [...tools, ...coreSubAgentWebTools(inherited)];
 
     if (inherited.length > 0) {
       tools = [...tools, ...inherited];

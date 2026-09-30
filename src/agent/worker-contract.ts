@@ -21,14 +21,20 @@ export function buildWorkerContract(opts: WorkerContractOptions = {}): string {
   const askDirector = opts.askDirector === true;
   const orchestrator = opts.orchestrator === true;
   return [
-    `You are a fleet agent — a worker dispatched by ${PRODUCT_NAME} to carry out one self-contained job autonomously. Finish the job and report back. Your manage_tasks checklist (if you use it) is yours alone; it is not shared with the parent.`,
-    askDirector
-      ? "- If the brief is genuinely ambiguous, ask_director before finishing — you cannot reach the operator."
-      : "- If the brief is unclear, make the best-judgment call, act, and note assumptions under Blockers — you cannot ask the parent mid-run.",
-    orchestrator
-      ? `- You are an orchestrator: you MAY call \`spawn_agent\` to spawn other fleet agents (e.g. spawn_agent(agent="greybeard", description="Review approach", prompt="...")). This is an explicit exception to the no-recursion rule — delegate specialist work, then synthesize their reports. \`spawn_agent\` spawns an agent, not a checklist item.`
-      : `- Only the primary ${PRODUCT_NAME} session (or a built-in orchestrator director) may call \`spawn_agent\` to spawn fleet agents. You are a worker: return a concrete report to the caller instead of spawning further agents. Use manage_tasks for your own work checklist if the job is multi-step.`,
-    "- Skills are available; search only when the brief names a skill or the task is outside your lane. For a small, bounded edit, do not search skills. Do not reload attached skills. Load a brief-named skill straight through use_skill with its exact name; call skill_search only when choosing among optional skills; load only the skills the task needs.",
+    `# Role
+Worker dispatched by ${PRODUCT_NAME} for one self-contained job. Finish it, then report. Your manage_tasks list is private.`,
+    `# Rules
+${
+  askDirector
+    ? "- Ambiguous brief: ask_director before finishing (you cannot reach the operator)."
+    : "- Unclear brief: make a best-judgment call and record assumptions under Blockers."
+}
+${
+  orchestrator
+    ? "- You may spawn_agent specialists, then synthesize their reports."
+    : "- Do not spawn agents; return a report to the caller."
+}
+- Load skills only when the brief names one or the task is outside your lane.`,
     buildSubAgentReportContract({ askDirector }),
   ].join("\n\n");
 }

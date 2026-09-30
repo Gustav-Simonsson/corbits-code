@@ -77,7 +77,7 @@ export function resolveShellTimeoutMs(args: {
 export function formatShellTimeoutNotice(timeoutMs: number): string {
   return (
     `[command timed out after ${timeoutMs}ms and was terminated]\n` +
-    `Retry with background:true for long-running commands (builds, tests, dev servers); completion arrives as a later-turn system message, and shell_collect collects or cancels.`
+    `Retry with background:true for long-running commands; the result arrives as a later message. Cancel with stop=shell_id.`
   );
 }
 
@@ -125,8 +125,8 @@ export function advertiseShellGuardTimeout(
     nextProperties["timeout"] = {
       ...(timeout as Record<string, unknown>),
       description: advertiseBackground
-        ? `Timeout in milliseconds (foreground default: ${advertisedDefault}; omit on background:true for no timeout)`
-        : `Timeout in milliseconds (foreground default: ${advertisedDefault})`,
+        ? `ms (foreground default ${advertisedDefault}; omit on background)`
+        : `ms (default ${advertisedDefault})`,
       default: advertisedDefault,
     };
   }
@@ -141,18 +141,24 @@ export function advertiseShellGuardTimeout(
     nextProperties["background"] = {
       type: "boolean",
       description:
-        "Set true to run without holding the turn open (prefer this for builds, test suites, and dev servers). " +
-        "Returns a shell_id immediately; the exit status and output are delivered when the process finishes. " +
-        "Use shell_collect to collect or cancel. Omit timeout for no timeout. " +
-        "Does not change the retained shell cwd.",
+        "Run detached; returns shell_id, result arrives as a later message. No timeout unless set.",
+    };
+    nextProperties["stop"] = {
+      type: "string",
+      description:
+        "shell_id of a background run to cancel (command not needed).",
     };
   } else {
     delete nextProperties["background"];
   }
+  const { required: _required, ...schemaRest } = schema as Record<
+    string,
+    unknown
+  >;
   return {
     ...definition,
     inputSchema: {
-      ...schema,
+      ...(advertiseBackground ? schemaRest : schema),
       properties: nextProperties,
     },
   };
@@ -586,6 +592,24 @@ export function shellGuardPlugin(
   };
   return {
     middleware: (next) => async (call, signal) => {
+      if (
+        call.name === "run_shell" &&
+        typeof call.arguments.stop === "string" &&
+        call.arguments.stop.length > 0
+      ) {
+        const registry = options.getBackgroundShellRegistry?.();
+        const stopped = registry?.cancel(call.arguments.stop) === true;
+        return {
+          callId: call.id,
+          content: stopped
+            ? JSON.stringify({
+                shell_id: call.arguments.stop,
+                status: "cancelling",
+              })
+            : `No running background shell with id ${call.arguments.stop}.`,
+          ...(stopped ? {} : { isError: true }),
+        };
+      }
       if (call.name === "run_shell") {
         return enqueueShell(async () => {
           const command = call.arguments.command;

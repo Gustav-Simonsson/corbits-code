@@ -51,37 +51,10 @@ describe("background shell through the agent toolset", () => {
       const parsed = JSON.parse(String(started.content)) as {
         shell_id: string;
       };
-      const snapshotNow = await toolset.dynamicRunner.run(
-        {
-          id: "bg-collect",
-          name: "shell_collect",
-          arguments: { shell_id: parsed.shell_id, action: "collect" },
-        },
-        new AbortController().signal,
-      );
-      expect(JSON.parse(String(snapshotNow.content))).toMatchObject({
-        status: "running",
-      });
-      const final = await toolset.dynamicRunner.run(
-        {
-          id: "bg-collect2",
-          name: "shell_collect",
-          arguments: {
-            shell_id: parsed.shell_id,
-            action: "collect",
-            wait_ms: 5_000,
-          },
-        },
-        new AbortController().signal,
-      );
-      const result = JSON.parse(String(final.content)) as {
-        status: string;
-        exit_code: number;
-        output: string;
-      };
-      expect(result).toMatchObject({ status: "completed", exit_code: 0 });
-      expect(result.output).toContain("bg-done");
-      await new Promise((r) => setTimeout(r, 50));
+      const deadline = Date.now() + 5_000;
+      while (exits.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
       expect(exits).toHaveLength(1);
       expect(defined(exits[0]).id).toBe(parsed.shell_id);
       const message = buildShellBackgroundMessage(defined(exits[0]));
@@ -97,7 +70,7 @@ describe("background shell through the agent toolset", () => {
     }
   });
 
-  test("shell_collect cancel kills the session's own child process group", async () => {
+  test("run_shell stop kills the session's own child process group", async () => {
     const token = `ic_toolset_cancel_${randomUUID()}`;
     const toolset = await createAgentToolset({
       cwd: process.cwd(),
@@ -119,15 +92,11 @@ describe("background shell through the agent toolset", () => {
       const { shell_id } = JSON.parse(String(started.content)) as {
         shell_id: string;
       };
-      const cancelled = await toolset.dynamicRunner.run(
-        {
-          id: "c-cancel",
-          name: "shell_collect",
-          arguments: { shell_id, action: "cancel" },
-        },
+      const stopped = await toolset.dynamicRunner.run(
+        { id: "c-stop", name: "run_shell", arguments: { stop: shell_id } },
         new AbortController().signal,
       );
-      expect(JSON.parse(String(cancelled.content))).toMatchObject({
+      expect(JSON.parse(String(stopped.content))).toMatchObject({
         status: "cancelling",
       });
       await waitUntilGone(token);
@@ -136,76 +105,18 @@ describe("background shell through the agent toolset", () => {
     }
   });
 
-  test("shell_collect with an aborted signal releases as running without killing the child", async () => {
+  test("run_shell stop on an unknown id is an error", async () => {
     const toolset = await createAgentToolset({
       cwd: process.cwd(),
       permissionGate: gate(process.cwd()),
+      onOperatorGate: async () => ({ kind: "cancel" as const }),
     });
     try {
-      const started = await toolset.dynamicRunner.run(
-        {
-          id: "a-start",
-          name: "run_shell",
-          arguments: {
-            command: "sleep 60",
-            background: true,
-          },
-        },
-        new AbortController().signal,
-      );
-      const { shell_id } = JSON.parse(String(started.content)) as {
-        shell_id: string;
-      };
-      const aborted = new AbortController();
-      aborted.abort(new Error("interrupted by interrupt_agent"));
       const out = await toolset.dynamicRunner.run(
-        {
-          id: "a-collect",
-          name: "shell_collect",
-          arguments: { shell_id, action: "collect", wait_ms: 60_000 },
-        },
-        aborted.signal,
-      );
-      expect(JSON.parse(String(out.content))).toMatchObject({
-        status: "running",
-      });
-      // A live-signal collect still sees the child running: the abort above
-      // released the waiter instead of killing the process. Had the abort
-      // killed it, this would already report completed.
-      const stillThere = await toolset.dynamicRunner.run(
-        {
-          id: "a-collect2",
-          name: "shell_collect",
-          arguments: { shell_id, action: "collect" },
-        },
+        { id: "u-stop", name: "run_shell", arguments: { stop: "nope" } },
         new AbortController().signal,
       );
-      expect(JSON.parse(String(stillThere.content))).toMatchObject({
-        status: "running",
-      });
-      // And the child is still killable: cancel settles it as completed.
-      const cancelled = await toolset.dynamicRunner.run(
-        {
-          id: "a-cancel",
-          name: "shell_collect",
-          arguments: { shell_id, action: "cancel" },
-        },
-        new AbortController().signal,
-      );
-      expect(JSON.parse(String(cancelled.content))).toMatchObject({
-        status: "cancelling",
-      });
-      const final = await toolset.dynamicRunner.run(
-        {
-          id: "a-collect3",
-          name: "shell_collect",
-          arguments: { shell_id, action: "collect", wait_ms: 5_000 },
-        },
-        new AbortController().signal,
-      );
-      expect(JSON.parse(String(final.content))).toMatchObject({
-        status: "completed",
-      });
+      expect(out.isError).toBe(true);
     } finally {
       await toolset.dispose();
     }

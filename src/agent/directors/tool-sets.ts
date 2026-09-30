@@ -16,7 +16,6 @@ export const READ_TOOLS = [
   "list_dir",
   "lsp",
   "run_shell",
-  "shell_collect",
   "web_fetch",
   "web_search",
   ...SKILL_TOOLS,
@@ -50,7 +49,7 @@ export const BUILD_TOOLS = [...READ_TOOLS, ...PRODUCT_WRITE_TOOLS] as const;
  * automatically; path writes come from PRODUCT_WRITE_TOOLS.
  */
 export const DOCS_TOOLS = [
-  ...READ_TOOLS.filter((t) => t !== "run_shell" && t !== "shell_collect"),
+  ...READ_TOOLS.filter((t) => t !== "run_shell"),
   ...PRODUCT_WRITE_TOOLS,
 ] as const;
 

@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
 
-import { CHAT_PROMPT_QUALITY_MARKERS } from "./agent/prompt-contract.js";
 import { buildChatSystemPrompt } from "./agent/prompts.js";
 
-// Sole consumer of CHAT_PROMPT_QUALITY_MARKERS: deleting this test orphans the
-// export (dead-export gate). The markers are the contract between the prompt
-// builders and the reviewer checklist, so the pin stays meaningful.
-test("chat system prompt satisfies system prompt quality markers", () => {
+test("chat system prompt keeps the routing, spawn-brief, and rules sections", () => {
   const prompt = buildChatSystemPrompt();
-  for (const marker of CHAT_PROMPT_QUALITY_MARKERS) {
-    expect(prompt).toContain(marker);
+  for (const heading of ["# Role", "# Route", "# Rules", "# Spawn"]) {
+    expect(prompt).toContain(heading);
   }
+  for (const field of ["goal", "success_criteria", "do_not", "report_focus"]) {
+    expect(prompt).toContain(field);
+  }
+  expect(prompt).toContain("manage_tasks");
 });

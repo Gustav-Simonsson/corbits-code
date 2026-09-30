@@ -558,56 +558,52 @@ const SpawnAgentArgs = type({
 export const spawnAgentToolDefinition: ToolDefinition = {
   name: SPAWN_AGENT_TOOL_NAME,
   description:
-    "Start a worker agent and return IMMEDIATELY with its agent_id — this never blocks on the worker's completion. Pass agent= a director/profile id returned by search_agents, or intent= (one of explore|implement|review|plan|general). The child starts blank. One focused task per worker. success_criteria is required for implement/review (and their default directors). Fire several spawn_agent calls in one turn to start independent lanes in parallel, then reply and end the turn — workers keep running while you are idle. Reports arrive as mailbox mail where mailbox delivery is mounted; where wait_agents is mounted (exec primary), collect with it instead. Do not poll. Excess fan-out is queued rather than refused. requires_tools declares hard tool requirements verified pre-spawn against the worker's capability mount (fail-closed with a reroute hint); a preflight rejection or a mount-time stale_snapshot failure is non-continuable — re-dispatch deliberately, never auto-retry or spawn a speculative successor.",
+    "Start a worker; returns agent_id at once (non-blocking). Worker starts blank: brief it fully. Use agent= (id from search_agents) or intent=. Spawn independent lanes in one turn, then end the turn; reports arrive as mail. success_criteria required for implement/review.",
   inputSchema: {
     type: "object",
     properties: {
       description: {
         type: "string",
-        description: "A short label for the worker job.",
+        description: "Short job label.",
       },
       prompt: {
         type: "string",
-        description: "The actionable goal for the worker.",
+        description: "Goal.",
       },
-      context: { type: "string", description: "Optional durable background." },
+      context: { type: "string", description: "Background." },
       goals: {
         type: "array",
         items: { type: "string" },
-        description:
-          "Optional ordered checklist seeds for the worker's own manage_tasks list.",
+        description: "Seed checklist.",
       },
       intent: {
         type: "string",
         enum: ["explore", "implement", "review", "plan", "general"],
-        description:
-          "Optional spawn intent; selects a closed director when agent= is omitted.",
+        description: "Selects director when agent omitted.",
       },
       success_criteria: {
         type: "array",
         items: { type: "string" },
-        description:
-          "Concrete done checks. Required for implement/review (and their default directors); recommended otherwise. Empty or whitespace-only arrays fail closed when required.",
+        description: "Done checks.",
       },
       do_not: {
         type: "array",
         items: { type: "string" },
-        description: "Optional explicit out-of-scope actions.",
+        description: "Out of scope.",
       },
       report_focus: {
         type: "string",
-        description: "Optional hint for what Findings must cover.",
+        description: "What the report must cover.",
       },
       agent: {
         type: "string",
-        description:
-          "Optional director id (e.g. from search_agents). Alternative to intent=.",
+        description: "Director id from search_agents.",
       },
       requires_tools: {
         type: "array",
         items: { type: "string" },
         description:
-          "Optional hard tool requirements (canonical names, e.g. run_shell). Verified pre-spawn against the worker's capability mount — the spawn fails closed with a reroute hint when a tool is missing, and the mount re-checks at run start. Rejections are non-continuable: re-dispatch deliberately, never auto-retry.",
+          "Hard tool requirements (canonical names). Preflight fails closed when missing.",
       },
     },
     required: ["description", "prompt"],
@@ -626,46 +622,23 @@ export const MAX_WAIT_TIMEOUT_MS = 300_000;
 export const waitAgentsToolDefinition: ToolDefinition = {
   name: "wait_agents",
   description:
-    `Mounted on exec-primary runs only: elsewhere mailbox mail arrives as inbound when workers finish, so spawn then idle instead of polling. ` +
-    `Block until the given agents reach a terminal state (done, failed, or interrupted), or a worker asks its director (awaiting_director), or timeout_ms elapses. ` +
-    `Default mode is "any" (return when the first target finishes or asks). Pass mode="all" to wait until every target is ` +
-    `terminal — except a pending ask_director unblocks immediately regardless of mode so the director can send_input. ` +
-    `Omit targets to wait on this caller's own uncollected fleet — the workers this spawn_agent/` +
-    `wait_agents pair started — never every running session in the shared store. Default timeout ${DEFAULT_WAIT_TIMEOUT_MS}ms, ` +
-    `clamped to a ${MAX_WAIT_TIMEOUT_MS}ms max. A timeout or parent-turn abort is NOT an error and never touches ` +
-    `the workers — they keep running and remain waitable. Live wait status includes "queued" (waiting for a burst ` +
-    `slot), "running", and "awaiting_director". interrupt_agent unblocks this wait immediately with ` +
-    `status "interrupted" (a parent-initiated pause — resume_agent, do not spawn_agent a successor against the still-live worker). ` +
-    `close_agent also unblocks with status "interrupted" but is permanent. Terminal JSON includes stop_reason when the session recorded one ` +
-    `(interrupted, cancelled, incomplete-report, and similar). A "failed" entry with "continuable": true is a recoverable transient ` +
-    `provider failure (retryable/timeout/overload) — terminal, not a timeout and not a stall: do not re-wait it, and you may spawn at most ` +
-    `one successor with the same brief. "failed" without the marker (auth, quota, context-overflow, or other errors) is not continuable — ` +
-    `do not respawn it. Capability preflight rejections and mount-time stale_snapshot failures report failed ` +
-    `without the marker for the same reason — re-dispatch deliberately instead of retrying. awaiting_director is not terminal: re-wait while still pending re-delivers the same question. ` +
-    `Answer with send_input (soft). Do not call this in a tight zero-progress loop: a timeout means the targets are still ` +
-    `queued, running, or awaiting a director answer, not "try again right away" — do other work, reply to the operator, or change the brief. Calling again with the ` +
-    `same targets is a real timed wait, not a spin, but wastes turns if nothing has changed. ` +
-    `Repeated identical waits that keep timing out are exempt from the run's doom-loop guard while ` +
-    `targets stay live — a timeout or still-running result is liveness, not a stall or a crash, so ` +
-    `keep waiting (or do other work) rather than treating it as a failure.`,
+    "Block until targets finish, fail, or ask (awaiting_director), or timeout_ms. mode any (default) or all. Timeout is not an error; workers keep running. Answer awaiting_director with send_input. failed+continuable:true may be respawned once.",
   inputSchema: {
     type: "object",
     properties: {
       targets: {
         type: "array",
         items: { type: "string" },
-        description:
-          "agent_id values to wait on. Omit to wait on this caller's uncollected spawned agents only.",
+        description: "agent_ids; omit for your uncollected workers.",
       },
       timeout_ms: {
         type: "number",
-        description: `Max time to block, in ms. Default ${DEFAULT_WAIT_TIMEOUT_MS}, clamped to ${MAX_WAIT_TIMEOUT_MS}.`,
+        description: `ms; default ${DEFAULT_WAIT_TIMEOUT_MS}, max ${MAX_WAIT_TIMEOUT_MS}.`,
       },
       mode: {
         type: "string",
         enum: ["any", "all"],
-        description:
-          '"any" (default) returns when the first target is terminal or awaiting_director. "all" waits until every target is terminal, but a pending ask still unblocks immediately.',
+        description: "any (default) or all.",
       },
     },
   },
@@ -1969,11 +1942,7 @@ export function createWaitAgentsTool(deps: WaitAgentsDeps): AgentTool {
 export const listAgentsToolDefinition: ToolDefinition = {
   name: "list_agents",
   description:
-    "List the workers this session started with spawn_agent. Does not list siblings or another orchestrator's workers. Each entry is id, " +
-    "director, description, wait status, lifecycle, stop_reason when recorded, and whether the fleet already collected it. " +
-    "When status is awaiting_director, the entry also includes question and question_id. " +
-    "After parked ask_director questions are already surfaced (idle-send wake or a prior list), " +
-    "list_agents returns an error until you answer with send_input (soft) or the ask is dropped. Do not poll list_agents.",
+    "List workers you spawned: id, director, description, status, stop_reason, pending question. Do not poll.",
   inputSchema: {
     type: "object",
     properties: {},

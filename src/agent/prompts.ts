@@ -1,11 +1,7 @@
 import type { EnvironmentInfo } from "./environment.js";
 import type { SkillSummary } from "../extensions/skills.js";
 import type { SessionMode } from "../config/session-mode.js";
-import {
-  coreToolNamesForSessionMode,
-  CORE_TOOL_NAMES,
-  type ToolAvailability,
-} from "./tool-search.js";
+import type { ToolAvailability } from "./tool-search.js";
 import { createSkywalkerSystemPrompt } from "./directors/skywalker/package.js";
 import {
   buildWorkerContract,
@@ -291,63 +287,6 @@ export function buildPromptDisciplineBlock(
   ].join("\n");
 }
 
-const TOOL_SUMMARIES: Record<string, string> = {
-  read: "read a file or tool-output:///{callId} from a prior tool result (prefer over cat/head/tail in the shell). Only read a tool-output:// URI if the truncation notice named one",
-  write: "create or overwrite a file (never shell redirects or heredocs)",
-  edit: "make a surgical edit (exact old_string match, or start_line/end_line line-range mode; never include read's NNNNNN\\t line prefix; substring failures include nearby file text; prefer over sed/awk in the shell)",
-  delete: "delete one file with an explicit outcome (never shell rm)",
-  bash: "run a shell command (builds, tests, git; pass timeout ms to bound long commands; never to read/write/delete files, search trees, or talk to the user)",
-  glob: "find files by name or pattern (bounded; timeout + output caps — safer than open-ended shell find)",
-  grep: "search file contents (bounded; timeout + output caps — safer than open-ended shell grep -r/rg)",
-  list_dir: "list a directory's entries (bounded listing)",
-  lsp: "resolve symbols — goToDefinition, findReferences, hover (prefer before reading huge files)",
-  web_search: "search the web (use instead of curl or wget)",
-  web_fetch: "fetch the content of a URL",
-  spawn_agent:
-    "start a worker agent and return immediately with agent_id; pass returned ids from search_agents as agent=...",
-  wait_agents:
-    "collect spawned workers by agent_id; mounted on exec-primary runs only — elsewhere mailbox mail arrives as inbound, so do not poll; returns awaiting_director when a worker asks, without collecting that session",
-  list_agents:
-    "list this session's spawn_agent workers without blocking; after a parked ask_director is surfaced, returns an error until send_input answers or the ask is dropped — do not poll",
-  search_agents:
-    "find agent profiles by role or team before spawning with spawn_agent(agent=...); default results are id, description, and spawn metadata — pass include_body=true for the loaded system prompt / body",
-  manage_tasks:
-    "maintain your work checklist — create/replace, update status, append, cancel",
-  ask_director:
-    "pause and ask the spawning parent (not the human) a short clarifying question with short option labels; parent answers via send_input; after the cap, proceed with best judgment or put remaining questions in Blockers",
-  submit_output:
-    "signal the task is complete, or complete a workflow step by passing its step id",
-  ask_operator:
-    "pause and ask the user when blocked or genuinely ambiguous; put long rationale in a transcript reply first, then call with a short question and short option labels only",
-  present:
-    "dynamically render aligned/structured output using the layout primitives (stack/row/grid/text etc)",
-  tool_search: "load more tools by capability when you need them",
-  use_skill:
-    "load a listed skill's full instructions before doing work it covers",
-  skill_search:
-    "look up skill descriptions by capability (catalog — call directly, do not tool_search for this)",
-};
-
-const ARCHIVE_TOOL_SUMMARIES: Partial<Record<string, string>> = {
-  read: "read a file, tool-output:///{callId} from a prior tool result, or archive:///{occurrenceId} (prefer over cat/head/tail in the shell). Only read a tool-output:// URI if the truncation notice named one",
-  glob: "find files by name or pattern (bounded; timeout + output caps — safer than open-ended shell find); path archive:/// lists evidence-archive refs",
-  grep: "search file contents (bounded; timeout + output caps — safer than open-ended shell grep -r/rg); path archive:/// searches this session's evidence archive",
-};
-
-export function buildAvailableTools(
-  tools: readonly string[] = CORE_TOOL_NAMES,
-  opts: { advertiseArchive?: boolean } = {},
-): string {
-  const summaries =
-    opts.advertiseArchive === true
-      ? { ...TOOL_SUMMARIES, ...ARCHIVE_TOOL_SUMMARIES }
-      : TOOL_SUMMARIES;
-  const lines = tools.map(
-    (tool) => `- ${tool}: ${summaries[tool] ?? "available"}`,
-  );
-  return ["Tools:", ...lines].join("\n");
-}
-
 export function buildActiveContext(
   date = new Date(),
   cwd = process.cwd(),
@@ -420,43 +359,16 @@ function baseSection(
       buildPromptDisciplineBlock(),
     ]);
   }
-  return joinSections([
-    buildChatRole(sessionMode),
-    buildHarnessFacts({ sessionMode }),
-    buildGuidelines({
-      sessionMode,
-      ...(waitAgentsMounted !== undefined ? { waitAgentsMounted } : {}),
-      ...(guidelineConfig?.omit !== undefined
-        ? { omit: guidelineConfig.omit }
-        : {}),
-    }),
-    buildPromptDisciplineBlock(),
-  ]);
+  return joinSections([buildChatRole(sessionMode)]);
 }
 
 // Name-only skill listing: the model sees what exists without paying for
 // descriptions or bodies. Details come from skill_search; bodies from use_skill.
-export function buildSkillsSection(skills: readonly SkillSummary[]): string {
-  return [
-    "Skills (names only — call skill_search for details, then use_skill to load a body):",
-    skills.map((s) => s.name).join(", "),
-  ].join("\n");
-}
-
-export function buildCorbitsRecoveryCommands(): string {
-  return [
-    "Corbits recovery commands:",
-    "- For provider authentication, login, reauthentication, or credential failures, recommend /connect and name the provider/profile.",
-    "- To switch the active provider or model, recommend /model.",
-    "- For OAuth profiles, never recommend Codex CLI login or API-key setup, and never request or expose secrets.",
-  ].join("\n");
-}
-
 export function buildChatSystemPrompt(
   extensions?: string[],
   env?: EnvironmentInfo,
   baseOverride?: string,
-  skills: readonly SkillSummary[] = [],
+  _skills: readonly SkillSummary[] = [],
   sessionMode: SessionMode = "orchestrator",
   toolAvailability: ToolAvailability = DEFAULT_TOOL_AVAILABILITY,
   guidelineConfig?: GuidelineConfig,
@@ -475,13 +387,7 @@ export function buildChatSystemPrompt(
       toolAvailability.waitAgentsMounted,
       guidelineConfig,
     ),
-    buildAvailableTools(
-      coreToolNamesForSessionMode(sessionMode, toolAvailability),
-      { advertiseArchive: true },
-    ),
-    buildCorbitsRecoveryCommands(),
   ];
-  if (skills.length > 0) sections.push(buildSkillsSection(skills));
   sections.push(contextSection(env));
   if (extensions !== undefined && extensions.length > 0) {
     sections.push(...extensions);
@@ -500,27 +406,21 @@ export function buildSubAgentReportContract(
 ): string {
   const askDirector = opts.askDirector === true;
   return [
-    "Reporting back:",
-    "- Stick to the dispatch brief. Do not invent scope or wander into unrelated work.",
-    "- If the brief lists Success criteria, treat them as the done-definition: when all are met (or you are blocked), stop calling tools and emit the report envelope. Do not keep tooling past done.",
-    "- If the brief lists Do not, respect those constraints; do not invent scope outside Intent / Do not.",
-    '- When done, stop calling tools and reply with ONLY this markdown envelope (prose inside each section is fine; emit all four headings every time in this order, writing "None." under a heading with nothing to report rather than dropping it):',
+    "# Report",
+    '- Stay within the brief. When its Success criteria are met (or you are blocked), stop calling tools and reply with ONLY this envelope, all four headings in order, "None." for empty ones:',
     "",
     "## Summary",
-    "One or two sentences: what you accomplished or concluded.",
-    "",
+    "One or two sentences: outcome.",
     "## Findings",
-    "The substance the parent needs — results, decisions, evidence.",
-    "",
+    "Results, decisions, evidence (exact commands and exit status for checks).",
     "## Blockers",
-    'Open questions, assumptions, or blockers. Write "None." if clear.',
-    "",
+    "Open questions and assumptions.",
     "## Paths",
-    'Key file paths you read or changed (one per line). Write "None." if none.',
+    "Key files read or changed, one per line.",
     "",
     askDirector
-      ? "- This message is the only thing returned to the parent. If the brief is ambiguous, ask_director before finishing; otherwise make the best-judgment call and note assumptions under Blockers. Inbound send_input supersedes the brief."
-      : "- This message is the only thing returned to the parent. Make the best-judgment call, act, and note assumptions under Blockers. Inbound send_input supersedes the brief.",
+      ? "- Only this message returns to the parent. Ask via ask_director if genuinely ambiguous. Inbound send_input supersedes the brief."
+      : "- Only this message returns to the parent. Inbound send_input supersedes the brief.",
   ].join("\n");
 }
 

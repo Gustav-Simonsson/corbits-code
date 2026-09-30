@@ -44,17 +44,13 @@ const CloseAgentArgs = type({
 export const closeAgentToolDefinition: ToolDefinition = {
   name: "close_agent",
   description:
-    "Permanently close a worker session by agent_id, closing its descendants first. Bounded " +
-    `by a ~${Math.round(DEFAULT_CLOSE_DEADLINE_MS / 1000)}s cleanup deadline per session so a wedged worker cannot hang ` +
-    "this call — a session that misses the deadline is still marked shutdown and the call fails " +
-    "instead of reporting success while children may still be live. Unblocks any in-flight wait_agents on these ids immediately with " +
-    "status 'interrupted'. Closing is permanent: a closed session cannot be resumed.",
+    "Permanently close a worker and its descendants. Cannot be resumed.",
   inputSchema: {
     type: "object",
     properties: {
       target: {
         type: "string",
-        description: "agent_id of the session to close.",
+        description: "agent_id.",
       },
     },
     required: ["target"],
@@ -69,21 +65,17 @@ const ResumeAgentArgs = type({
 export const resumeAgentToolDefinition: ToolDefinition = {
   name: "resume_agent",
   description:
-    "Start the next turn on a retained worker that is 'completed' or 'interrupted', reusing its " +
-    "prior context rather than spawning a fresh worker. Returns immediately with status 'running' " +
-    "or 'queued' if the admission window is full; collect the reply with wait_agents. Fails on a " +
-    "session that is still running, was never retained, or was already closed via close_agent " +
-    "(closing is permanent).",
+    "Send the next turn to a completed or interrupted worker, keeping its context. Returns at once; collect the reply as usual.",
   inputSchema: {
     type: "object",
     properties: {
       target: {
         type: "string",
-        description: "agent_id of the retained session to resume.",
+        description: "agent_id.",
       },
       message: {
         type: "string",
-        description: `The new instruction/message for the worker (non-empty, max ${DEFAULT_MAX_ENTRY_CHARS} characters).`,
+        description: "Instruction.",
       },
     },
     required: ["target", "message"],
@@ -314,20 +306,13 @@ const InterruptAgentArgs = type({
 export const interruptAgentToolDefinition: ToolDefinition = {
   name: "interrupt_agent",
   description:
-    "Stop a worker session's current turn while keeping the session and its context intact and " +
-    "reusable — distinct from close_agent, which is permanent. Unblocks any in-flight wait_agents " +
-    "on this id immediately with status 'interrupted'. Works on a queued spawn that has not started " +
-    "run() yet, and on a running turn. The worker's in-flight tool call or " +
-    "inference keeps running in the background (there is no way to hard-stop it without tearing the " +
-    "session down); this only stops the caller from waiting on it and marks the session " +
-    "'interrupted' so resume_agent can pick it back up with full prior context. " +
-    "Fails on a session that is not queued or running.",
+    "Stop a worker's current turn; session stays resumable via resume_agent (close_agent is permanent).",
   inputSchema: {
     type: "object",
     properties: {
       target: {
         type: "string",
-        description: "agent_id of the session to interrupt.",
+        description: "agent_id.",
       },
     },
     required: ["target"],
@@ -381,31 +366,21 @@ const SendInputArgs = type({
 export const sendInputToolDefinition: ToolDefinition = {
   name: "send_input",
   description:
-    "Steer a running worker mid-turn, or answer a pending ask_director. Soft (default): if the " +
-    "worker has a pending ask_director, the message resolves that question (it does not deliver a " +
-    "steer inbound). Otherwise deliver `message` into the live session and return immediately " +
-    "without awaiting a reply and without completing wait_agents. " +
-    "With interrupt:true: stop the current turn then queue `message` as the next-turn followup " +
-    "without awaiting that reply — wait_agents stays live (running/queued) and collects the " +
-    "followup reply when it finishes. Fails on a " +
-    "session that is not currently running an active turn, or when the message is empty / oversize. Nested " +
-    "orchestrators may only target their own descendants.",
+    "Message a running worker, or answer its pending ask_director. interrupt:true stops the current turn first and queues message as the next turn.",
   inputSchema: {
     type: "object",
     properties: {
       target: {
         type: "string",
-        description: "agent_id of the running session to steer.",
+        description: "agent_id.",
       },
       message: {
         type: "string",
-        description: `Instruction to inject (non-empty, max ${DEFAULT_MAX_ENTRY_CHARS} characters).`,
+        description: "Message.",
       },
       interrupt: {
         type: "boolean",
-        description:
-          "When true, interrupt the current turn then queue message as the next-turn followup. " +
-          "When false/omitted, answer a pending ask_director or soft-deliver into the running turn.",
+        description: "Interrupt first.",
       },
     },
     required: ["target", "message"],
