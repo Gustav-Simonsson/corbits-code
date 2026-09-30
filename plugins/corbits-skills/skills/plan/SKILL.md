@@ -7,6 +7,8 @@ description: Author an eng change plan. Does not implement or file issues.
 
 How to produce an engineering change plan. Does not implement. Does not file tracker issues.
 
+Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and tell the operator to `git init` first.
+
 If the change target is too fuzzy to plan, `ask_operator` first.
 
 ## What the plan must contain

@@ -7,6 +7,8 @@ description: Review a branch or pull request diff and report findings.
 
 Use this skill when performing code reviews or pull request reviews.
 
+Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and tell the operator to `git init` first.
+
 ## Classify, Then Recommend a Selected Fleet
 
 First classify the review target, then recommend only the fleet the

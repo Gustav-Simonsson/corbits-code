@@ -7,6 +7,10 @@ description: Per-commit workflow with planner review, build gate, and reviewer l
 
 A disciplined implementation workflow that produces reviewed, verified commits. Load this skill when you want each commit to go through architectural review, build verification, and code review before it lands.
 
+## Preflight
+
+Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and tell the operator to `git init` first. Work in a worktree from `origin/<default-branch>`, never in the main checkout: `use_skill("git-worktrees")` for the commands.
+
 ## Prerequisites
 
 Before using this workflow, load the `style` and `philosophy` skills. Follow their conventions throughout.

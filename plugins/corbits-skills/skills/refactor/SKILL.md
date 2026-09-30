@@ -8,6 +8,10 @@ description: Document a directory's design and plan improvements with the operat
 
 Use this skill to analyze existing code, produce a structured design document, and collaboratively plan improvements for future implementation.
 
+## Preflight
+
+Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and tell the operator to `git init` first. Work in a worktree from `origin/<default-branch>`, never in the main checkout: `use_skill("git-worktrees")` for the commands.
+
 ## Initialization
 
 Before doing anything else, load the `philosophy` skill. The principles in that skill guide how you evaluate design decisions.
