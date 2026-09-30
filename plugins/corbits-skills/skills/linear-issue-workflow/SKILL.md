@@ -109,11 +109,11 @@ Once implementation is complete, run a **whole-branch code review** before pushi
 
 ### Reviewer-of-Record Checks (in-session)
 
-The reviewer-of-record is the agent whose verdict ships — in this workflow, you, the orchestrator. Before delegating any part of the review, run the audits whose value depends on the reviewer-of-record's own eyes on raw output. The canonical command list and patterns live in `code-review`'s _Reviewer-of-Record Checks_ and _Commit-Message Style Audit_ sections; load `code-review` and follow them in this session.
+The reviewer-of-record is the agent whose verdict ships — in this workflow, you, the orchestrator. Before delegating any part of the review, run the audits whose value depends on the reviewer-of-record's own eyes on raw output. The canonical command list and patterns live in `review`'s _Reviewer-of-Record Checks_ and _Commit-Message Style Audit_ sections; load `review` and follow them in this session.
 
 Read the raw output. Stop conditions — fix before continuing:
 
-- Any violation surfaced by the commit-message audits. The canonical pattern lists (prefixes, vague subjects, body issues, length limits) live in `style` and `code-review`'s _Commit-Message Style Audit_; this section does not maintain a copy.
+- Any violation surfaced by the commit-message audits. The canonical pattern lists (prefixes, vague subjects, body issues, length limits) live in `style` and `review`'s _Commit-Message Style Audit_; this section does not maintain a copy.
 - `Bin` marker on any file you did not expect to be binary (source code, markdown, config).
 - Files in the diff outside the issue's scope.
 
@@ -121,13 +121,13 @@ After fixing a stop condition, re-run the in-session checks. Repeat until the ou
 
 ### Subagent review (deeper read)
 
-Dispatch the `critique` subagent for the file-by-file behavioral read, architectural review, and commit-message coherence check. Running these in a subagent keeps the deeper output out of the main context and gives independent eyes on patterns.
+Dispatch the `reviewer` director with `spawn_agent(agent="reviewer")` for the file-by-file behavioral read, architectural review, and commit-message coherence check. Running these in a subagent keeps the deeper output out of the main context and gives independent eyes on patterns.
 
 Brief the subagent with:
 
 - The absolute path to the worktree (it must `cd` there before doing anything else).
-- The base branch to diff against (the remote default branch resolved in Phase 2, e.g. `origin/main`), so `code-review` does not dead-end on its "ask the user" path. Make explicit that the review must cover the full `base..HEAD` range, every commit on the branch.
-- An instruction to load the `code-review` skill and follow its checklist against the current branch, _except_ the items marked _(reviewer-of-record)_ — the orchestrator has already run those.
+- The base branch to diff against (the remote default branch resolved in Phase 2, e.g. `origin/main`), so `review` does not dead-end on its "ask the user" path. Make explicit that the review must cover the full `base..HEAD` range, every commit on the branch.
+- An instruction to load the `review` skill and follow its checklist against the current branch, _except_ the items marked _(reviewer-of-record)_ — the orchestrator has already run those.
 - The Linear issue ID and a one-line summary of the change's _intent_ — what the change is for. "This branch refactors retry logic to use exponential backoff" is fine; "this branch should not introduce blocking calls in the sendPack path" pre-frames findings and is forbidden.
 - A request for findings with `file:line` references — not PR-comment prose.
 - An instruction that the subagent's final message must list every finding verbatim, with no summarization or omission. This prevents collapse during transmission; it does _not_ prevent the more fundamental loss of signals that do not fit a finding shape at all (binary markers, surprising stat counts). Those belong to the reviewer-of-record checks above.
@@ -136,7 +136,7 @@ Do **not** include author-supplied "blocking criteria" or "things to look for" i
 
 ### Fix every finding
 
-Treat the returned findings as a worklist and **fix every one**. The `code-review` skill's "Signal Over Noise" guidance has already filtered out pedantic taste-only nitpicks upstream — anything that survived to the final findings is something the reviewer judged worth the author's time. "Nit," "minor," "stylistic," and "suggestion" describe the reviewer's confidence about severity; they are not dispositions and do not authorize skipping. The only path to leaving a finding unfixed is a Greybeard waiver (see below).
+Treat the returned findings as a worklist and **fix every one**. The `review` skill's "Signal Over Noise" guidance has already filtered out pedantic taste-only nitpicks upstream — anything that survived to the final findings is something the reviewer judged worth the author's time. "Nit," "minor," "stylistic," and "suggestion" describe the reviewer's confidence about severity; they are not dispositions and do not authorize skipping. The only path to leaving a finding unfixed is a Planner waiver (see below).
 
 - Fix issues in additional commits, or via `git rebase -i` with `edit` on the target commit when a fix belongs on an earlier commit (mark the target `edit`, make the fix at the stop, `git commit --amend --no-edit`, `git rebase --continue`).
 - After fixing, re-run the reviewer-of-record checks in-session, then re-dispatch the review subagent against the full branch as it now stands. Every re-review is a fresh, self-contained read of `base..HEAD` exactly as it is — no scoping to the delta from a prior pass, no carryover ledger of earlier findings. The new findings replace the previous set; the previous are gone.
@@ -145,13 +145,13 @@ Treat the returned findings as a worklist and **fix every one**. The `code-revie
 
 ### Waivers
 
-The only path to leaving a finding unfixed is a Greybeard waiver. If you believe a finding should not be fixed — because the "fix" would be pure churn (taste-only rewording, unrelated refactor, change the project has explicitly chosen not to make) or because you actively disagree with the reviewer — dispatch the `greybeard` subagent with the finding, your proposed disposition, and the relevant diff. **A Greybeard "waive" ruling is the waiver** — record it in the disposition note and move on; no further user sign-off is needed. Accept Greybeard's call by default. Escalate to the user only if (a) you actively disagree with Greybeard's ruling, or (b) the Greybeard subagent is unreachable or returns an unusable response. In either case, present both positions (or the failure mode) and let the user decide. Do not route routine waiver requests through the user, and never waive a finding on your own authority.
+The only path to leaving a finding unfixed is a Planner waiver. If you believe a finding should not be fixed — because the "fix" would be pure churn (taste-only rewording, unrelated refactor, change the project has explicitly chosen not to make) or because you actively disagree with the reviewer — dispatch the `planner` subagent with the finding, your proposed disposition, and the relevant diff. **A Planner "waive" ruling is the waiver** — record it in the disposition note and move on; no further user sign-off is needed. Accept Planner's call by default. Escalate to the user only if (a) you actively disagree with Planner's ruling, or (b) the Planner subagent is unreachable or returns an unusable response. In either case, present both positions (or the failure mode) and let the user decide. Do not route routine waiver requests through the user, and never waive a finding on your own authority.
 
-By the time the gate closes, every finding is fixed or Greybeard-waived; the findings themselves are iteration history and are not preserved as a Phase 6 artifact. Hold onto each Greybeard ruling — Phase 6 names the waivers as present-state exceptions on the branch and cites the ruling that authorized each one. Do not keep the fix SHAs, the fixed findings, or the per-iteration log; none of those describe the branch as it stands.
+By the time the gate closes, every finding is fixed or Planner-waived; the findings themselves are iteration history and are not preserved as a Phase 6 artifact. Hold onto each Planner ruling — Phase 6 names the waivers as present-state exceptions on the branch and cites the ruling that authorized each one. Do not keep the fix SHAs, the fixed findings, or the per-iteration log; none of those describe the branch as it stands.
 
 ## Phase 6: Push and PR
 
-Once the Phase 5 gate has cleared (the review returned clean, or every remaining finding has a Greybeard waiver), work through the steps below in order. Drafting precedes confirmation so the user authorizes specific artifacts — the title, body, and self-review comment — rather than a promise about what they will say.
+Once the Phase 5 gate has cleared (the review returned clean, or every remaining finding has a Planner waiver), work through the steps below in order. Drafting precedes confirmation so the user authorizes specific artifacts — the title, body, and self-review comment — rather than a promise about what they will say.
 
 ### Rebase against the remote default branch
 
@@ -164,7 +164,7 @@ Verify the build still passes after rebasing.
 
 ### Re-derive the PR artifacts from the current diff
 
-The PR title, body, and self-review comment are PR-shaped artifacts and are bound by `code-review`'s _Describe the Branch As It Stands_ rule: present-tense statements of what the code _does_, never past-tense narration of how it got there.
+The PR title, body, and self-review comment are PR-shaped artifacts and are bound by `review`'s _Describe the Branch As It Stands_ rule: present-tense statements of what the code _does_, never past-tense narration of how it got there.
 
 Draft from the diff, not from memory. The implementation history is the single largest source of journey framing; memory of the work reliably reproduces it. Read the output of both:
 
@@ -201,24 +201,24 @@ Closes <ISSUE-ID>
 
 ### Self-review comment shape
 
-The comment names the _current_ state of the branch: clean, or carrying named Greybeard-waived exceptions. Never the iteration history, never the prior findings, never the SHAs of fixes.
+The comment names the _current_ state of the branch: clean, or carrying named Planner-waived exceptions. Never the iteration history, never the prior findings, never the SHAs of fixes.
 
 **Clean review (the common case).** A one-line comment body:
 
 ```
-Self-review (`code-review` skill) returned clean.
+Self-review (`review` skill) returned clean.
 ```
 
-**Waivers exist.** Name each waived finding as a present-state exception on the branch. Cite the Greybeard ruling as a present-state authorization, not as past-tense paraphrase. Describe what the current code _does_, not what an earlier iteration had:
+**Waivers exist.** Name each waived finding as a present-state exception on the branch. Cite the Planner ruling as a present-state authorization, not as past-tense paraphrase. Describe what the current code _does_, not what an earlier iteration had:
 
 ```markdown
-## Self-Review (`code-review` skill)
+## Self-Review (`review` skill)
 
 The branch carries the following intentional exceptions, each authorized
-by Greybeard:
+by Planner:
 
 - `<file:line>`: <present-tense description of what the current code
-  does>. Authorized by Greybeard on grounds of <present-tense reason —
+  does>. Authorized by Planner on grounds of <present-tense reason —
   e.g. "churn-avoidance", "alternative violates convention X">.
 ```
 
@@ -245,7 +245,7 @@ EOF
 Post the self-review comment. For the clean case, the single-quoted form is enough (the backticks inside single quotes are literal, not command substitution):
 
 ```bash
-gh pr comment --body 'Self-review (`code-review` skill) returned clean.'
+gh pr comment --body 'Self-review (`review` skill) returned clean.'
 ```
 
 For the waivers case, use a heredoc:

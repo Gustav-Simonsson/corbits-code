@@ -14,7 +14,7 @@ Linear issues for drift.
 ## What this is not
 
 - Not a director. There is no `lexicon` director package, no
-  `src/agent/directors/lexicon/` module, and no Skywalker
+  `src/agent/directors/lexicon/` module, and no dispatch
   classification route. Never call `spawn_agent(agent="lexicon")` —
   this skill runs as a `/lexicon` slash playbook on the primary only.
 - Not a fleet router. It does not assign identity or dispatch workers.

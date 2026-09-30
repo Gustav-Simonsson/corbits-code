@@ -4,7 +4,7 @@ user-invocable: false
 description: Compact coder mode guidance for minimal safe implementation diffs.
 ---
 
-Ponytail is a Builder discipline for keeping implementation diffs small without
+Ponytail is a Coder discipline for keeping implementation diffs small without
 weakening the brief.
 
 Default to `lite`: prefer the shortest clear change, reuse existing helpers and

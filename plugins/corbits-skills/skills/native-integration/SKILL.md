@@ -39,19 +39,19 @@ When a GaaS skill names a Claude/GaaS tool, use the Corbits equivalent. Do not c
 
 `intent="general"` is not a Corbits spawn. Use a closed director id.
 
-GaaS ast-grep invokes `sg` as a CLI. Corbits extras: run `sg` via `bash`. Do not fork the GaaS ast-grep body.
+GaaS ast-grep invokes `sg` as a CLI. Corbits extras: run `sg` via `bash`.
 
 Slash names that differ from GaaS skill ids: `/review` is GaaS `code-review`; `/create-issue` is GaaS `linear-create`. Keep those Corbits names.
 
-GaaS code-review uses "ask the user", "sub-agents"/"subagent", and `typescript-conventions`. Corbits extras: slash stays `/review`; `ask_operator` (tool mapping above); fleet `spawn_agent` for sub-agents; load `typescript` not `typescript-conventions`; findings-only — do not implement fixes; GitHub posting and Linear In Review (this skill). Do not fork the GaaS code-review body.
+GaaS code-review uses "ask the user", "sub-agents"/"subagent", and `typescript-conventions`. Corbits extras: slash stays `/review`; `ask_operator` (tool mapping above); fleet `spawn_agent` for sub-agents; load `typescript` not `typescript-conventions`; findings-only — do not implement fixes; GitHub posting and Linear In Review (this skill).
 
-GaaS refactor says "ask clarifying questions" / "ask the user". Corbits extras: `ask_operator` (tool mapping above). Do not fork the GaaS refactor body.
+GaaS refactor says "ask clarifying questions" / "ask the user". Corbits extras: `ask_operator` (tool mapping above).
 
-GaaS scribe uses the `question` tool. Corbits extras: `ask_operator` (tool mapping above). Do not fork the GaaS scribe body.
+GaaS scribe uses the `question` tool (now `ask_operator` in the Corbits body). Corbits extras: `ask_operator` (tool mapping above).
 
 When GaaS implement says you are orchestrated by karen, that is the Corbits primary (Dispatch). Route those disposition decisions through the primary, not a worker.
 
-GaaS implement "Initial Planning" / Greybeard-before-code is not `/plan`. Substantial coder work consumes a planner / `/plan` plan (files, acceptance criteria, non-goals, risks, ordered steps) and blocks if that plan is missing. Tiny parent-DIY stays plan-optional. `/plan` and planner author; they do not ship. `/implement` does not steal planning from `/plan`. Do not fork the GaaS implement body.
+GaaS implement "Initial Planning" / planner-before-code is not `/plan`. Substantial coder work consumes a planner / `/plan` plan (files, acceptance criteria, non-goals, risks, ordered steps) and blocks if that plan is missing. Tiny parent-DIY stays plan-optional. `/plan` and planner author; they do not ship. `/implement` does not steal planning from `/plan`.
 
 ## Linear claim-first
 

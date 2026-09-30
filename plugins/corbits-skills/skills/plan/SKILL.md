@@ -22,5 +22,5 @@ When requirements are fuzzy, put open questions under Blockers instead of invent
 ## What this is not
 
 - Not `/create-issue`. If the operator wants tickets, they use `/create-issue` after the plan.
-- Not an architecture gate. Greybeard reviews approach; this skill only authors the plan.
+- Not an architecture gate. Planner reviews approach; this skill only authors the plan.
 - Not implementation. Do not ship the change.
