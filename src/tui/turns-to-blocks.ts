@@ -1,3 +1,4 @@
+import { canonicalToolName } from "../agent/canonical-tool-name.js";
 import type {
   ContentBlock as RuntimeContentBlock,
   ConversationTurn,
@@ -166,7 +167,11 @@ function finalizeResumeToolBlocks(
   // so an errored or missing result must not leave the raw rows behind.
   for (let i = 0; i < blocks.length; i += 1) {
     const call = blocks[i];
-    if (call?.type !== "tool_call" || call.name !== "manage_tasks") continue;
+    if (
+      call?.type !== "tool_call" ||
+      canonicalToolName(call.name) !== "manage_tasks"
+    )
+      continue;
     indicesToRemove.add(i);
     const resultIndex =
       call.callId !== undefined

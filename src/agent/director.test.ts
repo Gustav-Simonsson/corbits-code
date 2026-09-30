@@ -1901,6 +1901,9 @@ describe("chatDirector LSP auto-activation", () => {
   test.each([
     { tool: "read_file", path: "src/foo.ts", expected: [lspEmit] },
     { tool: "edit_file", path: "lib/bar.rs", expected: [lspEmit] },
+    // Wire names the model actually emits; the director must resolve them.
+    { tool: "read", path: "src/foo.ts", expected: [lspEmit] },
+    { tool: "edit", path: "lib/bar.rs", expected: [lspEmit] },
     // Non-code file.
     { tool: "read_file", path: "README.md", expected: [] },
     // Failed result never activates.

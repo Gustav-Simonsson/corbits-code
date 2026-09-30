@@ -6,6 +6,7 @@
  * later waves can bind real agent APIs). Not the production CLI entry.
  */
 
+import { canonicalToolName } from "../agent/canonical-tool-name.js";
 import {
   cancelItem,
   createSessionQueue,
@@ -1005,8 +1006,9 @@ export function flushStreamRowUpdates(shell: AppShell): void {
 function applyToolCall(
   shell: AppShell,
   bag: BridgeBag,
-  event: Extract<BridgeInboundEvent, { type: "tool_call" }>,
+  raw: Extract<BridgeInboundEvent, { type: "tool_call" }>,
 ): void {
+  const event = { ...raw, name: canonicalToolName(raw.name) };
   if (event.name === MANAGE_TASKS_TOOL_NAME) {
     // Remembered so the matching result is dropped too — suppressing only the
     // call would leave its result to land as an unpaired row. Checklist lives
@@ -1057,8 +1059,9 @@ function applyToolCall(
 function applyToolResult(
   shell: AppShell,
   bag: BridgeBag,
-  event: Extract<BridgeInboundEvent, { type: "tool_result" }>,
+  raw: Extract<BridgeInboundEvent, { type: "tool_result" }>,
 ): void {
+  const event = { ...raw, name: canonicalToolName(raw.name) };
   if (event.callId !== undefined && bag.panelOnlyCallIds.delete(event.callId))
     return;
   const result = toolResultRow({
