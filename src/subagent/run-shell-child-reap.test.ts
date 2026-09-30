@@ -6,7 +6,7 @@
  * reapLiveChildren (SIGKILL the child process groups, 2s reap wait), then
  * agent.close() and the session-stream drain are awaited — voided, not hung
  * on, when the reap reports leftovers. Interrupt additionally releases
- * parked shell_collect waiters so a worker blocked in shell output
+ * parked registry waiters so a worker blocked in shell output
  * collection comes back as still-running instead of wedging the run.
  *
  * These tests drive the real `runSubAgent` with a stub agent whose `send`

@@ -658,7 +658,7 @@ export function buildMailboxMailMessage(text: string): InboundMessage {
 }
 
 // Preview cap for a background shell's inline output; the full output stays in
-// the registry (shell_collect) and, when truncated, in the spill blob.
+// the registry and, when truncated, in the spill blob.
 const BACKGROUND_SHELL_PREVIEW_CHARS = 2_000;
 
 /**

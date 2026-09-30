@@ -442,8 +442,8 @@ export async function createAgentToolset(
     toolAvailability = { languageServerAvailable: true },
   } = args;
   let mcpServersSource = args.mcpServersSource ?? "none";
-  // One registry per toolset: run_shell background:true starts here, the
-  // shell_collect tool and dispose read the same instance.
+  // One registry per toolset: run_shell background:true starts here, dispose
+  // reads the same instance.
   const backgroundShells = createBackgroundShellRegistry({
     ...(args.onBackgroundShellExit !== undefined
       ? {

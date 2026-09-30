@@ -9,7 +9,7 @@ import {
 // process keeps running past the end of the turn, so tool.boundary fires and
 // queued steers land while builds, test suites, and dev servers run. On exit
 // the result is pushed to the host via onExit (which delivers it to the
-// reactor as a system message on a later turn); shell_collect retrieves or
+// reactor as a system message on a later turn); run_shell stop=<id>
 // cancels by id.
 
 export const MAX_RUNNING_BACKGROUND_SHELLS = 8;
@@ -159,7 +159,7 @@ export function createBackgroundShellRegistry(
     // every settle path below.
     const clearTimer = (): void => clearTimeout(timer);
     // Per-call timeout only — background has no 120s default. Cancel reuses
-    // killProcessTree (same path as shell_collect action=cancel).
+    // killProcessTree (same path as run_shell stop=<id>).
     if (args.timeoutMs !== undefined && args.timeoutMs > 0) {
       timer = setTimeout(() => {
         killProcessTree(child);

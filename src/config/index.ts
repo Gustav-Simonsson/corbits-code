@@ -730,7 +730,7 @@ Flags:
   --profile <name>            settings profile
   -p                          one-shot prompt (same as exec / run)
   --resume [<session-id>]     interactive picker, or reopen a session; with exec/-p the id is required
-  --director <id>             exec-only: run as this director (default: skywalker)
+  --director <id>             exec-only: run as this director (default: dispatch)
   --dangerously-skip-permissions, --yolo
                                skip permission prompts for this process only (--yolo alias);
                                --auto --yolo uses yolo mode (catastrophic denials remain);

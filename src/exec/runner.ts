@@ -237,12 +237,12 @@ export function execUserFailureMessage(
 }
 
 /**
- * Exec-primary director overlay. Omit / skywalker keep the product default
+ * Exec-primary director overlay. Omit / dispatch keep the product default
  * (`loadSessionChatPrompt` + advertised session tools). Any other closed-fleet
  * id uses the package prompt and allowlist. Worker effort/nudge are not applied.
  */
 export interface ExecDirectorOverlay {
-  /** Package system prompt; omitted on the skywalker default path. */
+  /** Package system prompt; omitted on the dispatch default path. */
   systemPrompt?: string;
   /** `pkg.tools.allow` (fleet tools stripped when `maySpawn` is false). */
   advertisedAllow?: readonly string[];
@@ -252,11 +252,7 @@ export interface ExecDirectorOverlay {
 export function resolveExecDirectorOverlay(
   director: DirectorId | undefined,
 ): ExecDirectorOverlay {
-  if (
-    director === undefined ||
-    director === "dispatch" ||
-    (director as string) === "skywalker"
-  ) {
+  if (director === undefined || director === "dispatch") {
     return { mountFleet: true };
   }
   return resolveExecDirectorOverlayForPackage(DIRECTOR_REGISTRY[director]);

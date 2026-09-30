@@ -213,7 +213,7 @@ describe("formatCapabilityUnavailable", () => {
       {
         code: "missing_tool",
         tool: "spawn_agent",
-        alternatives: ["skywalker"],
+        alternatives: ["dispatch"],
         detail: 'Tier 3 leaf directors cannot mount fleet verb "spawn_agent"',
       },
       "test-worker",

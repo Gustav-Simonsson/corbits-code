@@ -314,6 +314,26 @@ describe("createToolSearchTool skills", () => {
     expect(out).toContain("use_skill");
     expect(out).toContain("- scribe: write docs");
   });
+
+  test("a skill hit still waits for a connecting server so its tools mount", async () => {
+    const live: ToolDefinition[] = [];
+    const tool = createToolSearchTool({
+      search: (query) => createToolIndex(() => live).search(query),
+      searchSkills: () => ["- linear-triage: triage issues"],
+      lookup: (name) => live.find((def) => def.name === name),
+      awaitPendingConnections: async () => {
+        live.push({
+          name: "mcp__linear__create_issue",
+          description: "Create an issue in the tracker",
+          inputSchema: { type: "object", properties: {}, required: [] },
+        });
+        return 0;
+      },
+    });
+    const out = await call(tool, { query: "linear tracker" });
+    expect(out).toContain("mcp__linear__create_issue");
+    expect(out).toContain("- linear-triage: triage issues");
+  });
 });
 
 function call(

@@ -127,7 +127,7 @@ export function advertisedToolNamesForSessionMode(
 // but unadvertised and is excluded from tool_search (use glob).
 // web_fetch / web_search are catalog (not deferred): URL reads and search are
 // first-class primary work; requiring tool_search before web_fetch caused
-// thrash on web-bait and contradicted the skywalker "already mounted" rule.
+// thrash on web-bait and contradicted the dispatch "already mounted" rule.
 export const CATALOG_TOOL_NAMES: readonly string[] = [
   "glob",
   "grep",
@@ -439,11 +439,7 @@ export function createToolSearchTool(deps: ToolSearchDeps): AgentTool {
         skillLines.length > 0
           ? `\n\nSkills (load with use_skill):\n${skillLines.join("\n")}`
           : "";
-      if (
-        names.length === 0 &&
-        skillLines.length === 0 &&
-        deps.awaitPendingConnections !== undefined
-      ) {
+      if (names.length === 0 && deps.awaitPendingConnections !== undefined) {
         // Tier 1 — miss while connectors start up: wait briefly, then
         // re-search so late-mounting tools land. The race bounds even a stuck
         // dependency (hung OAuth) — undefined means the wait itself timed out.
@@ -474,7 +470,7 @@ export function createToolSearchTool(deps: ToolSearchDeps): AgentTool {
               : stillPending === 1
                 ? "1 connector is still connecting"
                 : `${stillPending} connectors are still connecting`;
-          return `No tools matched "${query}" yet — ${detail}. Retry this search shortly.`;
+          return `No tools matched "${query}" yet — ${detail}. Retry this search shortly.${skillBlock}`;
         }
       }
       if (names.length === 0 && skillLines.length > 0) {

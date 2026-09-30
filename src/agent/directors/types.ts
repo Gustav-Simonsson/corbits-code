@@ -29,7 +29,7 @@ export type TaskIntent =
  * Fleet authority tier (CL-6941). Runtime-enforced at the tool-mount point in
  * subagent/run.ts and by subagent/authority.ts — never by prompt wording.
  *
- * - "orchestrator": Tier 1, primary (skywalker). Full fleet control over the
+ * - "orchestrator": Tier 1, primary (dispatch). Full fleet control over the
  *   whole tree.
  * - "nested-orchestrator": Tier 2, scoped to its own subtree (no closed
  *   director uses this tier today). May manage only its own descendants,

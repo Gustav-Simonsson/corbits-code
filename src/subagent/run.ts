@@ -491,7 +491,7 @@ export function shouldRequireEvidence(input: {
   intent?: TaskIntent;
   directorId?: string;
 }): boolean {
-  return input.directorId === "reviewer" || input.directorId === "critic";
+  return input.directorId === "reviewer";
 }
 
 /**
@@ -501,11 +501,7 @@ export function shouldRequirePlanSubstance(input: {
   intent?: TaskIntent;
   directorId?: string;
 }): boolean {
-  return (
-    input.intent === "plan" ||
-    input.directorId === "planner" ||
-    input.directorId === "counsel"
-  );
+  return input.intent === "plan" || input.directorId === "planner";
 }
 
 const submitResultDefinition: ToolDefinition = {
@@ -643,14 +639,14 @@ async function runSubAgentInner(
   const backgroundShells = createBackgroundShellRegistry({
     onExit: (exit) => backgroundExitSink?.(exit),
   });
-  // Intern / migrator (and any surface that filters out shell_collect) must
-  // not spawn background children they cannot collect. The getter is live so
-  // the capability filter below can unwire it before the first tool call.
-  let backgroundCollectMounted = true;
+  // A worker whose capability filter drops run_shell has no bash to detach
+  // from. The getter is live so the filter below can unwire it before the
+  // first tool call.
+  let backgroundShellsMounted = true;
   // Live: read_file PDF diagnosis asks whether this worker can run pdftotext
   // via bash. The capability filter below may unmount run_shell after the
   // plugin stack is built, so the getter is flipped in the same place as
-  // backgroundCollectMounted.
+  // backgroundShellsMounted.
   let hostCommandsMounted = true;
   // Child tools resolve spills against the child's own store first, then
   // the parent's: parent tool-output:// URIs handed in the brief must
@@ -685,7 +681,7 @@ async function runSubAgentInner(
         canExecuteHostCommands: () => hostCommandsMounted,
       },
       getBackgroundShellRegistry: () =>
-        backgroundCollectMounted ? backgroundShells : undefined,
+        backgroundShellsMounted ? backgroundShells : undefined,
       getShellOutputFeeds: () => childShellOutputFeed,
       getBlobWriter: () => childBlobWriter,
       getContextDir: () => childContextDir,
@@ -816,29 +812,10 @@ async function runSubAgentInner(
     ) {
       tools = [...tools, createApplyPatchTool(params.cwd)];
     }
-    backgroundCollectMounted = tools.some(
-      (tool) => tool.definition.name === "shell_collect",
-    );
     hostCommandsMounted = tools.some(
       (tool) => canonicalToolName(tool.definition.name) === "run_shell",
     );
-    if (!backgroundCollectMounted) {
-      tools = tools.map((tool) =>
-        tool.definition.name === "run_shell"
-          ? {
-              ...tool,
-              definition: advertiseEditFileLineRange(
-                advertiseShellGuardTimeout(
-                  tool.definition,
-                  shellTimeout?.defaultMs,
-                  shellTimeout?.maxMs,
-                  false,
-                ),
-              ),
-            }
-          : tool,
-      );
-    }
+    backgroundShellsMounted = hostCommandsMounted;
 
     // Every sub-agent is an agent: multi-step jobs get their own manage_tasks
     // checklist. The handler is local to this loop; parent and child never share
@@ -1511,8 +1488,8 @@ async function runSubAgentInner(
     // Aborting the send signal only rejects the promise; the child reactor keeps
     // running until close() (same hard-stop rule as the parent in runner.ts).
     closeOnAbort = (): void => {
-      // Parent abort / deadline / close_agent: unpark shell_collect waiters so
-      // a worker blocked on collect cannot wedge teardown. interrupt_agent is
+      // Parent abort / deadline / close_agent: unpark any registry waiters so
+      // teardown cannot wedge on one. interrupt_agent is
       // the keep-alive path (releaseWaiters only, children stay).
       backgroundShells.releaseWaiters();
       backgroundShells.disposeAll("parent abort");
@@ -1566,10 +1543,8 @@ async function runSubAgentInner(
       };
       // Interrupt only fires interruptController — never runController/
       // close, so it cannot hang teardown on a wedged agent.close. Release
-      // parked shell_collect waiters too: the interrupt settles the turn
-      // while the session (and its live shell children) stays alive, so a
-      // worker parked in shell output collection comes back as
-      // still-running instead of wedging the run past every deadline.
+      // parked registry waiters too: the interrupt settles the turn while the
+      // session (and its live shell children) stays alive.
       const interrupt = (): void => {
         backgroundShells.releaseWaiters();
         if (!interruptController.signal.aborted) {
@@ -1867,7 +1842,7 @@ async function runSubAgentInner(
     // A persisted, cleanly-completed session skips teardown here — it
     // stays open until close_agent (or a later failed/aborted run) tears it
     // down.
-    if (!persisting || !backgroundCollectMounted) {
+    if (!persisting || !backgroundShellsMounted) {
       backgroundShells.disposeAll("sub-agent closed");
     }
     if (!persisting) {

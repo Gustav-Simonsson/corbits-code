@@ -1,6 +1,6 @@
 /**
  * Persist close_agent must surface a leftover-child posix dispose, not treat
- * it as a successful bounded close. Intern persist (no shell_collect) must
+ * it as a successful bounded close. A persist run without run_shell must
  * still disposeAll leftover registry children even though the session stays
  * retained.
  */
@@ -153,7 +153,7 @@ describe("persist close_agent leftover dispose", () => {
 });
 
 describe("worker persist reaps leftover registry children", () => {
-  test("a leftover background child is disposeAll'd even though the worker session is retained", async () => {
+  test("a worker without run_shell has leftover background children disposeAll'd on persist", async () => {
     const cwd = await tmpSubAgentCwd("corbits-worker-persist-reap-");
     const token = `ic_worker_persist_${randomUUID()}`;
     let registry: BackgroundShellRegistry | undefined;
@@ -217,7 +217,7 @@ describe("worker persist reaps leftover registry children", () => {
                   directorId: "coder",
                   capabilities: {
                     mode: "allow",
-                    tools: ["run_shell", "read_file"],
+                    tools: ["read_file"],
                   },
                   onAgentReady: handles.onAgentReady,
                 }),

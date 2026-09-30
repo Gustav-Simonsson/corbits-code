@@ -99,7 +99,7 @@ export interface TurnState {
    * id per name — the latest registration wins — so when the mapping-owning
    * sibling resolves first and clears that slot, the leftover earlier call
    * would otherwise lose its name and (for stall-bounded polls like
-   * `shell_collect`) its stall budget. See `registerActiveCall`.
+   * `wait_agents`) its stall budget. See `registerActiveCall`.
    */
   readonly callNameById: Readonly<Record<string, string>>;
   /**

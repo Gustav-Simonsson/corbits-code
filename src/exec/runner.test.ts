@@ -8,7 +8,6 @@ import {
   DISPATCH_TOOLS,
   REVIEW_TOOLS,
 } from "../agent/directors/tool-sets.js";
-import type { DirectorId } from "../agent/directors/types.js";
 import {
   advertisedToolNamesForSessionMode,
   createToolIndex,
@@ -602,10 +601,6 @@ describe("resolveExecDirectorOverlay", () => {
     ).toBeUndefined();
     expect(resolveExecDirectorOverlay("dispatch").mountFleet).toBe(true);
     expect(resolveExecDirectorOverlay("dispatch").systemPrompt).toBeUndefined();
-    expect(
-      resolveExecDirectorOverlay("skywalker" as unknown as DirectorId)
-        .mountFleet,
-    ).toBe(true);
   });
 });
 

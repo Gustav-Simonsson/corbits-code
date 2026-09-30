@@ -86,7 +86,6 @@ export const KNOWN_CAPABILITY_ENGINES: readonly string[] = [
   "search_files",
   "list_dir",
   "lsp",
-  "shell_collect",
   "web_fetch",
   "web_search",
   "skill_search",
@@ -187,7 +186,7 @@ export function rerouteAlternatives(canonical: string): readonly string[] {
   const want = canonicalToolName(canonical);
   const out: string[] = [];
   for (const pkg of Object.values(DIRECTOR_REGISTRY)) {
-    if (pkg.id === "dispatch" || (pkg.id as string) === "skywalker") continue;
+    if (pkg.id === "dispatch") continue;
     const capabilities = packageToCapabilities(pkg);
     if (capabilities === undefined) {
       out.push(pkg.id);
@@ -211,12 +210,7 @@ export function rerouteAlternatives(canonical: string): readonly string[] {
  */
 export function leafTierAlternatives(): readonly string[] {
   return Object.values(DIRECTOR_REGISTRY)
-    .filter(
-      (pkg) =>
-        pkg.id !== "dispatch" &&
-        (pkg.id as string) !== "skywalker" &&
-        pkg.tier === "leaf",
-    )
+    .filter((pkg) => pkg.id !== "dispatch" && pkg.tier === "leaf")
     .map((pkg) => pkg.id)
     .sort()
     .slice(0, 3);

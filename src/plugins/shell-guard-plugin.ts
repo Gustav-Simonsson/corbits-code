@@ -90,9 +90,8 @@ export function formatShellTimeoutNotice(timeoutMs: number): string {
  * Schema `default` is the foreground omit path. Description says omit
  * timeout on background:true so the model does not copy 120000 onto
  * background calls (a copied value becomes a requested timeout and kills
- * the job). Surfaces that do not mount shell_collect pass
- * advertiseBackground=false so background is not advertised without a
- * collect path.
+ * the job). Callers without a background registry pass
+ * advertiseBackground=false so background is not advertised.
  */
 export function advertiseShellGuardTimeout(
   definition: ToolDefinition,

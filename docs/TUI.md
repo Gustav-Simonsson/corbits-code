@@ -206,9 +206,9 @@ past `STALL_TIMEOUT_MS`. That includes a stream that started producing
 tokens and then went dead, a wait for the model's next response that never
 arrives (right after submit, after a tool batch resolves, or after compact
 continuation re-entry), and an in-flight poll the per-tool execution
-watchdog leaves unarmed (`shell_collect`, `ask_director`). TUI primary does
+watchdog leaves unarmed (`wait_agents`, `ask_director`). TUI primary does
 not mount `wait_agents` — mailbox mail is the collect path.
-Concurrent same-name `shell_collect` polls still share one `callIdByName`
+Concurrent same-name polls still share one `callIdByName`
 slot (one id per name); the leftover stays named in the per-id
 `callNameById` map, so a sibling collect finishing does not drop the stall
 bound. The usual single-collect shape stays bounded too, including after a

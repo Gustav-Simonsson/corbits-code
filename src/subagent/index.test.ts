@@ -391,7 +391,6 @@ describe("sub-agent stop helpers", () => {
 
   test("shouldRequireEvidence is armed for the reviewer director id", () => {
     expect(shouldRequireEvidence({ directorId: "reviewer" })).toBe(true);
-    expect(shouldRequireEvidence({ directorId: "critic" })).toBe(true);
   });
 
   test("shouldRequireEvidence is off for other directors even with intent=review", () => {
@@ -485,7 +484,6 @@ describe("sub-agent stop helpers", () => {
 
   test("shouldRequirePlanSubstance is armed for plan intent or planner, not other directors", () => {
     expect(shouldRequirePlanSubstance({ directorId: "planner" })).toBe(true);
-    expect(shouldRequirePlanSubstance({ directorId: "counsel" })).toBe(true);
     expect(shouldRequirePlanSubstance({ intent: "plan" })).toBe(true);
     expect(
       shouldRequirePlanSubstance({ intent: "plan", directorId: "planner" }),

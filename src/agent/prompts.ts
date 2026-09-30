@@ -74,15 +74,15 @@ export function buildHarnessFacts(
     "Harness facts:",
     ...(subAgent
       ? [
-          "- Change files with write/edit and remove files with delete; shell file-writes and deletions are blocked.",
+          "- Change and remove files with the file-edit tools; shell file-writes and deletions are blocked.",
         ]
       : [
-          "- Change files with write/edit and remove files with delete for tiny/single-file/one-route bounded edits. Spawn coder for substantial/multi-file/parallel/specialist work. Docs/design still spawn shakespeare/designer except one-line fixes.",
+          "- Change and remove files with the file-edit tools for tiny/single-file/one-route bounded edits. Spawn coder for substantial/multi-file/parallel/specialist work. Docs/design still spawn shakespeare/designer except one-line fixes.",
           "- Shell file-writes and deletions are blocked; never use echo/heredoc/sed/rm as a substitute for product tools. Path tools are the DIY surface.",
         ]),
     "- Use the provided tools for file reads/searches instead of shelling out as a substitute.",
     "- read accepts a filesystem path or a tool-output:///{callId} URI from a prior tool result when the harness exposes one. Only read a tool-output:// URI if the truncation notice on that result named one; do not re-read a complete inline result.",
-    "- bash defaults to a 120s foreground timeout; pass timeout to override with no ceiling. Prefer background:true for builds, test suites, and dev servers: it returns a shell_id at once, the result is delivered when the process finishes (foreground runs hold steers; background runs do not), and shell_collect collects or cancels later. background does not change the retained shell cwd and has no default timeout.",
+    "- bash defaults to a 120s foreground timeout; pass timeout to override with no ceiling. Prefer background:true for builds, test suites, and dev servers: it returns a shell_id at once, the result is delivered when the process finishes (foreground runs hold steers; background runs do not), and stop=<shell_id> cancels it. background does not change the retained shell cwd and has no default timeout.",
     "- Shell find, rg, and grep -r are blocked — they can walk huge trees and OOM the host. Prefer the bounded grep/glob tools, and do not substitute another unbounded walk (fd, ls -R, scripted os.walk).",
     ...(subAgent
       ? [

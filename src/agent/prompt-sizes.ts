@@ -79,8 +79,8 @@ export type PromptSizeFamily = "default" | "muse" | "grok" | "claude" | "gpt";
 /**
  * Pre-filter mount names in run.ts install order: posix base (TOOL_NAMES,
  * shared with createPosixTools) + delete_file / lsp plugin tools
- * (buildCorePosixToolPlugins) + core web tools (coreSubAgentWebTools) +
- * shell_collect (run.ts). Codex natives are not mounted.
+ * (buildCorePosixToolPlugins) + core web tools (coreSubAgentWebTools).
+ * Codex natives are not mounted.
  */
 function preFilterMountNames(): readonly string[] {
   return [
