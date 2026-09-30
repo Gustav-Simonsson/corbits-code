@@ -6,6 +6,10 @@ import { canonicalToolName } from "./canonical-tool-name.js";
 import {
   advertisedToolName,
   authzParityDefinitions,
+  foldFileToolNames,
+  projectToolDefinitions,
+  toolProfileForModel,
+  translateUpdatePlanArgs,
   withAuthzParityDefinitions,
   WIRE_TO_ENGINE,
 } from "./tool-aliases.js";
@@ -391,6 +395,83 @@ describe("withAuthzParityDefinitions", () => {
       "run_shell",
       "bash",
       "shell",
+    ]);
+  });
+});
+
+describe("per-family tool profiles", () => {
+  const engines = [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "delete_file",
+    "run_shell",
+    "search_files",
+    "manage_tasks",
+    "use_skill",
+    "web_fetch",
+    "web_search",
+    "ask_operator",
+    "wait_agents",
+  ];
+
+  test("every advertised name in every profile dispatches back to its engine", () => {
+    for (const profile of ["default", "gpt"] as const) {
+      for (const engine of engines) {
+        expect(canonicalToolName(advertisedToolName(engine, profile))).toBe(
+          engine,
+        );
+      }
+    }
+  });
+
+  test("a profile never advertises two names for one engine", () => {
+    for (const profile of ["default", "gpt"] as const) {
+      const wires = engines.map((e) => advertisedToolName(e, profile));
+      expect(new Set(wires).size).toBe(wires.length);
+    }
+  });
+
+  test("gpt advertises update_plan with the plan schema its dispatcher accepts", () => {
+    const [projected] = projectToolDefinitions(
+      [posixDef("manage_tasks")],
+      "gpt",
+    );
+    if (projected === undefined) throw new Error("expected a projection");
+    const props = (projected.inputSchema as { properties: object }).properties;
+    expect(projected.name).toBe("update_plan");
+    expect(Object.keys(props)).toContain("plan");
+    expect(Object.keys(props)).not.toContain("tasks");
+    expect(
+      translateUpdatePlanArgs({
+        plan: [{ step: "a", status: "in_progress" }],
+      }),
+    ).toMatchObject({ action: "create" });
+  });
+
+  test("model families select the profile", () => {
+    expect(
+      toolProfileForModel({ providerName: "openai", model: "gpt-5-codex" }),
+    ).toBe("gpt");
+    expect(
+      toolProfileForModel({
+        providerName: "anthropic",
+        model: "claude-sonnet-5-5",
+      }),
+    ).toBe("default");
+  });
+
+  test("gpt folds write/edit/delete into apply_patch only", () => {
+    expect(foldFileToolNames(["read", "write", "edit", "bash"], "gpt")).toEqual(
+      ["read", "apply_patch", "bash"],
+    );
+    expect(foldFileToolNames(["read", "bash"], "gpt")).toEqual([
+      "read",
+      "bash",
+    ]);
+    expect(foldFileToolNames(["write", "edit"], "default")).toEqual([
+      "write",
+      "edit",
     ]);
   });
 });

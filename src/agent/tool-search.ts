@@ -11,7 +11,11 @@ import {
 } from "./lexical-rank.js";
 import type { SessionMode } from "../config/session-mode.js";
 import { sessionModeEnablesSubAgents } from "../config/session-mode.js";
-import { advertisedToolName, projectToolDefinition } from "./tool-aliases.js";
+import {
+  advertisedToolName,
+  projectToolDefinition,
+  type ToolProfile,
+} from "./tool-aliases.js";
 import { canonicalToolName } from "./canonical-tool-name.js";
 
 // Tools whose full schema is always advertised to the model. Everything else is
@@ -180,13 +184,14 @@ export function advertisedTools(
   all: readonly ToolDefinition[],
   activated: readonly string[] = [],
   builtInPrefix: readonly string[] = ADVERTISED_TOOL_NAMES,
+  profile: ToolProfile = "default",
 ): ToolDefinition[] {
   const byName = new Map<string, ToolDefinition>();
   for (const def of all) {
     byName.set(def.name, def);
     const engine = canonicalToolName(def.name);
     if (!byName.has(engine)) byName.set(engine, def);
-    const wire = advertisedToolName(engine);
+    const wire = advertisedToolName(engine, profile);
     if (!byName.has(wire)) byName.set(wire, def);
   }
   const seen = new Set<string>();
@@ -197,7 +202,7 @@ export function advertisedTools(
   return orderedNames.flatMap((name) => {
     const def = byName.get(name) ?? byName.get(canonicalToolName(name));
     if (def === undefined) return [];
-    const projected = projectToolDefinition(def);
+    const projected = projectToolDefinition(def, profile);
     if (seen.has(projected.name)) return [];
     seen.add(projected.name);
     return [projected];

@@ -51,7 +51,9 @@ import {
   type ToolAvailability,
 } from "../agent/tool-search.js";
 import {
+  foldFileToolNames,
   nameMatchesAdvertisedListing,
+  toolProfileForModel,
   withAuthzParityDefinitions,
 } from "../agent/tool-aliases.js";
 import { canonicalToolName } from "../agent/canonical-tool-name.js";
@@ -440,15 +442,17 @@ export function createAdvertisedToolset(args: {
   ): ToolDefinition[] => {
     const provider = args.getProvider();
     const denied = deniedFor(provider);
-    const gatedPrefix =
+    const profile = toolProfileForModel(provider);
+    const rawGated =
       denied.length === 0
         ? prefix
         : prefix.filter((name) => !denied.includes(name));
+    const gatedPrefix = foldFileToolNames(rawGated, profile);
     // The wire carries the fixed prefix plus wire-committed activations only:
     // fresh activations open the call gate (isAdvertised) at once but stay off
     // this array until flushPromotions commits them.
     return normalizeToolDefinitionsForProvider(
-      advertisedTools(all, wireActivated, gatedPrefix),
+      advertisedTools(all, wireActivated, gatedPrefix, profile),
       {
         ...provider,
       },
@@ -459,9 +463,13 @@ export function createAdvertisedToolset(args: {
     if (denied.includes(name) || denied.includes(canonicalToolName(name))) {
       return false;
     }
+    const effective = foldFileToolNames(
+      prefix,
+      toolProfileForModel(args.getProvider()),
+    );
     return nameMatchesAdvertisedListing(
       name,
-      (n) => prefix.includes(n) || activated.has(n),
+      (n) => effective.includes(n) || activated.has(n),
     );
   };
   const flushPromotions = (): boolean => {

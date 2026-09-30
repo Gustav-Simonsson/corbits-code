@@ -151,7 +151,7 @@ export function canonicalToolNamesForDirector(
       `canonicalToolNamesForDirector(${pkg.id}): "${dupe}" mounted twice — the assembly drifted from src/subagent/run.ts`,
     );
   }
-  return names.map(advertisedToolName);
+  return names.map((name) => advertisedToolName(name));
 }
 
 /** Assemble one director prompt exactly as run.ts does. */

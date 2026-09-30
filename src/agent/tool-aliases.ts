@@ -1,37 +1,114 @@
 /**
- * One advertised posix set (CL-8400). Registry engines stay posix-named;
- * advertise is a projection onto wire names. Incoming aliases resolve onto
- * the same engine id for dispatch and grants.
+ * Advertised tool names are a projection of registry engine ids that depends
+ * on the model family: each family sees exactly one name per tool, the one it
+ * was trained on. Incoming calls accept every name any profile advertises, so
+ * dispatch, grants, and history replay never depend on the active profile.
  *
- * Wire: read write edit delete bash grep glob
- * Engine: read_file write_file edit_file delete_file run_shell grep search_files
- * Hidden dispatch: shell → run_shell (Codex argv/workdir/timeout_ms coerce),
- * update_plan → manage_tasks. apply_patch is neither advertised nor dispatched.
+ * default (industry-common): read write edit delete bash glob todowrite skill
+ *   webfetch websearch question
+ * gpt (Codex): default, except shell, update_plan, wait
  */
 
 import { type } from "arktype";
 import type { ToolCall, ToolDefinition } from "@intx/types/runtime";
 import { canonicalToolName } from "./canonical-tool-name.js";
+import {
+  detectModelFamily,
+  type ModelFamily,
+} from "../subagent/provider-family.js";
 
-/** Advertised posix names → registry engine ids. 1:1, never dual-publish. */
-export const WIRE_TO_ENGINE = {
-  read: "read_file",
-  write: "write_file",
-  edit: "edit_file",
-  delete: "delete_file",
-  bash: "run_shell",
-  glob: "search_files",
+export type ToolProfile = "default" | "gpt";
+
+/** Registry engine ids → default wire names. */
+const DEFAULT_ENGINE_TO_WIRE = {
+  read_file: "read",
+  write_file: "write",
+  edit_file: "edit",
+  delete_file: "delete",
+  run_shell: "bash",
+  search_files: "glob",
+  manage_tasks: "todowrite",
+  use_skill: "skill",
+  web_fetch: "webfetch",
+  web_search: "websearch",
+  ask_operator: "question",
 } as const;
 
-/** Hidden incoming names that dispatch onto a mounted engine (not advertised). */
-export const HIDDEN_TO_ENGINE = {
-  shell: "run_shell",
-  update_plan: "manage_tasks",
+const GPT_OVERRIDES = {
+  run_shell: "shell",
+  manage_tasks: "update_plan",
+  wait_agents: "wait",
 } as const;
 
-const ENGINE_TO_WIRE: Record<string, string> = Object.fromEntries(
-  Object.entries(WIRE_TO_ENGINE).map(([wire, engine]) => [engine, wire]),
-);
+const ENGINE_TO_WIRE_BY_PROFILE: Record<
+  ToolProfile,
+  Readonly<Record<string, string>>
+> = {
+  default: DEFAULT_ENGINE_TO_WIRE,
+  gpt: { ...DEFAULT_ENGINE_TO_WIRE, ...GPT_OVERRIDES },
+};
+
+/** Tools the gpt profile folds into the single apply_patch envelope tool. */
+const PATCH_FOLDED_ENGINES: ReadonlySet<string> = new Set([
+  "write_file",
+  "edit_file",
+  "delete_file",
+]);
+
+/**
+ * gpt models are trained on apply_patch, not write/edit/delete. Replace the
+ * first folded name with apply_patch and drop the rest; other profiles and
+ * lists with no file-mutation tool pass through unchanged.
+ */
+export function foldFileToolNames(
+  names: readonly string[],
+  profile: ToolProfile,
+): readonly string[] {
+  if (profile !== "gpt") return names;
+  const folded = (name: string): boolean =>
+    PATCH_FOLDED_ENGINES.has(engineToolName(name));
+  if (!names.some(folded)) return names;
+  const first = names.findIndex(folded);
+  return names.flatMap((name, i) =>
+    i === first ? ["apply_patch"] : folded(name) ? [] : [name],
+  );
+}
+
+export function foldFileToolDefinitions(
+  defs: readonly ToolDefinition[],
+  profile: ToolProfile,
+): ToolDefinition[] {
+  if (profile !== "gpt" || !defs.some((d) => d.name === "apply_patch")) {
+    return [...defs];
+  }
+  return defs.filter((d) => !PATCH_FOLDED_ENGINES.has(engineToolName(d.name)));
+}
+
+export function toolProfileForFamily(family: ModelFamily): ToolProfile {
+  return family === "gpt" ? "gpt" : "default";
+}
+
+export function toolProfileForModel(input: {
+  providerName: string;
+  model?: string;
+}): ToolProfile {
+  return toolProfileForFamily(detectModelFamily(input));
+}
+
+/** Default wire names → registry engine ids. 1:1, never dual-publish. */
+export const WIRE_TO_ENGINE: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    Object.entries(DEFAULT_ENGINE_TO_WIRE).map(([engine, wire]) => [
+      wire,
+      engine,
+    ]),
+  );
+
+/** Names only a non-default profile advertises; still accepted on dispatch. */
+export const HIDDEN_TO_ENGINE: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    Object.entries(GPT_OVERRIDES).map(([engine, wire]) => [wire, engine]),
+  );
 
 const ALIAS_TO_ENGINE: Record<string, string> = {
   ...WIRE_TO_ENGINE,
@@ -47,9 +124,16 @@ export function engineToolName(requested: string): string {
   );
 }
 
-/** Project a registry engine id onto the advertised wire name. */
-export function advertisedToolName(engine: string): string {
-  return ENGINE_TO_WIRE[engine] ?? engine;
+/** Project a registry engine id onto the profile's advertised wire name. */
+export function advertisedToolName(
+  engine: string,
+  profile: ToolProfile = "default",
+): string {
+  const table =
+    typeof profile === "string" && profile in ENGINE_TO_WIRE_BY_PROFILE
+      ? ENGINE_TO_WIRE_BY_PROFILE[profile]
+      : ENGINE_TO_WIRE_BY_PROFILE.default;
+  return table[engine] ?? engine;
 }
 
 /**
@@ -67,15 +151,52 @@ export function nameMatchesAdvertisedListing(
   return wire !== name && isListed(wire);
 }
 
-export function projectToolDefinition(def: ToolDefinition): ToolDefinition {
-  const wire = advertisedToolName(def.name);
+// update_plan dispatches through translateUpdatePlanArgs, which only accepts
+// the Codex { plan: [{ step, status }] } shape. Advertising manage_tasks's
+// schema under that name sends the model into a rejected-call loop.
+const UPDATE_PLAN_DEFINITION = {
+  description:
+    "Your work checklist for multi-step jobs. Send the full plan each call; keep at most one step in_progress. Skip for one-step work.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      explanation: { type: "string" },
+      plan: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            step: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["pending", "in_progress", "completed"],
+            },
+          },
+          required: ["step", "status"],
+        },
+      },
+    },
+    required: ["plan"],
+  },
+} as const;
+
+export function projectToolDefinition(
+  def: ToolDefinition,
+  profile: ToolProfile = "default",
+): ToolDefinition {
+  const engine = canonicalToolName(def.name);
+  const wire = advertisedToolName(engine, profile);
+  if (wire === "update_plan" && engine === "manage_tasks") {
+    return { ...def, name: wire, ...UPDATE_PLAN_DEFINITION };
+  }
   return wire === def.name ? def : { ...def, name: wire };
 }
 
 export function projectToolDefinitions(
   defs: readonly ToolDefinition[],
+  profile: ToolProfile = "default",
 ): ToolDefinition[] {
-  return defs.map(projectToolDefinition);
+  return defs.map((def) => projectToolDefinition(def, profile));
 }
 
 /**

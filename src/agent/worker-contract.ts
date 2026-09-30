@@ -39,5 +39,5 @@ export function buildWorkerContract(opts: WorkerContractOptions = {}): string {
  * primary chat prompt.
  */
 export function buildWorkerToolNames(toolNames: readonly string[]): string {
-  return `Tools (names only): ${toolNames.map(advertisedToolName).join(", ")}`;
+  return `Tools (names only): ${toolNames.map((name) => advertisedToolName(name)).join(", ")}`;
 }
