@@ -1,79 +1,42 @@
 ---
 name: native-integration
-description: Corbits runtime mapping for GaaS skills — tools, fleet, non-git folders, GitHub review posting, tracker-agnostic issues
+description: Corbits rules for non-git folders, Linear status, tracker-agnostic issues, and posting reviews on GitHub
 user-invocable: false
 ---
 
 # Native integration
 
-GaaS skill bodies stay 1:1 with Guy's originals. This skill is the Corbits layer: tool names, fleet, and product extras that must not fork those bodies.
-
-Load alongside `style` and `philosophy` (and any GaaS skill you are following). Workers get this body baked; the primary loads it with `use_skill`.
-
-Do not delete Corbits-only skills (`plan`, `git-worktrees`, `idiot-proof`). They are extensions, not GaaS forks.
+Corbits-specific rules that the other skills rely on. Load alongside `style` and `philosophy`. Workers get this body baked; the primary loads it with `use_skill`.
 
 ## Test runner
 
-Corbits tests use `bun:test` (`bun test`, `bun run test`), not GaaS `tap` (`import t from "tap"`). When the typescript skill shows tap examples, map them to bun:test (`import { expect, test } from "bun:test"`). Do not fork the typescript skill body.
+Corbits tests use `bun:test` (`bun test`, `bun run test`). `opsh` scripts are bash and use TAP via `prove`; that harness is separate from `bun:test`. Agent commands run through `bash`.
 
-GaaS opsh scripts are bash (`#!/usr/bin/env opsh`, `lib::import`) and use TAP via `prove` (`test-harness`). That harness is not Corbits `bun:test`. Write scripts with `write`/`edit`; agent commands use `bash`. Do not fork the GaaS opsh body.
+## Fleet
 
-## Tool mapping
+Spawn with `spawn_agent(agent=<director>)` and a closed director id; `intent="general"` is not a spawn.
 
-When a GaaS skill names a Claude/GaaS tool, use the Corbits equivalent. Do not call the GaaS name.
-
-| GaaS / Claude           | Corbits                                            |
-| ----------------------- | -------------------------------------------------- |
-| TaskCreate              | `manage_tasks`                                     |
-| TaskUpdate              | `manage_tasks`                                     |
-| TaskList                | `manage_tasks`                                     |
-| AskUserQuestion         | `ask_operator` (primary) / `ask_director` (worker) |
-| `Task` / `@greybeard`   | `spawn_agent(agent="planner")`                     |
-| `@critic` / `@critique` | `spawn_agent(agent="reviewer")`                    |
-| `@intern`               | `spawn_agent(agent="coder")`                       |
-| `@explorer`             | `spawn_agent(agent="explorer")`                    |
-| Read / Write / Edit     | `read` / `write` / `edit`                          |
-| Glob / Grep             | `glob` / `grep`                                    |
-| Bash                    | `bash`                                             |
-| WebFetch / WebSearch    | `web_fetch` / `web_search`                         |
-
-`intent="general"` is not a Corbits spawn. Use a closed director id.
-
-GaaS ast-grep invokes `sg` as a CLI. Corbits extras: run `sg` via `bash`.
-
-Slash names that differ from GaaS skill ids: `/review` is GaaS `code-review`; `/create-issue` is GaaS `linear-create`. Keep those Corbits names.
-
-GaaS code-review uses "ask the user", "sub-agents"/"subagent", and `typescript-conventions`. Corbits extras: slash stays `/review`; `ask_operator` (tool mapping above); fleet `spawn_agent` for sub-agents; load `typescript` not `typescript-conventions`; findings-only — do not implement fixes; GitHub posting and Linear In Review (this skill).
-
-GaaS refactor says "ask clarifying questions" / "ask the user". Corbits extras: `ask_operator` (tool mapping above).
-
-GaaS scribe uses the `question` tool (now `ask_operator` in the Corbits body). Corbits extras: `ask_operator` (tool mapping above).
-
-When GaaS implement says you are orchestrated by karen, that is the Corbits primary (Dispatch). Route those disposition decisions through the primary, not a worker.
-
-GaaS implement "Initial Planning" / planner-before-code is not `/plan`. Substantial coder work consumes a planner / `/plan` plan (files, acceptance criteria, non-goals, risks, ordered steps) and blocks if that plan is missing. Tiny parent-DIY stays plan-optional. `/plan` and planner author; they do not ship. `/implement` does not steal planning from `/plan`.
+Substantial coder work consumes a planner or `/plan` plan (files, acceptance criteria, non-goals, risks, ordered steps) and blocks if that plan is missing. Tiny parent-DIY work stays plan-optional. `/plan` and planner author; they do not ship. Disposition decisions in `/implement` go through the primary, not a worker.
 
 ## Linear claim-first
 
-When the work tracks a Linear issue and Linear MCP is available: set the issue to In Progress before explore/build thrash. Parallel lanes claim their own IDs. When a PR is ready for review, move the issue to In Review — never Done at PR-open. If Linear MCP is unavailable, report that status could not be updated.
+When the work tracks a Linear issue and Linear MCP is available, set the issue to In Progress before explore/build thrash. Parallel lanes claim their own IDs. Use `use_skill("git-worktrees")` to create the worktree.
 
-When a PR is open and ready for review (not a draft or WIP), set the issue state to "In Review". Draft or WIP PRs stay **In Progress** until they are ready for review. Then move to In Review. Draft or WIP PRs stay In Progress. Do not mark the Linear issue Done on open PR alone. Do not leave it In Review after merge when work remains.
+Move the issue to In Review when the PR is ready for review. Draft or WIP PRs stay In Progress. Never mark the issue Done on PR open, and do not leave it In Review after merge when work remains. If Linear MCP is unavailable, report that status could not be updated.
 
-GaaS linear-issue-workflow inlines `git worktree add` and marks In Progress after the plan. Corbits extras: claim-first (this section) and `use_skill("git-worktrees")` instead of the inlined `git worktree add`; In Review on ready-for-review PRs (this section). `code-review` maps to Corbits `/review` (slash-name mapping above). Do not fork the GaaS linear-issue-workflow body.
-
-`linear-issue-workflow` owns the full Linear ship loop. This mapping does not replace it.
+`linear-issue-workflow` owns the full Linear ship loop.
 
 ## Non-git folders
 
-GaaS `style` refuses to operate outside a git repo. Corbits does not: a folder without `.git` is a valid working directory (scratch, unpacked tarball, new project). Git-using skills (`implement`, `review`, `git-rebase`, `pull-request-review`) still no-op or ask when they need a repo. Do not invent a git repo to satisfy those skills.
+A folder without `.git` is a valid working directory (scratch, unpacked tarball, new project). Git-using skills (`implement`, `review`, `git-rebase`, `pull-request-review`) no-op or ask when they need a repo. Do not invent a git repo to satisfy them.
 
-When GaaS git-rebase writes `/tmp` editor scripts, Corbits still plans on the primary and the coder executes sequenced git via `bash`; it may use inline `GIT_SEQUENCE_EDITOR` instead of write editor scripts. Do not fork the GaaS git-rebase body.
+The primary plans sequenced git and the coder executes it via `bash`, using inline `GIT_SEQUENCE_EDITOR` instead of writing editor scripts.
 
 ## Tracker-agnostic issues
 
-GaaS `linear-create` is Linear-only. Corbits `/create-issue` keeps the GaaS Background/Outcome shape and the `create-issue` name, but is not Linear-only:
+`/create-issue` is not Linear-only:
 
-1. Linear MCP available → Linear.
+1. Linear MCP available: Linear.
 2. Else ask which tracker (GitHub, GitLab, other) unless `.corbits/MEMORY.md` already has `Preferred issue tracker`.
 3. Persist that preference in MEMORY.md (never secrets).
 4. GitHub: `gh issue create`. GitLab: `glab issue create`.
@@ -85,8 +48,6 @@ Do not restate MCP tool names or schemas in chat. Call the tools.
 When the branch under review has an open GitHub pull request, **post the finished review on the PR**. A review that only lives in the chat session is not done.
 
 This step is the delivery of the review, not a second pass of analysis. By the time you post, findings are already decided. Do not reopen the read while drafting the body.
-
-GaaS pull-request-review loads `code-review` and says "ask the user". Corbits extras: `ask_operator` (tool mapping above), `/review` for `code-review` (slash-name mapping above), and GitHub posting (this section). Do not fork the GaaS pull-request-review body.
 
 ### When to post
 
