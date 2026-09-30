@@ -514,3 +514,32 @@ describe("auto-mode project grant store", () => {
     });
   });
 });
+
+describe("dangling symlinks", () => {
+  const write = (path: string): ToolCall => ({
+    id: "c",
+    name: "write_file",
+    arguments: { path, content: "x" },
+  });
+
+  test("a write through a dangling link to a secret file is denied", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "secret-guard-dangling-"));
+    await symlink(join(dir, ".env"), join(dir, "config.txt"));
+    const result = await handler()(
+      write(join(dir, "config.txt")),
+      new AbortController().signal,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toMatch(/sensitive file blocked/);
+  });
+
+  test("a dangling link to an ordinary file is left to the permission gate", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "secret-guard-dangling-"));
+    await symlink(join(dir, "notes.txt"), join(dir, "alias.txt"));
+    const result = await handler()(
+      write(join(dir, "alias.txt")),
+      new AbortController().signal,
+    );
+    expect(result.isError).toBeUndefined();
+  });
+});

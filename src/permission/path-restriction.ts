@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import type { RootsProvider } from "./worktree-roots.js";
@@ -80,6 +80,52 @@ export function realpathNearestOr(path: string): string {
     if (parentReal === UNRESOLVABLE) return UNRESOLVABLE;
     return join(parentReal, path.slice(tailStart));
   }
+}
+
+const MAX_SYMLINK_HOPS = 40;
+
+// The deepest path-or-ancestor that is a symlink whose target does not exist.
+function danglingLinkOf(path: string): string | undefined {
+  let current = path;
+  for (;;) {
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        try {
+          realpathSync(current);
+        } catch {
+          return current;
+        }
+      }
+    } catch {
+      // Component absent: keep walking up.
+    }
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+// realpathNearestOr reports a dangling symlink as UNRESOLVABLE because the
+// link's own name says nothing about where a write would land. A write
+// through `link -> .env` creates `.env`, so security judgments that need the
+// landing path follow the link targets by hand. Still UNRESOLVABLE for a
+// symlink loop or an unreadable link.
+export function realpathFollowingDangling(path: string): string {
+  let current = path;
+  for (let hop = 0; hop < MAX_SYMLINK_HOPS; hop++) {
+    const real = realpathNearestOr(current);
+    if (real !== UNRESOLVABLE) return real;
+    const link = danglingLinkOf(current);
+    if (link === undefined) return UNRESOLVABLE;
+    let target: string;
+    try {
+      target = resolve(dirname(link), readlinkSync(link));
+    } catch {
+      return UNRESOLVABLE;
+    }
+    current = join(target, current.slice(link.length));
+  }
+  return UNRESOLVABLE;
 }
 
 // An empty root must never reach the prefix compare: `"" + sep` is just
