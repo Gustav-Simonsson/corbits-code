@@ -184,13 +184,16 @@ const GUIDELINE_SUB_BLOCKS: Record<
           "- Unexpected changes in files you did not touch: stop and ask_operator.",
         ]),
   ],
-  scopeConventions: (ctx) => [
+  scopeConventions: () => [
     "Scope and conventions:",
     "- Touch only code required for the task; no drive-by refactors, formatting sweeps, or unrelated fixes.",
-    ctx.subAgent
-      ? "- Follow AGENTS.md and /docs for architecture."
-      : "- Follow AGENTS.md and /docs for architecture; use_skill style and philosophy when starting repo work.",
+    "- Follow AGENTS.md and /docs for architecture.",
     "- Match existing project patterns (functional style, arktype at boundaries, small focused diffs).",
+    "- Keep refactors out of feature changes, and do work now rather than deferring it. A TODO marks only work blocked by something outside your control, and names the blocker.",
+    "- Comments explain why, never what.",
+    "- Replacing a path deletes the old one: no shims, re-exports, or compatibility wrappers for callers you own (public interfaces excepted).",
+    "- Fix at the layer that owns the invariant. Two fixes to one subsystem without resolving it means you are chasing symptoms: stop and report where the constraint belongs.",
+    "- Validate external input once at the boundary and trust it inside. Tests assert required behavior and land with the change.",
     "- Before finishing implementation work, run the repository-defined typecheck command, relevant tests, and every defined full verification command; these checks are mandatory.",
     "- If the repository defines no typecheck command, do not invent a typecheck command: report its absence as an explicit Blocker with evidence from AGENTS.md and package scripts (or equivalent project configuration).",
     "- In Findings, report every exact verification command and its outcome, including exit status. A bare `pass` without command evidence is an incomplete report.",

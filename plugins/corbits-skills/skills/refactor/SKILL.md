@@ -12,10 +12,6 @@ Use this skill to analyze existing code, produce a structured design document, a
 
 Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and tell the operator to `git init` first. Work in a worktree from `origin/<default-branch>`, never in the main checkout: `use_skill("git-worktrees")` for the commands.
 
-## Initialization
-
-Before doing anything else, load the `philosophy` skill. The principles in that skill guide how you evaluate design decisions.
-
 ## Workflow
 
 ### Step 1: Understand the Scope
@@ -60,7 +56,7 @@ Document structure:
 After documenting the current state:
 
 1. Present your observations and ask the user about their priorities
-2. Propose specific improvements with rationale grounded in philosophy principles (pragmatic, simple over easy, etc.)
+2. Propose specific improvements with rationale grounded in the principles below (pragmatic, simple over easy, etc.)
 3. Let the user accept, reject, or modify proposals
 4. Ask follow-up questions to refine the approach
 5. Iterate until alignment is reached
@@ -81,7 +77,6 @@ A single markdown file in the user's current working directory containing both t
 
 ## Guiding Principles
 
-From the philosophy skill:
 - **Pragmatic over idealistic** - Don't propose changes for theoretical purity
 - **Simple is usually harder than easy** - Favor designs that are genuinely simple, not just quick
 - **Do no harm** - Consider risks to stability and correctness
