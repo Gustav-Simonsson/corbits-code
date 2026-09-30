@@ -1,6 +1,6 @@
 ---
 name: opsh
-description: Write scripts using opsh and its built-in libraries. Load this skill when writing, reviewing, or debugging opsh scripts.
+description: Write and debug opsh scripts and use its built-in libraries.
 user-invocable: false
 ---
 

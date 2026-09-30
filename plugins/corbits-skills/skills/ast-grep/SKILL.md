@@ -1,6 +1,6 @@
 ---
 name: ast-grep
-description: Bulk code refactoring using AST patterns instead of manual read-edit-write cycles. Load this skill when renaming, changing signatures, or migrating API usage across many files.
+description: Bulk refactors with AST patterns. Load for renames and API migrations across many files.
 ---
 
 # ast-grep

@@ -1,6 +1,6 @@
 ---
 name: scribe
-description: Maintain product, architecture, and implementation docs — routes input, detects gaps, and interviews for completeness
+description: Maintain product, architecture, and implementation docs and detect gaps.
 ---
 
 # Scribe

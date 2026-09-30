@@ -1,6 +1,6 @@
 ---
 name: linear-issue-workflow
-description: Implement a feature or fix based on a Linear issue
+description: Ship a feature or fix from a Linear issue, from claim to reviewed PR.
 argument-hint: "<issue-id> [--reviewer <reviewer>]"
 user-invocable: false
 ---

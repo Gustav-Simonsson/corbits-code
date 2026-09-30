@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Disciplined per-commit workflow with Planner review, build gates, and Reviewer loops
+description: Per-commit workflow with planner review, build gate, and reviewer loop.
 ---
 
 # Implement

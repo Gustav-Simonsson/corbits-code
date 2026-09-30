@@ -1,6 +1,6 @@
 ---
 name: philosophy
-description: Engineering philosophy and work culture principles. Load this skill when making architectural decisions or to understand the team's work principles.
+description: Engineering principles. Load for architectural decisions.
 user-invocable: false
 ---
 

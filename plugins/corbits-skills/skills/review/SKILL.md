@@ -1,6 +1,6 @@
 ---
 name: review
-description: Perform a code review or pull request review on a branch
+description: Review a branch or pull request diff and report findings.
 ---
 
 # Code Review
