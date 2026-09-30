@@ -3,7 +3,7 @@ import { DOCS_TOOLS } from "../tool-sets.js";
 
 /**
  * Shakespeare worker (CL-7029).
- * Docs maintenance — PRODUCT / ARCHITECTURE / IMPLEMENTATION only; scribe core baked in.
+ * Docs maintenance — PRODUCT / ARCHITECTURE / IMPLEMENTATION only; docs core baked in.
  * Package id/path stays `shakespeare` (global rename is out of scope).
  */
 export const shakespearePackage: DirectorPackage = {
@@ -30,7 +30,7 @@ BLINDERS ON: Stay on the brief's success_criteria and the P/A/I docs. Do not wan
 
 **IMPLEMENTATION.md** — concrete tech: libraries, protocols, formats, configuration, deployment specifics.
 
-# Workflow (scribe core)
+# Workflow (docs core)
 
 ## 0. Document discovery
 

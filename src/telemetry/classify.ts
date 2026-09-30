@@ -84,6 +84,7 @@ const BUILT_IN_AGENT_NAMES: ReadonlySet<string> = new Set([
 // name.
 const FIRST_PARTY_SKILL_NAMES: ReadonlySet<string> = new Set([
   "create-issue",
+  "docs",
   "git-worktrees",
   "implement",
   "interview",
@@ -93,7 +94,6 @@ const FIRST_PARTY_SKILL_NAMES: ReadonlySet<string> = new Set([
   "pull-request-review",
   "refactor",
   "review",
-  "scribe",
   "style",
   "typescript",
 ]);

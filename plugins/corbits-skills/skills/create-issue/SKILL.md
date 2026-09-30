@@ -24,7 +24,7 @@ Pick the tracker before drafting. Do not skip this.
 
 ## Phase 1: Document Discovery
 
-When the operator provides `--from-doc` or mentions a planning document, search for scribe-managed documents:
+When the operator provides `--from-doc` or mentions a planning document, search for `/docs`-managed documents:
 
 1. Look for `PRODUCT.md`, `ARCHITECTURE.md`, `IMPLEMENTATION.md` in:
    - Repository root
