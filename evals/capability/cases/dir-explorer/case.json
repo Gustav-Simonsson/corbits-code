@@ -1,0 +1,8 @@
+{
+  "id": "dir-explorer",
+  "tier": "easy",
+  "title": "Explorer locates discount logic",
+  "fixture": "fixtures/dir-shop",
+  "prompt": "Where is the discount applied to a cart, and which functions are involved? Do not change any source. Save your final report (the same text you return) to REPORT.md.",
+  "verify": "verify.sh"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "dir-counsel",
+  "tier": "easy",
+  "title": "Counsel plans a coupon feature",
+  "fixture": "fixtures/dir-shop",
+  "prompt": "Plan adding coupon codes (percentage off, single use per cart) to this cart. Give an ordered engineering plan. Do not change source. Save your final plan (the same text you return) to PLAN.md.",
+  "verify": "verify.sh"
+}
