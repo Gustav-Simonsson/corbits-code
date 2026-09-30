@@ -78,26 +78,16 @@ const BUILT_IN_AGENT_NAMES: ReadonlySet<string> = new Set([
 // plugin id and kind — no skill list — so the closed set is spelled out here
 // and pinned by src/telemetry/product-events.test.ts.
 // `user-invocable: false` is a slash-surface flag, not a telemetry flag:
-// eleven bundled skills carry it — eight stay listed and loadable
-// (git-rebase, linear-issue-workflow, opsh, philosophy, style, typescript,
-// native-integration, ponytail), `git-worktrees` resolves by explicit name
-// only, and two stay hidden from listings (idiot-proof, native-runtime):
-// `disable-model-invocation` keeps them out of discovery, but an explicit
-// `use_skill` / `resolveSkillBody` load still resolves — and reports `custom`.
-// Of the eleven,
-// seven are reported by name and four stay `custom` (pinned; conservative
-// under-reporting, never a leak). Project- or plugin-authored skills are
-// never reported by name.
+// background skills stay loadable by explicit name, and a bundled skill that
+// is not in the set below reports `custom` (conservative under-reporting,
+// never a leak). Project- or plugin-authored skills are never reported by
+// name.
 const FIRST_PARTY_SKILL_NAMES: ReadonlySet<string> = new Set([
-  "ast-grep",
   "create-issue",
-  "git-rebase",
   "git-worktrees",
   "implement",
   "interview",
-  "lexicon",
   "linear-issue-workflow",
-  "opsh",
   "philosophy",
   "plan",
   "pull-request-review",

@@ -331,12 +331,10 @@ shape.
   `resolveSkillBody`), so the model does not auto-suggest background libraries.
   First-party recipes that are not operator slashes remain listed for
   `skill_search` / `use_skill` when they only set `user-invocable: false`
-  (`git-rebase`, `linear-issue-workflow`, `style`, `philosophy`,
-  `native-integration`, `typescript`, `ponytail`, `opsh`). Background libs
-  such as `git-worktrees` set both flags. Bodies that stay out of discovery
-  such as `idiot-proof` and `native-runtime` also set both flags (baked into
-  workers; not a slash and not listed by `skill_search`/`discoverSkills`, but
-  still loadable by explicit `use_skill`/`resolveSkillBody` name). The slash
+  (`linear-issue-workflow`, `style`, `philosophy`, `native-integration`,
+  `typescript`). Background libs such as `git-worktrees` set both flags: not a
+  slash and not listed by `skill_search`/`discoverSkills`, but still loadable
+  by explicit `use_skill`/`resolveSkillBody` name. The slash
   command is a direct user entry point on top.
 - **First-party catalog.** `plugins/corbits-skills/` (id `corbits-skills`,
   kind `command`, `defaultEnabled: true`) is the bundled skill catalog. Origin

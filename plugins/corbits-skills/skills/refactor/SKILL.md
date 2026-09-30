@@ -70,7 +70,6 @@ Append an **Improvement Plan** section to the document with:
 - Suggested order of operations
 - Any constraints or risks to be aware of
 - Enough detail that another agent could execute the plan
-- For structural transformations (renames, signature changes, API migrations), note that the `ast-grep` skill should be loaded during execution — it enables bulk AST-based rewrites instead of manual read-edit-write cycles
 
 ## Output
 
