@@ -3,5 +3,5 @@
   "name": "Corbits Skills",
   "kind": "command",
   "defaultEnabled": true,
-  "description": "Default operator skills and slash commands (implement, refactor, review, pull-request, issue, docs, interview, plan) and background reference skills (git-worktrees, typescript, interchange)."
+  "description": "Default operator skills and slash commands (implement, refactor, review, pull-request, issue, docs, interview, plan) and background reference skills (git-worktrees, typescript, interchange, corbits)."
 }

@@ -83,6 +83,12 @@ const BUILT_IN_AGENT_NAMES: ReadonlySet<string> = new Set([
 // never a leak). Project- or plugin-authored skills are never reported by
 // name.
 const FIRST_PARTY_SKILL_NAMES: ReadonlySet<string> = new Set([
+  "corbits",
+  "corbits-hub-libs",
+  "corbits-inference",
+  "corbits-system-one",
+  "corbits-tools",
+  "corbits-ui-apps",
   "docs",
   "git-worktrees",
   "implement",
