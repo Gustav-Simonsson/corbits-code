@@ -227,7 +227,6 @@ test("first-party skill names are reported by name; everything else stays custom
   // name either — the allowlist is the closed set, not the skills directory.
   // Hidden-from-discovery background skills (explicit loads still resolve)
   // stay custom.
-  expect(classifySkillName("native-integration")).toBe("custom");
   expect(classifySkillName("Review")).toBe("custom");
   expect(classifySkillName("")).toBe("custom");
 });

@@ -39,6 +39,36 @@ When the target is a PR (number, URL, or branch), review it from a worktree, nev
 
 If any step fails, stop and ask instead of working around it.
 
+## Post the Review on GitHub
+
+When the branch has an open GitHub PR, post the finished review on it. A review that only lives in chat is not done. Posting delivers decided findings; do not reopen the analysis while writing the body.
+
+Post when the operator asked to review a PR, when `/implement`'s whole-branch gate is running for a branch with an open PR, or when a PR exists and the review's purpose is a record on it. Do not post a private local read.
+
+Use a real review for the verdict, `--approve`, `--comment`, or `--request-changes`:
+
+```bash
+gh pr review <number-or-url> --comment --body-file <file>
+```
+
+Body shape, short and in present tense:
+
+```markdown
+## Review · <Approve | Comment | Request changes>
+
+<one line: what the branch does>
+
+### Findings
+
+- `path/to/file.ts:12` — concrete problem and why it matters
+
+### Notes
+
+- Only load-bearing context.
+```
+
+A clean review says "No findings." after the one-line description. Every finding has a `path:line` and a concrete failure mode; severity is the review action, not adjectives. No throat-clearing, no praise to soften a finding, no journey narration, no emoji, no "nit:" taste. When more than one lens produced a distinct judgment (reviewer, planner waiver, warden), each posts its own labelled review, and only the lens that owns the merge verdict may approve. Paste the review URL back to the operator. Posting does not change Linear state.
+
 ## Base Branch Determination
 
 Before reviewing, you must determine the correct base branch. Use these methods

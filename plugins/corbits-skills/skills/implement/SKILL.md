@@ -1,174 +1,47 @@
 ---
 name: implement
-description: Per-commit workflow with planner review, build gate, and reviewer loop.
+description: Ship a planned, ticketed change from worktree to pushed branch with per-commit review.
+argument-hint: "[ticket-id]"
 ---
 
 # Implement
 
-A disciplined implementation workflow that produces reviewed, verified commits. Load this skill when you want each commit to go through architectural review, build verification, and code review before it lands.
+Take a plan and a ticket to a pushed branch. Each commit is built, gated, and reviewed before the next one starts. `/implement` does not plan; `/plan` and `/issue` come first.
 
-## Preflight
+## 1. Preflight
 
-Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and tell the operator to `git init` first. Work in a worktree from `origin/<default-branch>`, never in the main checkout: `use_skill("git-worktrees")` for the commands.
+- Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and tell the operator to `git init` first.
+- Requires a plan (files, acceptance criteria, non-goals, risks, ordered steps) and a ticket. If either is missing, stop and point to `/plan` or `/issue`. A tiny change the primary does itself may skip the plan but not the ticket.
+- When the ticket is in Linear and Linear MCP is mounted, set it to In Progress now. If MCP is missing, say the status could not be updated.
 
-## Prerequisites
+## 2. Worktree
 
-Before using this workflow, load the `style` and `philosophy` skills. Follow their conventions throughout.
+Work in a worktree from `origin/<default-branch>` (`use_skill("git-worktrees")`). The branch name comes from the ticket (for Linear, its `gitBranchName`). A stacked change bases on the previous branch. Do all work there, never in the main checkout.
 
-## When to Use
+Track the commit-sized units of the plan with `manage_tasks`.
 
-This is a standalone skill, loaded on request. It is not part of dispatch. Use it when you want a single agent to work through a series of commits with review discipline.
+## 3. Per commit
 
-The caller defines what work to do and where the commit boundaries are. This skill defines _how_ each commit gets produced.
+For each unit, in order:
 
-## Tracking Progress
+1. **Approach.** For anything non-trivial, describe the approach to `spawn_agent(agent="planner")`: what changes and why, files touched, trade-offs, uncertainties. Adjust for real problems; disagree only with a reason.
+2. **Implement and test.** Follow the repo's test conventions. Bug fixes start with a test that fails for the right reason, then the fix. Features get a test that asserts the designed behavior. The test lands in the same commit as the code, and so do doc updates the change requires. Keep scope to the unit; note other work for a later commit.
+3. **Build gate.** Run the project's full pipeline (format, lint, build, test), never a partial one. Fix failures you caused. Report pre-existing failures to the operator. Record the commands and exit statuses.
+4. **Commit.** Follow `CONTRIBUTING.md` for the subject and body. No ticket ids or AI attribution in commit messages.
+5. **Reviewer loop.** `spawn_agent(agent="reviewer")` on `git show HEAD` with the intent from step 1, limited to this commit's scope. Fix every verified or high-confidence finding, re-run the build gate, and amend (or `git rebase -i` with `edit` for an earlier commit). Repeat until clean or until what remains is a conscious decision, not an oversight.
 
-Use `manage_tasks` to track progress throughout the workflow. It gives the user real-time visibility into what you're doing.
+The build must pass before every commit, amend, and rebase stop.
 
-### Initial Planning
+## 4. Dispositions
 
-Before starting implementation, use `manage_tasks` to add each commit-sized unit of work from the caller's instructions:
+Every finding outside the current commit gets one: (a) fix here, (b) separate commit on this branch, (c) new issue filed this session with its id in the status update, or (d) accept as-is. "Out of scope" and "later" are not dispositions. Only the operator may choose (d). Decisions go through the primary, not a worker.
 
-- **title**: Clear imperative description of the unit of work
-- **description**: Enough context that you could pick it up cold
-- **active form**: Present continuous form for the status line (e.g., "Refactoring HTTP client retry logic")
+## 5. Whole-branch gate
 
-### During the Per-Commit Workflow
+When every unit has landed, run `/review` on `base..HEAD` (the whole branch, not the last commit). Fix every finding, or get an explicit operator waiver for it.
 
-When you begin a unit of work, mark its task `in_progress` with `manage_tasks`. As you move through the workflow steps, update the task's active form to reflect which step you're in:
+## 6. Push and hand off
 
-- **Step 1**: "Reviewing approach with Planner: {subject}"
-- **Step 2**: "Implementing: {subject}"
-- **Step 3**: "Running build gate: {subject}"
-- **Step 4**: "Committing: {subject}"
-- **Step 5**: "Running Reviewer loop: {subject}"
+Push the branch (`bin/git-push-scoped origin <branch>` when the repo has it, else `git push -u origin <branch>`). Never force-push a published branch. Then run `/pull-request` to open the PR. When the PR is ready for review, the Linear ticket moves to In Review; never Done on PR open, and never left In Review after merge when work remains.
 
-When the commit lands and Reviewer is clean, mark the task `completed`.
-
-### Discovered Work
-
-If new work surfaces during implementation (Planner suggests a preparatory refactor, Reviewer reveals a missing edge case that warrants its own commit), add a new task with `manage_tasks` and work it through the full per-commit workflow.
-
-## Workflow Per Commit
-
-For each logical unit of work that results in a commit, follow these steps in order. Do not skip steps.
-
-### Step 1: Planner Review
-
-Mark the task `in_progress` and set the active form to "Reviewing approach with Planner: {subject}".
-
-Before writing any code, describe your implementation approach to Planner and ask for feedback.
-
-**What to send Planner:**
-
-- What you're about to change and why
-- Which files you expect to touch
-- Any design decisions or trade-offs you're considering
-- Anything you're uncertain about
-
-**How to handle feedback:**
-
-- If Planner identifies problems with your approach, adjust before proceeding
-- If Planner suggests a fundamentally different approach, consider it seriously
-- You don't need to agree with every suggestion, but you need a reason to disagree
-- Once you're aligned on approach, move to Step 2
-
-Use `spawn_agent(agent="planner")` for this step.
-
-### Step 2: Implement and Test
-
-Update the active form to "Implementing: {subject}".
-
-The order of operations depends on whether you're fixing a bug or building a feature. In both cases, follow the repository's existing test conventions — look at how existing tests are structured, where they live, what framework they use, and match that style. If the repository has no existing tests, ask the caller what test framework and conventions to use before proceeding.
-
-**For bug fixes (test-first):**
-
-1. Write a test that reproduces the bug.
-2. Run the test and verify it **fails**. If it doesn't fail, you don't understand the bug well enough to fix it. Go back and refine the test until it demonstrates the broken behavior.
-3. Implement the fix, following the approach reviewed in Step 1.
-4. Run the test again and verify it **passes**. If it doesn't pass, your fix is incomplete.
-
-**For new features:**
-
-1. Implement the feature, following the approach reviewed in Step 1.
-2. Write a test that exercises the new functionality and asserts on the expected behavior. The test should verify that the code works as designed and implemented, not just that it doesn't crash.
-3. Run the test and verify it **passes**.
-
-Keep the test focused on the behavior introduced by this commit. Don't test unrelated functionality. The test is part of the deliverable, not an afterthought.
-
-The test lands in the same unit of work as the implementation (Step 4) — same commit when committing — one logical unit (source of truth: style skill, AGENTS.md). When the caller passes testsmith-designed cases, land them as the implementation tests; any case left unlanded goes in the report with why so the caller can route a tester run.
-
-Keep the scope tight to what was discussed. If you discover additional work is needed, finish the current commit's scope first and note the additional work for a future commit. When the landing alters documented behavior beyond the discussed doc scope, flag it for the caller so a shakespeare docs pass can follow.
-
-### Step 3: Build Gate
-
-Update the active form to "Running build gate: {subject}".
-
-Run `make` (or the project's equivalent full pipeline: format, lint, build, test).
-
-- If the build passes, move to Step 4
-- If the build fails due to your changes, fix the failures and re-run until it passes
-- If the build fails due to pre-existing issues unrelated to your changes, report the failure to the caller and let them decide how to proceed
-- Do not move forward with a broken build
-- Do not substitute partial builds (e.g., running only the compiler) for the full pipeline
-- Record the exact verification commands and their exit statuses: the report maps each success criterion to pass, fail, or blocked with command evidence
-
-### Step 4: Commit
-
-Update the active form to "Committing: {subject}".
-
-Create the commit. Follow the commit message conventions from the `style` skill. Include the test in the same unit of work as the implementation — same commit when committing — one logical unit — and update the docs when the commit changes documented behavior. Worker-chain branch/PR convention: branch name carries the issue id, the PR body ends with `Fixes CL-…` and carries no AI-attribution lines (CONTRIBUTING: title is a Conventional Commits subject, body is Summary/Verification).
-
-### Step 5: Reviewer Loop
-
-Update the active form to "Running Reviewer loop: {subject}".
-
-Ask Reviewer to review the committed change.
-
-**How to run:**
-
-1. Use `spawn_agent(agent="reviewer")` to ask it to review the output of `git show HEAD`. Include the intent from Step 1 (what the change is meant to accomplish and the approach agreed with Planner) so Reviewer can evaluate whether the implementation matches the plan, not just surface-level quality. Tell Reviewer to limit its findings to the scope of the current commit -- pre-existing issues in touched files are out of scope.
-2. Read its findings
-3. For each issue marked VERIFIED or HIGH confidence: fix it
-4. Re-run the build gate (Step 3) to verify fixes
-5. Land the fixes on the right commit. If the target is HEAD, `git commit --amend`. Otherwise use `git rebase -i` with `edit` on the target commit:
-
-   ```
-   git rebase -i <base-branch>
-   # In the editor, change "pick <sha> ..." to "edit <sha> ..."
-   # ... make the fix at the stop ...
-   git add <files>
-   git commit --amend --no-edit
-   git rebase --continue
-   ```
-
-   If the situation calls for more elaborate history surgery, search your available skills for one whose description covers git rebase or branch-history cleanup, and load it. Re-run the build gate after the rebase completes.
-
-6. Ask Reviewer to review `git show HEAD` again. Re-include the original intent from Step 1 and tell it what you fixed since the last pass so it can focus on verifying the fixes and checking for new issues rather than re-reviewing the entire change from scratch.
-7. Repeat until Reviewer comes back clean or all remaining findings are acknowledged and intentional
-
-**When to stop looping:**
-
-- Reviewer reports no issues
-- Remaining findings are judgment calls you've consciously decided against, not oversights
-- The build passes after the last round of fixes
-
-### Step 6: Next
-
-Mark the current task `completed` with `manage_tasks`. Move to the next unit of work and return to Step 1.
-
-## Guidelines
-
-**Don't shortcut the loop.** The value is in the discipline. Skipping Planner "because this change is simple" or skipping Reviewer "because the build passes" defeats the purpose.
-
-**Keep commits focused, but do not drop findings.** When Reviewer surfaces something outside the current commit's scope, every finding must be assigned one of four dispositions: (a) fix in the current commit, (b) commit it separately on this branch, (c) file a new issue with concrete acceptance criteria, or (d) accept it as-is. "Out of scope" is not a disposition. "Note it for later" is not a disposition unless you also say which of (a)–(d) "later" means.
-
-**Disposition (d) always requires operator approval** — neither you nor planner can drop a finding on your own. For (c), the issue must be filed in this session, with its ID or URL in the status update; a promise to file it later is dropping the work. If you are orchestrated by karen, route the decision through karen's section 9 procedure (consult planner, paste his recommendation verbatim, escalate to the operator for any "accept as-is" or any unclear answer). If you are running directly, consult the operator before choosing (c) or (d).
-
-**Build must pass before every commit, amend, and rebase stop.** Never commit code that doesn't compile or pass tests. Fix build failures first, then commit, amend, or continue the rebase.
-
-**Planner is for approach, Reviewer is for execution.** Planner reviews your plan before you write code. Reviewer reviews your code after you write it. Don't conflate the two.
-
-## Acknowledgment
-
-After reviewing this skill, state: "I have reviewed the implement skill and am ready to follow the commit workflow."
+Remove the worktree after the PR merges, or when the operator abandons the change.
