@@ -666,7 +666,13 @@ export async function createAgentToolset(
       rootsProvider: createWorktreeRootsProvider(cwd),
     }),
     createUseSkillTool(cwd, skillDirs, args.telemetry),
-    createApplyPatchTool(cwd),
+    createApplyPatchTool(cwd, {
+      allowOutside: () => permissionGate.getSkipPermissions(),
+      rootsProvider: createWorktreeRootsProvider(cwd),
+      ...(args.secretGuardExtraDeniedPaths !== undefined
+        ? { extraDeniedPaths: args.secretGuardExtraDeniedPaths }
+        : {}),
+    }),
     builtinExaEnabled
       ? createExaMCPWebFetchTool({ connect: waitForBuiltinExaConnection })
       : createWebFetchTool(),

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
@@ -6,7 +6,10 @@ import { expect, test } from "bun:test";
 import { createApplyPatchTool } from "./apply-patch-tool.js";
 
 async function run(cwd: string, input: string): Promise<string> {
-  const tool = createApplyPatchTool(cwd);
+  const tool = createApplyPatchTool(cwd, {
+    allowOutside: () => false,
+    rootsProvider: () => [],
+  });
   if (tool.kind !== "string") throw new Error("expected a string tool");
   return tool.handler({ input }, new AbortController().signal);
 }
@@ -64,4 +67,26 @@ test("rejects paths that escape the workspace", async () => {
     "*** Begin Patch\n*** Add File: ../escape.txt\n+x\n*** End Patch",
   );
   expect(out).toContain("escapes the workspace");
+});
+
+test("refuses to write a secret file", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "apply-patch-"));
+  const out = await run(
+    cwd,
+    "*** Begin Patch\n*** Add File: .env\n+TOKEN=x\n*** End Patch",
+  );
+  expect(out).toContain("sensitive file blocked");
+  await expect(stat(join(cwd, ".env"))).rejects.toThrow();
+});
+
+test("refuses to follow a workspace symlink out of the workspace", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "apply-patch-"));
+  const outside = await mkdtemp(join(tmpdir(), "apply-patch-outside-"));
+  await symlink(outside, join(cwd, "link"));
+  const out = await run(
+    cwd,
+    "*** Begin Patch\n*** Add File: link/pwned.txt\n+x\n*** End Patch",
+  );
+  expect(out).toContain("escapes the workspace");
+  await expect(stat(join(outside, "pwned.txt"))).rejects.toThrow();
 });
