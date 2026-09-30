@@ -23,7 +23,7 @@ export const READ_TOOLS = [
 
 /**
  * Path mutation tools shared by closed directors. Review/explore/orchestrator
- * /intern mount these path tools (lane discipline lives in prompts, not the
+ * mount these path tools (lane discipline lives in prompts, not the
  * capability filter). delete is advertised on write surfaces, omitted from
  * READ_TOOLS only.
  */

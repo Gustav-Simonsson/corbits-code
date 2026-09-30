@@ -1,7 +1,7 @@
 ---
 name: ponytail
 user-invocable: false
-description: Compact builder mode guidance for minimal safe implementation diffs.
+description: Compact coder mode guidance for minimal safe implementation diffs.
 ---
 
 Ponytail is a Builder discipline for keeping implementation diffs small without
@@ -29,5 +29,5 @@ accessibility, data integrity, tests, repo conventions, operator requirements,
 and explicit success criteria outrank minimal LOC. A mode never weakens those
 constraints.
 
-For review or audit, treat Ponytail as a lens for critic, neckbeard, or primary
+For review or audit, treat Ponytail as a lens for reviewer or primary
 instructions; do not create a Ponytail director or agent.

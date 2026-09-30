@@ -74,6 +74,7 @@ import {
 } from "./capability-preflight.js";
 import {
   advertisedToolName,
+  foldFileToolNames,
   foldFileToolDefinitions,
   projectToolDefinitions,
   toolProfileForModel,
@@ -1076,9 +1077,16 @@ async function runSubAgentInner(
       ...(attachedSection !== undefined ? [attachedSection] : []),
     ];
     const toolProfile = toolProfileForModel(params.provider);
-    const toolNames = tools.map((t) =>
-      advertisedToolName(t.definition.name, toolProfile),
-    );
+    // The prompt lists what the wire carries: on gpt the file tools fold into
+    // apply_patch, which is already mounted, so names can repeat.
+    const toolNames = [
+      ...new Set(
+        foldFileToolNames(
+          tools.map((t) => t.definition.name),
+          toolProfile,
+        ).map((name) => advertisedToolName(name, toolProfile)),
+      ),
+    ];
     const systemPrompt = buildSubAgentSystemPrompt(
       extensions.length > 0 ? extensions : undefined,
       environment,

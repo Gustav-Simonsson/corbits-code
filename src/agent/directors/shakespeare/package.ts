@@ -13,7 +13,7 @@ export const shakespearePackage: DirectorPackage = {
     "shipping product features",
     "pure code review",
     "orchestration / fleet control",
-    "acting as tester or implementer",
+    "acting as reviewer or implementer",
   ],
   description: "Docs maintenance — PRODUCT / ARCHITECTURE / IMPLEMENTATION",
   systemPrompt: `You are ShakespeareDirector (Shakespeare), a specialist in Corbits Code.

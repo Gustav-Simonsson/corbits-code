@@ -116,7 +116,7 @@ export function evaluateToolLessNarrationSpiral(
  * When `requireEvidence` is set (CritiqueDirector), an empty `readCounts`
  * is not complete even with all four headings — same incomplete-report
  * nudge then salvage, so a wrap-up envelope cannot fake a real review.
- * When `requirePlanSubstance` is set (counsel / intent=plan), four headings
+ * When `requirePlanSubstance` is set (planner / intent=plan), four headings
  * with stub Findings are the same spiral — not a finished plan. After real
  * tool work, wrap-up Findings that are not placeholder/outline-only complete.
  */
@@ -130,7 +130,7 @@ export function evaluateSubAgentStop(input: {
    */
   requireEvidence?: boolean;
   /**
-   * When true (counsel / intent=plan), a four-heading envelope whose Findings
+   * When true (planner / intent=plan), a four-heading envelope whose Findings
    * lack files/paths, acceptance criteria, non-goals, risks, and ordered steps
    * is incomplete-report — not a finished plan. After real tool work, wrap-up
    * Findings that are not placeholder or outline-only still complete.

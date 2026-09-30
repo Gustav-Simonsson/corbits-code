@@ -299,7 +299,7 @@ export interface ResolveEffortForRoleOpts {
   pin?: ReasoningEffort;
   /**
    * Package modelRole default (CL-5816). When set, replaces the binary
-   * orchestrator/leaf default so intern can be low while implement stays medium.
+   * orchestrator/leaf default so a light worker can run low while coder stays medium.
    */
   roleDefault?: ReasoningEffort;
   /** Parent session effort — used only when the role default is not supported. */

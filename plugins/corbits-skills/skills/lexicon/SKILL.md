@@ -39,8 +39,8 @@ checkout — never float mid-run.
   `src/agent/directors/<id>/package.ts` as `systemPrompt`.
 - Agents side: `plugins/*/agents/*.md` files in the checkout, matched
   by file basename — `<id>.md` matches director `<id>` exactly.
-- Near-misses are not diffs: `critique.md` is not `critic`, and
-  `marketing-intern.md` is not `intern`. List them as unmatched, do
+- Near-misses are not diffs: `critique.md` is not `reviewer`, and
+  `marketing-intern.md` is not `coder`. List them as unmatched, do
   not force a comparison.
 
 ## Step 3: Diff same-name pairs
@@ -48,7 +48,7 @@ checkout — never float mid-run.
 For each matched pair, compare the director `systemPrompt` against the
 agents file body at the pin. Report per director: in sync, or drifted
 with the drifted sections quoted on both sides. Note the ported-from
-commit recorded in the package comment (e.g. gaasbot's `@ 6e16b6c`)
+commit recorded in the package comment (e.g. `@ 6e16b6c`)
 when it disagrees with the pin — a stale port marker is itself drift.
 
 ## Step 4: Report assembled prompt sizes
