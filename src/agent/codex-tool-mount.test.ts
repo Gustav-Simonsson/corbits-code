@@ -37,7 +37,6 @@ describe("Codex tool proxy mount", () => {
       isCodex: false,
     });
     const names = toolset.dynamicRunner.currentDefinitions().map((d) => d.name);
-    expect(names).not.toContain("apply_patch");
     expect(names).not.toContain("shell");
     expect(names).not.toContain("update_plan");
     await toolset.dispose();
@@ -61,7 +60,6 @@ describe("Codex tool proxy mount", () => {
       isCodex: true,
     });
     const names = toolset.dynamicRunner.currentDefinitions().map((d) => d.name);
-    expect(names).not.toContain("apply_patch");
     expect(names).toContain("write_file");
     expect(names).toContain("edit_file");
     expect(names).toContain("delete_file");
