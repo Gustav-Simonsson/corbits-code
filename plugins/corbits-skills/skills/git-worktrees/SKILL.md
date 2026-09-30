@@ -7,7 +7,7 @@ description: Create and tear down a worktree from origin/<default-branch>. Load 
 
 # git-worktrees
 
-Every workflow that writes code or checks out a branch works in a worktree, not the main checkout. Load this with `use_skill("git-worktrees")` and run the commands through `bash`.
+Every workflow that writes code or checks out a branch (`/implement`, `/refactor`, and `/review` of a PR) works in a worktree, not the main checkout. Load this with `use_skill("git-worktrees")` and run the commands through `bash`. Tear the worktree down after the PR merges or the change is abandoned.
 
 ## Create from origin/<default-branch>
 
