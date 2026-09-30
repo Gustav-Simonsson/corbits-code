@@ -325,7 +325,7 @@ shape.
   merge into the same `commandPlugin` as `commands/*.md`. Untagged skills still
   become slashes (marketplace backward compatibility). Frontmatter
   `argument-hint` is preserved so the TUI can show greyed arg guidance (e.g.
-  `/create-issue` → `[description] [--from-doc]`). This is an additional
+  `/issue` → `[description] [--from-doc]`). This is an additional
   surface: `discoverSkills` skips skills with `disable-model-invocation: true`
   from the lazy listing (those stay loadable via explicit `use_skill` /
   `resolveSkillBody`), so the model does not auto-suggest background libraries.

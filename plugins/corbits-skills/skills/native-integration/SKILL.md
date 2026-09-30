@@ -28,11 +28,11 @@ Move the issue to In Review when the PR is ready for review. Draft or WIP PRs st
 
 ## Non-git folders
 
-A folder without `.git` is a valid working directory (scratch, unpacked tarball, new project). Git-using skills (`implement`, `review`, `pull-request-review`) no-op or ask when they need a repo. Do not invent a git repo to satisfy them.
+A folder without `.git` is a valid working directory (scratch, unpacked tarball, new project). Git-using skills (`implement`, `review`, `pull-request`) no-op or ask when they need a repo. Do not invent a git repo to satisfy them.
 
 ## Tracker-agnostic issues
 
-`/create-issue` is not Linear-only:
+`/issue` is not Linear-only:
 
 1. Linear MCP available: Linear.
 2. Else ask which tracker (GitHub, GitLab, other) unless `.corbits/MEMORY.md` already has `Preferred issue tracker`.
@@ -51,7 +51,7 @@ This step is the delivery of the review, not a second pass of analysis. By the t
 
 Post when any of these is true:
 
-- The user asked for a PR review (`pull-request-review`, a PR URL, or an explicit "review #N")
+- The user asked for a PR review (a PR URL or an explicit "review #N")
 - `linear-issue-workflow` Phase 5 self-review has cleared and Phase 6 is opening or updating the PR
 - An open PR exists for the branch and the review's purpose is to leave a record on it
 
