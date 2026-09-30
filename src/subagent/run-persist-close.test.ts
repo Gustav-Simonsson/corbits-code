@@ -158,7 +158,6 @@ describe("worker persist reaps leftover registry children", () => {
     const token = `ic_worker_persist_${randomUUID()}`;
     let registry: BackgroundShellRegistry | undefined;
     const disposeReasons: string[] = [];
-    let leftoverId: string | undefined;
 
     await withMockedModuleDuring(
       import.meta.resolve("../shell/background-shell.js"),
@@ -193,7 +192,6 @@ describe("worker persist reaps leftover registry children", () => {
                 cwd,
               });
               if ("error" in started) throw new Error(started.error);
-              leftoverId = started.id;
               expect(captured.runningCount()).toBe(1);
               if (process.platform !== "win32") {
                 await waitUntilPresent(token);
@@ -226,8 +224,6 @@ describe("worker persist reaps leftover registry children", () => {
               expect(disposeReasons).toEqual(["sub-agent closed"]);
               const captured = defined(registry);
               expect(captured.runningCount()).toBe(0);
-              const leftover = await captured.collect(defined(leftoverId), 0);
-              expect(leftover.state).toBe("not-found");
               if (process.platform !== "win32") {
                 await waitUntilGone(token);
               }

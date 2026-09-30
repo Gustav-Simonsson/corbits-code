@@ -1506,10 +1506,8 @@ async function runSubAgentInner(
     // Aborting the send signal only rejects the promise; the child reactor keeps
     // running until close() (same hard-stop rule as the parent in runner.ts).
     closeOnAbort = (): void => {
-      // Parent abort / deadline / close_agent: unpark any registry waiters so
-      // teardown cannot wedge on one. interrupt_agent is
-      // the keep-alive path (releaseWaiters only, children stay).
-      backgroundShells.releaseWaiters();
+      // interrupt_agent is the keep-alive path: it never reaches here, so its
+      // background children stay.
       backgroundShells.disposeAll("parent abort");
       void (async () => {
         try {
@@ -1560,11 +1558,9 @@ async function runSubAgentInner(
         }
       };
       // Interrupt only fires interruptController — never runController/
-      // close, so it cannot hang teardown on a wedged agent.close. Release
-      // parked registry waiters too: the interrupt settles the turn while the
-      // session (and its live shell children) stays alive.
+      // close, so it cannot hang teardown on a wedged agent.close. The session
+      // (and its live shell children) stays alive.
       const interrupt = (): void => {
-        backgroundShells.releaseWaiters();
         if (!interruptController.signal.aborted) {
           interruptController.abort(
             new Error("interrupted by interrupt_agent"),

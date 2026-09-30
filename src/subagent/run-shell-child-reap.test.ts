@@ -5,14 +5,12 @@
  * awaitBoundedTeardown): posixTools.dispose() runs the shell-guard
  * reapLiveChildren (SIGKILL the child process groups, 2s reap wait), then
  * agent.close() and the session-stream drain are awaited — voided, not hung
- * on, when the reap reports leftovers. Interrupt additionally releases
- * parked registry waiters so a worker blocked in shell output
- * collection comes back as still-running instead of wedging the run.
+ * on, when the reap reports leftovers.
  *
  * These tests drive the real `runSubAgent` with a stub agent whose `send`
  * holds a REAL live `sleep` child (killed on abort, like runGuardedShell's
  * onAbort) and whose `stream()` stays open until the session closes — the
- * production shape of a worker parked in shell collection.
+ * production shape of a worker parked in a shell call.
  */
 import { describe, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -53,7 +51,7 @@ async function waitForChildExit(
 
 /**
  * Stub agent modeling a worker parked behind a live shell child: `send`
- * spawns a real `sleep` descendant and pends (like shell collection output);
+ * spawns a real `sleep` descendant and pends (like a pending shell call);
  * the abort listener kills the child first, mirroring runGuardedShell's
  * onAbort. `stream()` stays open until `releaseStream` — the session cannot
  * drain while the descendant is wedged. `leakOnAbort` models a stub that
