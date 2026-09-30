@@ -364,18 +364,14 @@ describe("tierGateRequiresTools", () => {
 
   test("tier-gated leaf channel names Tier 3 leaves instead of claiming no director mounts it", () => {
     const gated = tierGateRequiresTools(["submit_result"], "orchestrator");
-    expect(gated?.alternatives ?? []).toEqual([
-      "bruckheimer",
-      "builder",
-      "counsel",
-    ]);
+    expect(gated?.alternatives ?? []).toEqual(["artist", "coder", "designer"]);
     const message = formatCapabilityUnavailable(
       gated ?? { code: "missing_tool", tool: "submit_result" },
       "test-orchestrator",
     );
     expect(message).toContain("Tier 3 leaf workers only");
     expect(message).toContain(
-      "Re-dispatch to one of (bruckheimer, builder, counsel)",
+      "Re-dispatch to one of (artist, coder, designer)",
     );
     expect(message).not.toContain("No spawnable director mounts");
   });

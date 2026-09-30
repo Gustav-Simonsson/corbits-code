@@ -334,7 +334,7 @@ describe("createAdvertisedToolset", () => {
     expect(names).not.toContain("mcp__acme__do");
   });
 
-  test("primary keeps skill_search for grok/kimi providers (always orchestrator)", () => {
+  test("primary keeps tool_search for grok/kimi providers (always orchestrator)", () => {
     for (const getProvider of [
       () => ({ providerName: "xai", model: "grok-4-1-fast-non-reasoning" }),
       () => ({ providerName: "moonshot", model: "kimi-k2-0711" }),
@@ -343,12 +343,12 @@ describe("createAdvertisedToolset", () => {
         wiring({ getProvider }),
       );
       const names = computeAdvertised([
-        def("skill_search"),
+        def("tool_search"),
         def("use_skill"),
       ]).map((d) => d.name);
-      expect(names).toContain("skill_search");
+      expect(names).toContain("tool_search");
       expect(names).toContain("skill");
-      expect(isAdvertised("skill_search")).toBe(true);
+      expect(isAdvertised("tool_search")).toBe(true);
     }
   });
 });

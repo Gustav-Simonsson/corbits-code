@@ -252,7 +252,11 @@ export interface ExecDirectorOverlay {
 export function resolveExecDirectorOverlay(
   director: DirectorId | undefined,
 ): ExecDirectorOverlay {
-  if (director === undefined || director === "skywalker") {
+  if (
+    director === undefined ||
+    director === "dispatch" ||
+    (director as string) === "skywalker"
+  ) {
     return { mountFleet: true };
   }
   return resolveExecDirectorOverlayForPackage(DIRECTOR_REGISTRY[director]);

@@ -5,7 +5,6 @@
     "composite": false,
     "baseUrl": ".",
     "paths": {
-      "@corbits/agent-intern": ["./agents/intern/src/index.ts"],
       "@corbits/provider-opencode-go": ["./packages/opencode-go/src/index.ts"],
       "@corbits/first-class-providers": [
         "./packages/first-class-providers/src/index.ts"
@@ -18,7 +17,6 @@
     "src/**/*.ts",
     "testkit/**/*.ts",
     "packages/**/*.ts",
-    "agents/**/*.ts",
     "e2e/**/*.ts",
     "evals/**/*.ts",
     "scripts/**/*.ts"

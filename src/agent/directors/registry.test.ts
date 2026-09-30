@@ -13,9 +13,9 @@ import {
 } from "./registry.js";
 
 describe("director registry", () => {
-  test("closed set has exactly 20 directors", () => {
-    expect(DIRECTOR_IDS).toHaveLength(20);
-    expect(listDirectors()).toHaveLength(20);
+  test("closed set has exactly 10 directors", () => {
+    expect(DIRECTOR_IDS).toHaveLength(10);
+    expect(listDirectors()).toHaveLength(10);
     for (const id of DIRECTOR_IDS) {
       expect(DIRECTOR_REGISTRY[id].id).toBe(id);
     }
@@ -30,9 +30,9 @@ describe("director registry", () => {
   });
 
   test("resolve by agentId", () => {
-    const r = resolveDirector({ agentId: "skywalker" });
+    const r = resolveDirector({ agentId: "dispatch" });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.package.id).toBe("skywalker");
+    if (r.ok) expect(r.package.id).toBe("dispatch");
   });
 
   test("unknown agent errors with guidance", () => {
@@ -47,7 +47,7 @@ describe("director registry", () => {
   test("intent map defaults (no general)", () => {
     expect(resolveDirector({ intent: "implement" })).toMatchObject({
       ok: true,
-      package: { id: "builder" },
+      package: { id: "coder" },
     });
     expect(resolveDirector({ intent: "explore" })).toMatchObject({
       ok: true,
@@ -55,20 +55,20 @@ describe("director registry", () => {
     });
     expect(resolveDirector({ intent: "plan" })).toMatchObject({
       ok: true,
-      package: { id: "counsel" },
+      package: { id: "planner" },
     });
     expect(resolveDirector({ intent: "review" })).toMatchObject({
       ok: true,
-      package: { id: "critic" },
+      package: { id: "reviewer" },
     });
     const general = resolveDirector({ intent: "general" });
     expect(general.ok).toBe(false);
   });
 
   test("explicit agentId wins over intent", () => {
-    const r = resolveDirector({ agentId: "greybeard", intent: "implement" });
+    const r = resolveDirector({ agentId: "coder", intent: "plan" });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.package.id).toBe("greybeard");
+    if (r.ok) expect(r.package.id).toBe("coder");
   });
 
   test("missing agent and intent errors", () => {
@@ -77,9 +77,11 @@ describe("director registry", () => {
   });
 
   test("isDirectorId", () => {
-    expect(isDirectorId("critic")).toBe(true);
-    expect(isDirectorId("critique")).toBe(false);
-    expect(isDirectorId("build")).toBe(false);
+    expect(isDirectorId("reviewer")).toBe(true);
+    expect(isDirectorId("coder")).toBe(true);
+    expect(isDirectorId("planner")).toBe(true);
+    expect(isDirectorId("critic")).toBe(false);
+    expect(isDirectorId("builder")).toBe(false);
     expect(isDirectorId("nope")).toBe(false);
   });
 
@@ -104,70 +106,37 @@ describe("director registry", () => {
     expect(explorer.capabilities?.tools).toContain("delete_file");
     expect(explorer.orchestrator).toBe(false);
 
-    const grey = packageToProfile(DIRECTOR_REGISTRY.greybeard);
-    expect(grey.orchestrator).toBe(false);
+    const reviewer = packageToProfile(DIRECTOR_REGISTRY.reviewer);
+    expect(reviewer.orchestrator).toBe(false);
 
     const shakespeare = packageToProfile(DIRECTOR_REGISTRY.shakespeare);
     expect(shakespeare.capabilities?.mode).toBe("allow");
     expect(shakespeare.capabilities?.tools).toContain("write_file");
   });
 
-  test("directorProfiles is the spawn catalog (closed set minus skywalker)", () => {
+  test("directorProfiles is the spawn catalog (closed set minus dispatch)", () => {
     const profiles = directorProfiles();
-    expect(profiles).toHaveLength(19);
-    expect(profiles.map((p) => p.id)).not.toContain("skywalker");
+    expect(profiles).toHaveLength(9);
+    expect(profiles.map((p) => p.id)).not.toContain("dispatch");
   });
 
-  // Phase 5 acceptance (CL-5818 / CL-5843) as converted by CL-7670: only the
-  // primary spawns — greybeard is a leaf.
-  test("greybeard is a leaf with no spawn", () => {
-    const g = DIRECTOR_REGISTRY.greybeard;
-    expect(g.spawn.maySpawn).toBe(false);
-    expect(g.spawn.allowlist).toBeUndefined();
-    expect(g.tier).toBe("leaf");
-    expect(packageToProfile(g).orchestrator).toBe(false);
+  test("coder is a leaf with no spawn", () => {
+    const c = DIRECTOR_REGISTRY.coder;
+    expect(c.spawn.maySpawn).toBe(false);
+    expect(c.spawn.allowlist).toBeUndefined();
+    expect(c.tier).toBe("leaf");
+    expect(packageToProfile(c).orchestrator).toBe(false);
   });
 
-  test("skywalker is the only maySpawn:true closed director", () => {
+  test("dispatch is the only maySpawn:true closed director", () => {
     const spawners = DIRECTOR_IDS.filter(
       (id) => DIRECTOR_REGISTRY[id].spawn.maySpawn,
     );
-    expect(spawners).toEqual(["skywalker"]);
-  });
-
-  test("migrator is a dry-run-scoped leaf with no fleet verbs (CL-7671)", () => {
-    const m = DIRECTOR_REGISTRY.migrator;
-    expect(m.id).toBe("migrator");
-    expect(m.tier).toBe("leaf");
-    expect(m.spawn.maySpawn).toBe(false);
-    expect(m.modelRole).toBe("plan");
-    expect(m.tools?.allow).toEqual(["read_file", "grep", "lsp", "run_shell"]);
-    expect(packageToProfile(m).orchestrator).toBe(false);
-    const r = resolveDirector({ agentId: "migrator" });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.package.id).toBe("migrator");
+    expect(spawners).toEqual(["dispatch"]);
   });
 
   test("closed directors mount product write tools", () => {
-    for (const id of [
-      "critic",
-      "greybeard",
-      "neckbeard",
-      "explorer",
-      "counsel",
-      "testsmith",
-      "tester",
-      "gaasbot",
-      "intern",
-      "builder",
-      "shakespeare",
-      "bruckheimer",
-      "rand",
-      "prober",
-      "skywalker",
-      "gauntlet",
-      "warden",
-    ] as const) {
+    for (const id of DIRECTOR_IDS) {
       const allow = DIRECTOR_REGISTRY[id].tools?.allow ?? [];
       expect(allow).toContain("write_file");
       expect(allow).toContain("edit_file");
@@ -175,79 +144,27 @@ describe("director registry", () => {
     }
   });
 
-  test("draper and emil are read-only critique leaves (CL-8231 / CL-8234)", () => {
-    for (const id of ["draper", "emil"] as const) {
-      const allow = DIRECTOR_REGISTRY[id].tools?.allow ?? [];
-      expect(allow).toContain("read_file");
-      expect(allow).toContain("skill_search");
-      expect(allow).toContain("use_skill");
-      expect(allow).not.toContain("write_file");
-      expect(allow).not.toContain("edit_file");
-      expect(allow).not.toContain("delete_file");
-    }
-  });
-
-  test("builder mounts product writes; intern mounts writes without apply_patch; other leaves do not spawn", () => {
-    expect(DIRECTOR_REGISTRY.builder.tools?.allow).toEqual(
-      expect.arrayContaining(["write_file", "edit_file", "delete_file"]),
-    );
-    expect(
-      DIRECTOR_REGISTRY.builder.tools?.allow as readonly string[],
-    ).not.toContain("apply_patch");
-    const internAllow = DIRECTOR_REGISTRY.intern.tools?.allow ?? [];
-    expect(internAllow).toContain("run_shell");
-    expect(internAllow).toContain("write_file");
-    expect(internAllow).toContain("edit_file");
-    expect(internAllow).toContain("delete_file");
-    expect(internAllow).not.toContain("apply_patch");
-    for (const id of DIRECTOR_IDS) {
-      if (id === "skywalker") continue;
-      expect(DIRECTOR_REGISTRY[id].spawn.maySpawn).toBe(false);
-    }
-  });
-
-  test("skywalker primary mounts DIY writes plus the spawn surface", () => {
-    const s = DIRECTOR_REGISTRY.skywalker;
+  test("dispatch primary mounts DIY writes plus the spawn surface", () => {
+    const s = DIRECTOR_REGISTRY.dispatch;
     expect(s.tools?.allow).not.toContain("task");
     expect(s.tools?.allow).toContain("spawn_agent");
-    // CL-7678: wait_agents is exec-primary opt-in, off the Skywalker allow —
-    // TUI primary collects through mailbox mail.
     expect(s.tools?.allow).not.toContain("wait_agents");
     expect(s.tools?.allow).toContain("write_file");
     expect(s.tools?.allow).toContain("edit_file");
     expect(s.tools?.allow).toContain("delete_file");
-    expect(s.spawn.allowlist).toHaveLength(19);
+    expect(s.spawn.allowlist).toHaveLength(9);
   });
 
-  // CL-6941: tier and spawn.maySpawn independently encode "may this package
-  // spawn", hand-set across 20 files. This pins their agreement so drift
-  // (adding maySpawn: true without bumping tier, or vice versa) fails a test
-  // instead of surfacing as an unexplained FleetAuthorityError at dispatch.
   test("tier agrees with spawn.maySpawn for every director", () => {
     for (const id of DIRECTOR_IDS) {
       const pkg = DIRECTOR_REGISTRY[id];
       expect(pkg.tier !== "leaf").toBe(pkg.spawn.maySpawn);
       expect(tierForDirectorId(id)).toBe(pkg.tier);
     }
-    expect(DIRECTOR_REGISTRY.skywalker.tier).toBe("orchestrator");
-    // CL-7670: greybeard converted to a leaf — only the primary spawns.
-    expect(DIRECTOR_REGISTRY.greybeard.tier).toBe("leaf");
+    expect(DIRECTOR_REGISTRY.dispatch.tier).toBe("orchestrator");
   });
 
-  test("gauntlet is a mutation-check leaf (CL-7658)", () => {
-    const r = resolveDirector({ agentId: "gauntlet" });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.package.id).toBe("gauntlet");
-      expect(r.package.tier).toBe("leaf");
-      expect(r.package.spawn.maySpawn).toBe(false);
-      expect(r.package.modelRole).toBe("test");
-    }
-    expect(isDirectorId("gauntlet")).toBe(true);
-    expect(tierForDirectorId("gauntlet")).toBe("leaf");
-  });
-
-  test("prober is a measure-only leaf (CL-7656)", () => {
+  test("prober is a measure-only leaf", () => {
     const r = resolveDirector({ agentId: "prober" });
     expect(r.ok).toBe(true);
     if (r.ok) {

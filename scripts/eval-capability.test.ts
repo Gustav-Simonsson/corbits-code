@@ -405,9 +405,9 @@ describe("buildEvalDiagnostics", () => {
     expect(diagnostics.reasoningEffort).toBe("high");
   });
 
-  test("--director builder reports the director's own advertised allowlist", async () => {
+  test("--director coder reports the director's own advertised allowlist", async () => {
     const diagnostics = await buildEvalDiagnostics(
-      sampleConfig({ director: "builder" }),
+      sampleConfig({ director: "coder" }),
     );
     expect(diagnostics.advertisedTools).not.toEqual(
       (await buildEvalDiagnostics(sampleConfig({}))).advertisedTools,

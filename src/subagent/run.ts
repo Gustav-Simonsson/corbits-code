@@ -485,26 +485,27 @@ function salvageFindingsText(
 }
 
 /**
- * Arm requireEvidence only for the critic director. Greybeard is also
- * intent=review and may spawn-only then envelope; that is not a fake
- * review — do not pull it into the empty-readCounts gate.
+ * Arm requireEvidence only for the reviewer director.
  */
 export function shouldRequireEvidence(input: {
   intent?: TaskIntent;
   directorId?: string;
 }): boolean {
-  return input.directorId === "critic";
+  return input.directorId === "reviewer" || input.directorId === "critic";
 }
 
 /**
- * Arm plan-substance Findings on counsel or intent=plan. Do not key off
- * modelRole === "plan" — gaasbot shares that role and is not a plan author.
+ * Arm plan-substance Findings on planner or intent=plan.
  */
 export function shouldRequirePlanSubstance(input: {
   intent?: TaskIntent;
   directorId?: string;
 }): boolean {
-  return input.intent === "plan" || input.directorId === "counsel";
+  return (
+    input.intent === "plan" ||
+    input.directorId === "planner" ||
+    input.directorId === "counsel"
+  );
 }
 
 const submitResultDefinition: ToolDefinition = {

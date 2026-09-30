@@ -5,9 +5,10 @@ import { submitOutputDefinition } from "../agent/director.js";
 import { DIRECTOR_REGISTRY } from "../agent/directors/registry.js";
 import {
   BUILD_TOOLS,
+  DISPATCH_TOOLS,
   REVIEW_TOOLS,
-  SKYWALKER_TOOLS,
 } from "../agent/directors/tool-sets.js";
+import type { DirectorId } from "../agent/directors/types.js";
 import {
   advertisedToolNamesForSessionMode,
   createToolIndex,
@@ -82,15 +83,15 @@ describe("exec director allowlist", () => {
     expect(overlay.advertisedAllow).not.toContain(OUTSIDE_ALLOW);
   });
 
-  test("critic overlay narrows advertised tools to the package allow list", () => {
-    const overlay = resolveExecDirectorOverlay("critic");
+  test("reviewer overlay narrows advertised tools to the package allow list", () => {
+    const overlay = resolveExecDirectorOverlay("reviewer");
     expect(overlay.advertisedAllow).toBeDefined();
     expect(overlay.advertisedAllow).not.toContain("tool_search");
     expect(overlay.advertisedAllow).not.toContain(OUTSIDE_ALLOW);
   });
 
-  test("skywalker keeps the product default — no allow list", () => {
-    const overlay = resolveExecDirectorOverlay("skywalker");
+  test("dispatch keeps the product default — no allow list", () => {
+    const overlay = resolveExecDirectorOverlay("dispatch");
     expect(overlay.advertisedAllow).toBeUndefined();
     expect(overlay.mountFleet).toBe(true);
   });
@@ -283,8 +284,8 @@ describe("exec director allowlist", () => {
     expect(names).toContain("mcp__acme__do");
   });
 
-  test("skywalker overlay leaves every tool allowed", () => {
-    const overlay = resolveExecDirectorOverlay("skywalker");
+  test("dispatch overlay leaves every tool allowed", () => {
+    const overlay = resolveExecDirectorOverlay("dispatch");
     expect(isExecOverlayToolAllowed(overlay, OUTSIDE_ALLOW)).toBe(true);
   });
 });
@@ -567,24 +568,22 @@ describe("runExec", () => {
 });
 
 describe("resolveExecDirectorOverlay", () => {
-  test("builder exec primary does not mount fleet", () => {
-    const overlay = resolveExecDirectorOverlay("builder");
+  test("coder exec primary does not mount fleet", () => {
+    const overlay = resolveExecDirectorOverlay("coder");
     expect(overlay.mountFleet).toBe(false);
     expect(overlay.advertisedAllow).toBeDefined();
     expect(overlay.advertisedAllow).toEqual([...BUILD_TOOLS]);
     const buildToolSet = new Set<string>(BUILD_TOOLS);
-    const fleetVerbs = SKYWALKER_TOOLS.filter(
-      (name) => !buildToolSet.has(name),
-    );
+    const fleetVerbs = DISPATCH_TOOLS.filter((name) => !buildToolSet.has(name));
     expect(fleetVerbs.length).toBeGreaterThan(0);
     for (const verb of fleetVerbs) {
       expect(overlay.advertisedAllow).not.toContain(verb);
     }
-    expect(overlay.systemPrompt).toContain("BuilderDirector");
+    expect(overlay.systemPrompt).toContain("Coder");
   });
 
-  test("greybeard exec primary is a leaf overlay without fleet verbs (CL-7670)", () => {
-    const overlay = resolveExecDirectorOverlay("greybeard");
+  test("reviewer exec primary is a leaf overlay without fleet verbs", () => {
+    const overlay = resolveExecDirectorOverlay("reviewer");
     expect(overlay.mountFleet).toBe(false);
     expect(overlay.advertisedAllow).toBeDefined();
     expect(overlay.advertisedAllow).toEqual([...REVIEW_TOOLS]);
@@ -592,19 +591,21 @@ describe("resolveExecDirectorOverlay", () => {
     expect(overlay.advertisedAllow).not.toContain("wait_agents");
     expect(overlay.advertisedAllow).not.toContain("search_agents");
     expect(overlay.advertisedAllow).toContain("write_file");
-    expect(overlay.systemPrompt).toContain("GreybeardDirector");
+    expect(overlay.systemPrompt).toContain("Reviewer");
   });
 
-  test("skywalker default still can mount fleet", () => {
+  test("dispatch default still can mount fleet", () => {
     expect(resolveExecDirectorOverlay(undefined).mountFleet).toBe(true);
     expect(resolveExecDirectorOverlay(undefined).systemPrompt).toBeUndefined();
     expect(
       resolveExecDirectorOverlay(undefined).advertisedAllow,
     ).toBeUndefined();
-    expect(resolveExecDirectorOverlay("skywalker").mountFleet).toBe(true);
+    expect(resolveExecDirectorOverlay("dispatch").mountFleet).toBe(true);
+    expect(resolveExecDirectorOverlay("dispatch").systemPrompt).toBeUndefined();
     expect(
-      resolveExecDirectorOverlay("skywalker").systemPrompt,
-    ).toBeUndefined();
+      resolveExecDirectorOverlay("skywalker" as unknown as DirectorId)
+        .mountFleet,
+    ).toBe(true);
   });
 });
 
@@ -612,7 +613,7 @@ describe("exec advertised tools vs TUI", () => {
   const sessionMode = "orchestrator" as const;
 
   test("non-TTY exec advertised tools exclude ask_operator", () => {
-    const overlay = resolveExecDirectorOverlay("skywalker");
+    const overlay = resolveExecDirectorOverlay("dispatch");
     const names =
       overlay.advertisedAllow ??
       advertisedToolNamesForSessionMode(sessionMode, {

@@ -7,35 +7,18 @@ import {
 } from "./identity.js";
 import { DIRECTOR_REGISTRY } from "./registry.js";
 
-const ATTACHED_STYLE_PHILOSOPHY = [
-  "builder",
-  "counsel",
-  "critic",
-  "greybeard",
-  "neckbeard",
-  "shakespeare",
-  "gaasbot",
-  "warden",
-] as const;
-
 describe("formatDirectorSystemPrompt", () => {
-  test("prefixes agent id, model role, and lists skill names without bodies", () => {
-    const text = formatDirectorSystemPrompt(DIRECTOR_REGISTRY.builder);
-    expect(text.startsWith("Identity: agent id `builder`")).toBe(true);
-    expect(text).toContain('spawn_agent(agent="builder")');
+  test("prefixes agent id, model role, and formats system prompt", () => {
+    const text = formatDirectorSystemPrompt(DIRECTOR_REGISTRY.coder);
+    expect(text.startsWith("Identity: agent id `coder`")).toBe(true);
+    expect(text).toContain('spawn_agent(agent="coder")');
     expect(text).toContain("Model role: implement.");
-    for (const skill of ["style", "philosophy", "native-runtime"]) {
-      expect(text).toContain(skill);
-    }
-    // Skill bodies are injected by attached-skills, never baked into the
-    // director prompt itself.
-    expect(text).not.toContain("# Baked skill guidance");
-    expect(text).toContain(DIRECTOR_REGISTRY.builder.systemPrompt);
+    expect(text).toContain(DIRECTOR_REGISTRY.coder.systemPrompt);
   });
 
-  test("lists names even when no bodies would resolve", () => {
+  test("lists skills when configured", () => {
     const text = formatDirectorSystemPrompt({
-      ...DIRECTOR_REGISTRY.builder,
+      ...DIRECTOR_REGISTRY.coder,
       optionalSkills: ["does-not-exist-xyz"],
     });
     expect(text).toContain("does-not-exist-xyz");
@@ -43,46 +26,35 @@ describe("formatDirectorSystemPrompt", () => {
 });
 
 describe("packageAllowedSkillNames", () => {
-  test("unions attached then optional without duplicating", () => {
-    expect(packageAllowedSkillNames(DIRECTOR_REGISTRY.builder)).toEqual([
-      "style",
-      "philosophy",
-      "native-runtime",
-      "idiot-proof",
-      "ponytail",
-    ]);
-    expect(packageAllowedSkillNames(DIRECTOR_REGISTRY.intern)).toEqual([]);
+  test("returns undefined for universal skill access when unconfigured", () => {
+    expect(packageAllowedSkillNames(DIRECTOR_REGISTRY.coder)).toBeUndefined();
+    expect(
+      packageAllowedSkillNames(DIRECTOR_REGISTRY.dispatch),
+    ).toBeUndefined();
     expect(
       packageAllowedSkillNames(DIRECTOR_REGISTRY.explorer),
     ).toBeUndefined();
-    expect(packageAllowedSkillNames(DIRECTOR_REGISTRY.skywalker)).toEqual([
-      "style",
-      "philosophy",
-      "native-integration",
-      "interview",
-    ]);
   });
 
-  test("attachedSkills is style+philosophy only on directors that listed both", () => {
-    for (const pkg of Object.values(DIRECTOR_REGISTRY)) {
-      if ((ATTACHED_STYLE_PHILOSOPHY as readonly string[]).includes(pkg.id)) {
-        expect(pkg.attachedSkills).toEqual(["style", "philosophy"]);
-        expect(pkg.optionalSkills ?? []).not.toContain("style");
-        expect(pkg.optionalSkills ?? []).not.toContain("philosophy");
-        continue;
-      }
-      expect(pkg.attachedSkills).toBeUndefined();
-    }
+  test("unions attached then optional without duplicating when configured", () => {
+    expect(
+      packageAllowedSkillNames({
+        ...DIRECTOR_REGISTRY.coder,
+        attachedSkills: ["style"],
+        optionalSkills: ["style", "philosophy"],
+      }),
+    ).toEqual(["style", "philosophy"]);
   });
 });
 
 describe("defaultEffortForDirector", () => {
-  test("intern is low; implement is medium; greybeard is high", () => {
-    expect(defaultEffortForDirector(DIRECTOR_REGISTRY.intern)).toBe("low");
-    expect(defaultEffortForDirector(DIRECTOR_REGISTRY.builder)).toBe(
+  test("resolves correct effort levels for directors", () => {
+    expect(defaultEffortForDirector(DIRECTOR_REGISTRY.coder)).toBe(
       MODEL_ROLE_DEFAULT_EFFORT.implement,
     );
-    expect(defaultEffortForDirector(DIRECTOR_REGISTRY.greybeard)).toBe("high");
-    expect(defaultEffortForDirector(DIRECTOR_REGISTRY.skywalker)).toBe("high");
+    expect(defaultEffortForDirector(DIRECTOR_REGISTRY.planner)).toBe(
+      MODEL_ROLE_DEFAULT_EFFORT.plan,
+    );
+    expect(defaultEffortForDirector(DIRECTOR_REGISTRY.dispatch)).toBe("high");
   });
 });

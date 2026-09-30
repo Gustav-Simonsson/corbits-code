@@ -527,10 +527,10 @@ describe("loadConfig", () => {
     },
     { argv: ["run", "alias task"], expected: { task: "alias task" } },
     {
-      argv: ["exec", "--director", "builder", "ship it"],
-      expected: { task: "ship it", director: "builder" },
+      argv: ["exec", "--director", "coder", "ship it"],
+      expected: { task: "ship it", director: "coder" },
     },
-    // No --director leaves it undefined (skywalker default).
+    // No --director leaves it undefined (dispatch default).
     { argv: ["exec", "ship it"], expected: { task: "ship it" } },
   ] as const)("parses %j as exec", async ({ argv, expected }) => {
     const cwd = await emptyCwd();
@@ -653,7 +653,7 @@ describe("loadConfig", () => {
     const modelFirst = await loadFor(cwd, ["--model", model, "-p", "hello"]);
     const directorFirst = await loadFor(cwd, [
       "--director",
-      "skywalker",
+      "dispatch",
       "-p",
       "ship it",
     ]);
@@ -668,7 +668,7 @@ describe("loadConfig", () => {
     expect(modelFirst.model).toBe(model);
     expect(modelFirst.task).toBe("hello");
     expect(directorFirst.command).toBe("exec");
-    expect(directorFirst.director).toBe("skywalker");
+    expect(directorFirst.director).toBe("dispatch");
     expect(directorFirst.task).toBe("ship it");
   });
 

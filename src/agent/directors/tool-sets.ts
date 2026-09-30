@@ -53,17 +53,8 @@ export const DOCS_TOOLS = [
   ...PRODUCT_WRITE_TOOLS,
 ] as const;
 
-/** Review / counsel: read surface + path writes (skill tools arrive via READ_TOOLS; lane discipline in prompts). */
+/** Review / planner / explorer: read surface + path writes. */
 export const REVIEW_TOOLS = [...READ_TOOLS, ...PRODUCT_WRITE_TOOLS] as const;
-
-/** Mechanical intern: shell-first + path writes when the brief requires them. */
-export const INTERN_TOOLS = [
-  "run_shell",
-  "read_file",
-  "list_dir",
-  ...PRODUCT_WRITE_TOOLS,
-  ...SKILL_TOOLS,
-] as const;
 
 /**
  * Nested orchestrator surface (package filter): dispatch + path writes.
@@ -83,8 +74,8 @@ export const ORCHESTRATOR_TOOLS = [
   "read_agent_trace",
 ] as const;
 
-/** Skywalker primary: orchestrator surface plus fleet discovery (Tier-1 only). */
-export const SKYWALKER_TOOLS = [
-  ...ORCHESTRATOR_TOOLS,
-  "search_agents",
-] as const;
+/** Dispatch primary: orchestrator surface plus fleet discovery (Tier-1 only). */
+export const DISPATCH_TOOLS = [...ORCHESTRATOR_TOOLS, "search_agents"] as const;
+
+/** Legacy alias for backwards compatibility during migration. */
+export const SKYWALKER_TOOLS = DISPATCH_TOOLS;

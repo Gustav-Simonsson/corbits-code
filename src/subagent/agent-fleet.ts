@@ -1071,10 +1071,15 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
         applyResolvedProvider,
       });
       if ("error" in resolved) return fleetResult(call.id, resolved.error);
-      if (agentId === "skywalker" || resolved.directorId === "skywalker") {
+      if (
+        agentId === "dispatch" ||
+        resolved.directorId === "dispatch" ||
+        agentId === "skywalker" ||
+        resolved.directorId === "skywalker"
+      ) {
         return fleetResult(
           call.id,
-          "Error: skywalker is the primary session identity, not a spawned worker. Pass spawn_agent(agent=...) for a specialist (builder, explorer, counsel, critic, ...).",
+          "Error: dispatch is the primary session identity, not a spawned worker. Pass spawn_agent(agent=...) for a specialist (coder, explorer, planner, reviewer, ...).",
         );
       }
       if (deps.spawnAllowlist !== undefined && deps.spawnAllowlist.length > 0) {

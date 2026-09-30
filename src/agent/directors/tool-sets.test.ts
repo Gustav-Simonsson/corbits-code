@@ -6,8 +6,8 @@ import {
   PRODUCT_WRITE_TOOLS,
   READ_TOOLS,
   REVIEW_TOOLS,
-  INTERN_TOOLS,
   SKILL_TOOLS,
+  DISPATCH_TOOLS,
   SKYWALKER_TOOLS,
 } from "./tool-sets.js";
 
@@ -66,27 +66,31 @@ describe("DOCS_TOOLS", () => {
   });
 });
 
-describe("SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
+describe("DISPATCH_TOOLS / SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
   test("both mount product writes and split fleet tools", () => {
     for (const name of PRODUCT_WRITE_TOOLS) {
+      expect(DISPATCH_TOOLS as readonly string[]).toContain(name);
       expect(SKYWALKER_TOOLS as readonly string[]).toContain(name);
       expect(ORCHESTRATOR_TOOLS as readonly string[]).toContain(name);
     }
     for (const name of ["spawn_agent"] as const) {
+      expect(DISPATCH_TOOLS as readonly string[]).toContain(name);
       expect(SKYWALKER_TOOLS as readonly string[]).toContain(name);
       expect(ORCHESTRATOR_TOOLS as readonly string[]).toContain(name);
     }
-    // CL-7678: wait_agents is exec-primary opt-in (mountWaitAgents), not on the
-    // TUI/nested allowlists — those runs collect through mailbox mail.
-    for (const surface of [SKYWALKER_TOOLS, ORCHESTRATOR_TOOLS] as const) {
+    for (const surface of [
+      DISPATCH_TOOLS,
+      SKYWALKER_TOOLS,
+      ORCHESTRATOR_TOOLS,
+    ] as const) {
       expect(surface as readonly string[]).not.toContain("wait_agents");
+      expect(surface as readonly string[]).not.toContain("task");
     }
-    expect(SKYWALKER_TOOLS as readonly string[]).not.toContain("task");
-    expect(ORCHESTRATOR_TOOLS as readonly string[]).not.toContain("task");
   });
 
   // CL-7051: fleet discovery is Tier-1 only.
-  test("search_agents is on Skywalker only, not the nested orchestrator surface", () => {
+  test("search_agents is on Dispatch only, not the nested orchestrator surface", () => {
+    expect(DISPATCH_TOOLS as readonly string[]).toContain("search_agents");
     expect(SKYWALKER_TOOLS as readonly string[]).toContain("search_agents");
     expect(ORCHESTRATOR_TOOLS as readonly string[]).not.toContain(
       "search_agents",
@@ -100,8 +104,8 @@ describe("SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
       BUILD_TOOLS,
       DOCS_TOOLS,
       REVIEW_TOOLS,
-      INTERN_TOOLS,
       ORCHESTRATOR_TOOLS,
+      DISPATCH_TOOLS,
       SKYWALKER_TOOLS,
     ] as const) {
       expect(surface as readonly string[]).toContain("skill_search");
@@ -116,8 +120,8 @@ describe("SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
       BUILD_TOOLS,
       DOCS_TOOLS,
       REVIEW_TOOLS,
-      INTERN_TOOLS,
       ORCHESTRATOR_TOOLS,
+      DISPATCH_TOOLS,
       SKYWALKER_TOOLS,
     ] as const) {
       const names = surface as readonly string[];
@@ -126,26 +130,10 @@ describe("SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
   });
 });
 
-describe("REVIEW_TOOLS / INTERN_TOOLS", () => {
-  test("compose PRODUCT_WRITE_TOOLS", () => {
+describe("REVIEW_TOOLS", () => {
+  test("composes PRODUCT_WRITE_TOOLS", () => {
     for (const name of PRODUCT_WRITE_TOOLS) {
       expect(REVIEW_TOOLS as readonly string[]).toContain(name);
-      expect(INTERN_TOOLS as readonly string[]).toContain(name);
-    }
-  });
-
-  test("intern stays shell-first without grep/search/spawn", () => {
-    expect(INTERN_TOOLS).toContain("run_shell");
-    expect(INTERN_TOOLS).toContain("read_file");
-    expect(INTERN_TOOLS).toContain("list_dir");
-    expect(INTERN_TOOLS as readonly string[]).not.toContain("shell_collect");
-    for (const name of [
-      "grep",
-      "search_files",
-      "spawn_agent",
-      "wait_agents",
-    ] as const) {
-      expect(INTERN_TOOLS as readonly string[]).not.toContain(name);
     }
   });
 });
@@ -160,8 +148,8 @@ describe("BUILD_TOOLS", () => {
     expect(BUILD_TOOLS as readonly string[]).not.toContain("update_plan");
   });
 
-  test("review/orchestrator/intern do not list apply_patch", () => {
-    for (const surface of [REVIEW_TOOLS, ORCHESTRATOR_TOOLS, INTERN_TOOLS]) {
+  test("review and orchestrator do not list apply_patch", () => {
+    for (const surface of [REVIEW_TOOLS, ORCHESTRATOR_TOOLS]) {
       expect(surface as readonly string[]).not.toContain("apply_patch");
     }
   });

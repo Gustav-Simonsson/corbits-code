@@ -4,26 +4,16 @@
 import type { OutputType } from "../../subagent/submit-result.js";
 
 export const DIRECTOR_IDS = [
-  "skywalker",
-  "builder",
+  "dispatch",
   "explorer",
-  "counsel",
-  "intern",
-  "critic",
-  "greybeard",
-  "neckbeard",
-  "bruckheimer",
-  "gaasbot",
-  "draper",
-  "emil",
-  "rand",
-  "shakespeare",
-  "testsmith",
-  "tester",
-  "gauntlet",
-  "prober",
-  "migrator",
+  "planner",
+  "coder",
+  "reviewer",
+  "designer",
+  "artist",
   "warden",
+  "shakespeare",
+  "prober",
 ] as const;
 
 export type DirectorId = (typeof DIRECTOR_IDS)[number];

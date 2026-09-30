@@ -1928,33 +1928,33 @@ describe("spawn_agent dispatch contracts", () => {
     expect(deps.sessions.get("call-fixed-id")).toBeDefined();
   });
 
-  test("refuses skywalker as a spawned worker", async () => {
+  test("refuses dispatch as a spawned worker", async () => {
     const deps = createFleetDeps(async () => ({ report: "no" }));
     const spawn = createSpawnAgentTool(deps);
     const raw = await callFleetToolRaw(spawn, {
       description: "nope",
       prompt: "do it",
-      agent: "skywalker",
+      agent: "dispatch",
     });
     expect(raw.isError).toBe(true);
-    expect(raw.content).toContain("skywalker is the primary session identity");
+    expect(raw.content).toContain("dispatch is the primary session identity");
   });
 
   test("rejects a child outside this director allowlist", async () => {
     const deps = createFleetDeps(async () => ({ report: "no" }));
-    deps.spawnAllowlist = ["intern", "explorer", "critic"];
+    deps.spawnAllowlist = ["planner", "explorer", "reviewer"];
     const spawn = createSpawnAgentTool(deps);
     const raw = await callFleetToolRaw(spawn, {
       description: "build",
       prompt: "ship it",
-      agent: "builder",
+      agent: "coder",
     });
     expect(raw.isError).toBe(true);
     expect(raw.content).toContain("allowlist");
-    expect(raw.content).toContain("builder");
+    expect(raw.content).toContain("coder");
   });
 
-  test("greybeard launches as a leaf worker without nestedDispatch (CL-7670)", async () => {
+  test("reviewer launches as a leaf worker without nestedDispatch", async () => {
     const captured: RunSubAgentParams[] = [];
     const deps = createFleetDeps(async (params) => {
       captured.push(params);
@@ -1964,7 +1964,8 @@ describe("spawn_agent dispatch contracts", () => {
     await callFleetTool(spawn, {
       description: "arch",
       prompt: "judge this",
-      agent: "greybeard",
+      agent: "reviewer",
+      success_criteria: ["find defects"],
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(captured).toHaveLength(1);
@@ -2026,13 +2027,13 @@ describe("spawn_agent dispatch contracts", () => {
       outcome: "running" as const,
     },
     {
-      name: "agent=intern without success_criteria",
-      args: { description: "chore", prompt: "run it", agent: "intern" },
+      name: "agent=planner without success_criteria",
+      args: { description: "plan", prompt: "break it down", agent: "planner" },
       outcome: "running" as const,
     },
     {
-      name: "agent=greybeard without intent and without success_criteria",
-      args: { description: "arch", prompt: "judge this", agent: "greybeard" },
+      name: "agent=explorer without intent and without success_criteria",
+      args: { description: "explore", prompt: "map it", agent: "explorer" },
       outcome: "running" as const,
     },
     {

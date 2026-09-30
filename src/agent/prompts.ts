@@ -2,7 +2,7 @@ import type { EnvironmentInfo } from "./environment.js";
 import type { SkillSummary } from "../extensions/skills.js";
 import type { SessionMode } from "../config/session-mode.js";
 import type { ToolAvailability } from "./tool-search.js";
-import { createSkywalkerSystemPrompt } from "./directors/skywalker/package.js";
+import { createDispatchSystemPrompt } from "./directors/dispatch/package.js";
 import {
   buildWorkerContract,
   buildWorkerToolNames,
@@ -46,9 +46,9 @@ function formatDateDDMMYYYY(date: Date): string {
 export function buildChatRole(
   _sessionMode: SessionMode = "orchestrator",
 ): string {
-  // Primary session identity is the closed Skywalker director package (CL-5817).
+  // Primary session identity is the closed Dispatch director package.
   // Harness facts / guidelines still append after this role in baseSection.
-  return createSkywalkerSystemPrompt();
+  return createDispatchSystemPrompt();
 }
 
 // Facts the model cannot derive from its training: what the permission layer
@@ -77,7 +77,7 @@ export function buildHarnessFacts(
           "- Change files with write/edit and remove files with delete; shell file-writes and deletions are blocked.",
         ]
       : [
-          "- Change files with write/edit and remove files with delete for tiny/single-file/one-route bounded edits. Spawn builder for substantial/multi-file/parallel/specialist work. Docs/design still spawn shakespeare/bruckheimer/rand except one-line fixes.",
+          "- Change files with write/edit and remove files with delete for tiny/single-file/one-route bounded edits. Spawn coder for substantial/multi-file/parallel/specialist work. Docs/design still spawn shakespeare/designer except one-line fixes.",
           "- Shell file-writes and deletions are blocked; never use echo/heredoc/sed/rm as a substitute for product tools. Path tools are the DIY surface.",
         ]),
     "- Use the provided tools for file reads/searches instead of shelling out as a substitute.",
@@ -158,7 +158,7 @@ const GUIDELINE_SUB_BLOCKS: Record<
     "- read for file contents; grep or glob to locate code; lsp for symbols, types, references, or call flow before opening large files.",
     ctx.subAgent
       ? "- edit for targeted changes; write for new files or full rewrites; delete to remove files — never echo, heredoc, sed, or rm in the shell for those jobs."
-      : "- edit for targeted DIY tiny/single-file/one-route edits; write for new files or full rewrites; delete to remove files — never shell-write (echo/heredoc/sed/rm). Spawn builder (or a docs director) for substantial/multi-file/parallel/specialist work.",
+      : "- edit for targeted DIY tiny/single-file/one-route edits; write for new files or full rewrites; delete to remove files — never shell-write (echo/heredoc/sed/rm). Spawn coder (or a docs director) for substantial/multi-file/parallel/specialist work.",
     "- bash for builds, tests, git, and one-off commands — not for shell find, head-position rg, or recursive grep -r (OOM risk), cat, or messaging the user.",
     ...(ctx.subAgent
       ? []
@@ -256,7 +256,7 @@ export function buildPromptDisciplineBlock(
   const subAgent = opts.subAgent ?? false;
   const toolsOverShell = subAgent
     ? "- Never use bash to read, edit, or write files — use read, edit, write; cat/head/tail, sed/awk/perl -i, and heredoc/echo redirection are prohibited substitutes."
-    : "- Never use bash to read, edit, or write files — use read, edit, write for tiny/bounded DIY; spawn builder/docs directors for substantial work; cat/head/tail, sed/awk/perl -i, and heredoc/echo redirection are prohibited substitutes.";
+    : "- Never use bash to read, edit, or write files — use read, edit, write for tiny/bounded DIY; spawn coder/docs directors for substantial work; cat/head/tail, sed/awk/perl -i, and heredoc/echo redirection are prohibited substitutes.";
   return [
     "Prompt discipline:",
     "",

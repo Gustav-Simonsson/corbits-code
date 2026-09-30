@@ -10,7 +10,6 @@ import { randomUUID } from "node:crypto";
 
 import { withMockedModuleDuring } from "../../testkit/mock-module.js";
 import { defined } from "../../testkit/defined.js";
-import { INTERN_TOOLS } from "../agent/directors/tool-sets.js";
 import type { BackgroundShellRegistry } from "../shell/background-shell.js";
 import {
   baseRunParams,
@@ -153,11 +152,10 @@ describe("persist close_agent leftover dispose", () => {
   });
 });
 
-describe("intern persist reaps leftover registry children when collect is unmounted", () => {
-  test("a leftover background child is disposeAll'd even though the intern session is retained", async () => {
-    expect(INTERN_TOOLS as readonly string[]).not.toContain("shell_collect");
-    const cwd = await tmpSubAgentCwd("corbits-intern-persist-reap-");
-    const token = `ic_intern_persist_${randomUUID()}`;
+describe("worker persist reaps leftover registry children", () => {
+  test("a leftover background child is disposeAll'd even though the worker session is retained", async () => {
+    const cwd = await tmpSubAgentCwd("corbits-worker-persist-reap-");
+    const token = `ic_worker_persist_${randomUUID()}`;
     let registry: BackgroundShellRegistry | undefined;
     const disposeReasons: string[] = [];
     let leftoverId: string | undefined;
@@ -213,11 +211,14 @@ describe("intern persist reaps leftover registry children when collect is unmoun
             try {
               const result = await runSubAgent(
                 baseRunParams(cwd, {
-                  description: "intern persist leftover registry probe",
+                  description: "worker persist leftover registry probe",
                   prompt: "finish the first turn",
                   persist: true,
-                  directorId: "intern",
-                  capabilities: { mode: "allow", tools: [...INTERN_TOOLS] },
+                  directorId: "coder",
+                  capabilities: {
+                    mode: "allow",
+                    tools: ["run_shell", "read_file"],
+                  },
                   onAgentReady: handles.onAgentReady,
                 }),
               );

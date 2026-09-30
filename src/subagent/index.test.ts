@@ -389,15 +389,16 @@ describe("sub-agent stop helpers", () => {
     ).toBe("complete");
   });
 
-  test("shouldRequireEvidence is armed for the critic director id", () => {
+  test("shouldRequireEvidence is armed for the reviewer director id", () => {
+    expect(shouldRequireEvidence({ directorId: "reviewer" })).toBe(true);
     expect(shouldRequireEvidence({ directorId: "critic" })).toBe(true);
   });
 
-  test("shouldRequireEvidence is off for greybeard even with intent=review", () => {
+  test("shouldRequireEvidence is off for other directors even with intent=review", () => {
     expect(
       shouldRequireEvidence({
         intent: "review",
-        directorId: "greybeard",
+        directorId: "explorer",
       }),
     ).toBe(false);
   });
@@ -482,16 +483,15 @@ describe("sub-agent stop helpers", () => {
     expect(hasPlanFindings(HEADINGS_ONLY_ENVELOPE)).toBe(false);
   });
 
-  test("shouldRequirePlanSubstance is armed for plan intent or counsel, not other directors", () => {
+  test("shouldRequirePlanSubstance is armed for plan intent or planner, not other directors", () => {
+    expect(shouldRequirePlanSubstance({ directorId: "planner" })).toBe(true);
     expect(shouldRequirePlanSubstance({ directorId: "counsel" })).toBe(true);
     expect(shouldRequirePlanSubstance({ intent: "plan" })).toBe(true);
     expect(
-      shouldRequirePlanSubstance({ intent: "plan", directorId: "counsel" }),
+      shouldRequirePlanSubstance({ intent: "plan", directorId: "planner" }),
     ).toBe(true);
-    expect(shouldRequirePlanSubstance({ directorId: "critic" })).toBe(false);
-    expect(shouldRequirePlanSubstance({ directorId: "greybeard" })).toBe(false);
-    expect(shouldRequirePlanSubstance({ directorId: "builder" })).toBe(false);
-    expect(shouldRequirePlanSubstance({ directorId: "gaasbot" })).toBe(false);
+    expect(shouldRequirePlanSubstance({ directorId: "reviewer" })).toBe(false);
+    expect(shouldRequirePlanSubstance({ directorId: "coder" })).toBe(false);
     expect(shouldRequirePlanSubstance({ intent: "implement" })).toBe(false);
     expect(shouldRequirePlanSubstance({ intent: "review" })).toBe(false);
     expect(shouldRequirePlanSubstance({})).toBe(false);

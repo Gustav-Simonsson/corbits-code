@@ -103,9 +103,9 @@ describe("preflightCapabilities", () => {
     expect(rerouteAlternatives("run_shell").length).toBeGreaterThan(0);
   });
 
-  test("reroute alternatives sort before the cap of 3 (read_file has 19 mounting directors)", () => {
+  test("reroute alternatives sort before the cap of 3 (read_file has 9 mounting directors)", () => {
     const alternatives = rerouteAlternatives("read_file");
-    expect(alternatives).toEqual(["bruckheimer", "builder", "counsel"]);
+    expect(alternatives).toEqual(["artist", "coder", "designer"]);
     expect(alternatives).toEqual([...alternatives].sort());
   });
 
@@ -118,12 +118,12 @@ describe("preflightCapabilities", () => {
     }
   });
 
-  test("leafTierAlternatives names sorted Tier 3 leaf directors, never skywalker", () => {
+  test("leafTierAlternatives names sorted Tier 3 leaf directors, never dispatch", () => {
     const alternatives = leafTierAlternatives();
     expect(alternatives.length).toBeGreaterThan(0);
     expect(alternatives.length).toBeLessThanOrEqual(3);
     expect(alternatives).toEqual([...alternatives].sort());
-    expect(alternatives).not.toContain("skywalker");
+    expect(alternatives).not.toContain("dispatch");
   });
 });
 
