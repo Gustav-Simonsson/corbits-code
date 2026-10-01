@@ -53,6 +53,6 @@ Selectors are exact, `ns:*`, or `*`. Effects are `require` or `block`, and block
 ## Need more
 
 - Upstream docs: `HARNESS_DESIGN.md`, `SIDECAR_PLACEMENT.md`, `CREDENTIALS.md`, `AUTH.md`, `GIT_ACCESS.md`, `unified-execution-host-design.md`.
-- Client app driving a hub: `use_skill interchange-client-apps`.
+- Client app driving a hub: `use_skill interchange-client-apps`. Host embedding a hub: `use_skill interchange-embed-hub`.
 - Workflow authoring: `use_skill interchange-workflows`.
 - Overview: `use_skill interchange`.

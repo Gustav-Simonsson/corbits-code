@@ -89,6 +89,7 @@ const FIRST_PARTY_SKILL_NAMES: ReadonlySet<string> = new Set([
   "interchange",
   "interchange-agents",
   "interchange-client-apps",
+  "interchange-embed-hub",
   "interchange-run-modes",
   "interchange-workflows",
   "interview",
