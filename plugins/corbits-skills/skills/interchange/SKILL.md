@@ -36,6 +36,6 @@ State is git: the audit log is the commit history, resume is re-running on the s
 - Build or embed an agent in code, pick tools, sources, and test it: `use_skill interchange-agents`.
 - Multi-step, durable, resumable work: `use_skill interchange-workflows`.
 - Where and how it runs (local, hub plus sidecar, NAT, credentials, placement): `use_skill interchange-run-modes`.
-- An app that sets up and drives its own hub (tenants, auth, deploys): `use_skill interchange-client-apps`. Hosting the hub in your process: `use_skill interchange-embed-hub`.
+- An app that sets up and drives its own hub: `use_skill interchange-client-apps` (it routes to `interchange-embed-hub`, `interchange-hub-setup`, `interchange-hub-api`, `interchange-chat`).
 - Corbits packages that plug into it (providers, MCP, cron, memory, UI): `use_skill corbits`.
 - Design docs in the upstream repo: `docs/ARCHITECTURE.md`, `INFERENCE.md`, `AUTH.md`, `CREDENTIALS.md`, `HARNESS_DESIGN.md`. Package layout: `LAYOUT.md`. Runnable references: `examples/README.md`.

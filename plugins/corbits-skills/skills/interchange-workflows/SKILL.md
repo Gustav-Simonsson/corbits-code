@@ -89,22 +89,22 @@ const result = await run.complete; // { runId, terminalStatus, outputs }
 
 There is no primitive that starts or signals another deployment from inside a workflow. Choose by need:
 
-| Need                                     | Use                                                          |
-| ---------------------------------------- | ------------------------------------------------------------ |
-| Human turn into a run                    | Mail to the run address                                      |
-| Human decision into a parked run         | `deliverWorkflowSignal` with a stable `signalId`             |
-| Agent to agent, conversational           | `mail_send` to the peer's run address (unverified: triggers) |
-| Bounded sub-task, no human               | `childWorkflow` (an untimed park inside fails the child)     |
-| Rework loop with a human gate in one run | `loop` with `awaitSignal` in the body                        |
-| Many human turns in one living run       | `onTrigger` section                                          |
-| Large or durable content                 | Artifact or memory reference plus sha256, not the payload    |
-| Start a different deployment             | The client or host (ensure deploy, then trigger)             |
+| Need                                     | Use                                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------ |
+| Human turn into a run                    | Mail to the run address                                                        |
+| Human decision into a parked run         | `deliverWorkflowSignal` with a stable `signalId`                               |
+| Agent to agent, conversational           | `mail_send` to the peer's run address (inbound mail to a run address fires it) |
+| Bounded sub-task, no human               | `childWorkflow` (an untimed park inside fails the child)                       |
+| Rework loop with a human gate in one run | `loop` with `awaitSignal` in the body                                          |
+| Many human turns in one living run       | `onTrigger` section                                                            |
+| Large or durable content                 | Artifact or memory reference plus sha256, not the payload                      |
+| Start a different deployment             | The client or host (ensure deploy, then trigger)                               |
 
 Solution Builder orchestrates from the client: it mails per-stage specialists, sends `project.decision` signals to one project workflow, and passes artifact references. On redeploy it starts a new generation and replays recorded decisions through it.
 
 ## Need more
 
 - Full pitfall list: upstream `docs/WORKFLOW_AUTHORING.md` and `examples/workflow-quickstart`.
-- Driving deploys from an app: `use_skill interchange-client-apps`.
+- Driving deploys from an app: `use_skill interchange-hub-setup`. Chat and signals in a UI: `use_skill interchange-chat`.
 - Scheduled or webhook-triggered runs: `use_skill corbits-hub-libs`.
 - Overview: `use_skill interchange`.

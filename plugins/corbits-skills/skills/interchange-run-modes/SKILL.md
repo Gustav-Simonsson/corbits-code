@@ -1,70 +1,76 @@
 ---
 name: interchange-run-modes
-description: Pick where the Interchange control plane lives (none with runLocal, embedded hub, remote hub) and how sidecars, credentials, and placement work.
+description: Choose where an Interchange workflow or agent runs (runLocal, embedded hub, remote hub plus sidecar), and set up sidecars, credentials, and placement. Load when deciding whether you need a hub.
 user-invocable: false
 ---
 
 # Interchange run modes
 
-The question is where the control plane lives. Your workflow and agent code is the same in every mode.
+The question is where the control plane lives. Workflow and agent code is the same in every mode.
 
-| Tier                          | Control plane                   | Use it when                                                                   |
-| ----------------------------- | ------------------------------- | ----------------------------------------------------------------------------- |
-| `runLocal` / in-process agent | none                            | Scripts, CLI tools, CI, tests, dev loops, one user, run ends with the process |
-| Embedded hub                  | in your app process             | You need hub features but want one local binary (desktop app)                 |
-| Remote hub                    | a hosted hub, sidecars dial out | Shared team, runs must outlive any one machine, work placed on other hosts    |
+| Mode                        | Control plane             | Use when                                                                      |
+| --------------------------- | ------------------------- | ----------------------------------------------------------------------------- |
+| `runLocal` or `createAgent` | none                      | Scripts, CLI tools, CI, tests, dev loops, one user, run ends with the process |
+| Embedded hub                | inside your app           | You need hub features in one local binary, such as a desktop app              |
+| Remote hub                  | hosted, sidecars dial out | Shared team, runs outlive any machine, work placed on other hosts             |
 
-Embedded and remote differ only in a base URL. An app written against the hub `Transport` switches by config (`use_skill interchange-embed-hub`, `use_skill interchange-client-apps`). Moving up from `runLocal` is a deploy, not a rewrite, so start without a hub unless you need one of the reasons below.
+Embedded and remote differ only by base URL. Moving up from `runLocal` is a deploy, not a rewrite. Default to no hub, and move up for one of these reasons:
 
-## Skip the hub when
-
-- Nothing to stand up: no database, keys, auth origin, or sidecar processes, and a cold start in milliseconds.
-- State is inspectable and disposable (a directory), with no second source of truth.
-- Tests and CI want hermetic runs with scripted inference and no ambient credentials.
-- One person starts the run and watches it end.
-- HITL is fine while the process lives: `run.signal(name, payload, signalId)` answers an `awaitSignal`.
-- You want to avoid depending on the alpha hub surface.
-
-## Want a control plane when
-
-- Waits must outlive the process (approvals, `awaitSignal`, timers): the hub parks, persists, and resumes after a crash. `runLocal` has no durability and a crashed run is terminal.
-- Credentials are shared and rotated: the hub seals provider keys and freezes a failover chain at deploy.
-- Triggers run while you are away: mail, cron, webhooks.
-- Several principals need grants, an audit trail, approvals routes, and spend accounting.
-- Work should run in a sandbox or on another host (sidecar placement).
-- Runs need addresses so people and agents can mail them.
+- A wait (`awaitSignal`, approval, timer) must outlive the process. The hub parks, persists, and resumes after a crash.
+- Credentials are shared or rotated. The hub seals them and freezes a failover chain at deploy.
+- Triggers must fire while you are away (mail, cron, webhooks).
+- Several principals need grants, audit, approvals, and spend accounting.
+- Work must run in a sandbox or on another host.
+- People or agents must mail a run by address.
 - A deploy must be pinned to a commit.
+
+Hub setup: `use_skill interchange-embed-hub`, `use_skill interchange-hub-setup`.
 
 ## runLocal
 
-`runLocal(definition, { authorize, hasUpstreamSignalResolver, ... })` returns `{ runId, complete, cancel, signal }`. `authorize` and `hasUpstreamSignalResolver` are required; pass `true` for a top-level run you will signal.
+Runs the real workflow runtime with in-memory parts. Reference: upstream `examples/workflow-quickstart`.
 
-- Supported: signals, authorize, actions (need `actionResolver`), loops (need `loopFns`), inline child workflows, timers, an in-memory event log in `RunResult.events`, cancel, and `resumeFromEvents` if you feed the log back yourself.
-- Not supported: persistence, crash resume, drain, hub approval rows or `/approvals` routes, mail and triggers, tools, hub credentials, placement.
-- The default step invoker is a stub that returns `{ output: null }`. To run a model, pass an `invokeStep` that builds `createAgent` and calls `agent.send`.
-- An untimed `awaitSignal` inside a `childWorkflow` fails the child, because nothing can answer it.
+```ts
+const run = runLocal(workflow, {
+  authorize: allowAll, // required, no default
+  hasUpstreamSignalResolver: true, // required, true for a top-level run you will signal
+  actionResolver, // ref -> ActionHandler, throws on unknown
+  loopFns, // ref -> LoopFn, throws on unknown
+  invokeStep: createAgentStepInvoker({
+    source,
+    material,
+    contextDir,
+    authorize: allowAll,
+  }),
+});
+await run.signal("go", payload, "sig-1"); // answers an awaitSignal
+const result = await run.complete; // { terminalStatus, outputs, events }
+```
+
+- The default `invokeStep` calls `authorize` and returns `{ output: null }`. It runs no model and no tools. A step that needs an agent needs your `invokeStep` (see `step-invoker.ts` in the quickstart, which builds `createAgent` and calls `send`).
+- Works: signals, loops, actions, inline child workflows, timers, cancel, an in-memory event log.
+- Missing: persistence, crash resume, `/approvals` routes, mail triggers, hub credentials, placement, mail-addressed runs. A crashed run is terminal.
+- An approval park resolves only if you call `run.signal` yourself.
+- An untimed `awaitSignal` inside a `childWorkflow` is refused, because nothing can answer it.
 - Unverified: whether `onTrigger` sections run locally.
 
-For a single agent without a workflow, use in-process `createAgent` with a git-backed store and `@intx/tools-posix` (`use_skill interchange-agents`). You supply `authorize` and audit.
-
-Desktop means a local process: in-process, or an embedded hub that spawns a local sidecar process. There is no dedicated desktop harness. Container, VM, Workers, and browser hosts are in progress, not shipped.
+For one agent with no workflow, use `createAgent` with a git-backed `contextDir` and `@intx/tools-posix` (`use_skill interchange-agents`). There is no dedicated desktop harness. Desktop means a local process. Container, VM, Workers, and browser hosts are not shipped.
 
 ## Hub plus sidecar
 
-- The hub is the control plane (Postgres, tenants, grants, credentials, deploys, git). A sidecar is a host process that connects outbound over one WebSocket (`HUB_WS_URL`), registers with an allocation token, then runs each deployment as a supervised child (`bin/workflow-child`). It needs no public address. Use `wss://` off loopback.
-- Sidecar env: `SIDECAR_DATA_DIR`, `HUB_WS_URL`, `SIDECAR_ID`, `SIDECAR_TOKEN`, `SIDECAR_CREDENTIAL_ENCRYPTION_KEY`.
-- Sidecars exist only through a `SidecarProvisioner` (`ensure` and `destroy`, idempotent, generation-fenced). Inject them with `createHubServer({ sidecarProvisioners, probeSidecarProvisioners })`. None is registered by default, so a fresh dev hub cannot probe or deploy.
-- A local-process provisioner just spawns `apps/sidecar/src/index.ts` with those env vars. The reference is `tests/admin-ui-e2e/harness/local-process-sidecar-provisioner.ts` upstream.
-- A crashed child is respawned with backoff (1 s doubling to 30 s). Three exits in 60 s latch `crash-looping` and fail the run.
-- Dev stack: `bin/db-reset && bin/dev --seed` gives the hub on :3000 and the admin UI on :5173.
+- The hub is the control plane. A sidecar is a host process that dials the hub over one WebSocket (`HUB_WS_URL`), registers with an allocation token, and runs each deployment as a supervised child. It needs no public address. Use `wss://` off loopback.
+- Sidecars exist only through a `SidecarProvisioner` (`ensure`, `destroy`, idempotent, generation-fenced). None is registered by default, so a fresh hub cannot deploy.
+- Sidecar env: `HUB_WS_URL`, `SIDECAR_ID`, `SIDECAR_TOKEN`, `SIDECAR_DATA_DIR`, `SIDECAR_CREDENTIAL_ENCRYPTION_KEY`.
+- A crashed child restarts with backoff (1 s up to 30 s). Three exits in 60 s mark it `crash-looping` and fail the run.
+- Upstream dev stack: `bin/db-reset && bin/dev --seed`, hub on :3000.
 
 ## Credentials
 
-Agents never discover credentials. The hub resolves them at launch and the harness mediates use. Inference keys travel inside the `agent.deploy` frame, and rotation pushes `sources.update`. Tool credentials are tenant-owned, decrypted on the hub, and delivered over the control channel. Proactive OAuth refresh is not built. Docs disagree on whether keys sit in `deployment.json`, so check `DEV.md` and the code before relying on either.
+Agents never discover credentials. The hub resolves them at launch and the harness mediates use. Inference keys travel in the `agent.deploy` frame and rotation pushes `sources.update`. Tool credentials are tenant-owned and delivered over the control channel. Proactive OAuth refresh is not built. Docs disagree on whether keys sit in `deployment.json`, so check `DEV.md` and the code.
 
 ## Placement
 
-A workflow declares what it needs, and a provisioner advertises what it offers:
+A workflow declares needs, and a provisioner advertises what it offers:
 
 ```ts
 sidecarPlacement: {
@@ -72,11 +78,11 @@ sidecarPlacement: {
 }
 ```
 
-Selectors are exact, `ns:*`, or `*`. Effects are `require` or `block`, and block wins ties. Tenant policy can add constraints that workflows cannot weaken. The OS or container sandbox boundary is not built, so grants are not a syscall or network sandbox.
+Selectors are exact, `ns:*`, or `*`. Effects are `require` or `block`, and block wins. Tenant policy adds constraints that workflows cannot weaken. There is no OS or container sandbox yet, so grants are not a syscall or network sandbox. Untrusted work needs a provisioner declaring an `isolation:*` capability.
 
 ## Need more
 
-- Upstream docs: `HARNESS_DESIGN.md`, `SIDECAR_PLACEMENT.md`, `CREDENTIALS.md`, `AUTH.md`, `GIT_ACCESS.md`, `unified-execution-host-design.md`.
-- Client app driving a hub: `use_skill interchange-client-apps`. Host embedding a hub: `use_skill interchange-embed-hub`.
+- Upstream docs: `HARNESS_DESIGN.md`, `SIDECAR_PLACEMENT.md`, `CREDENTIALS.md`, `AUTH.md`, `unified-execution-host-design.md`.
+- Apps that drive a hub: `use_skill interchange-client-apps`.
 - Workflow authoring: `use_skill interchange-workflows`.
 - Overview: `use_skill interchange`.
