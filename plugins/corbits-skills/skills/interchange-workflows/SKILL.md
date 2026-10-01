@@ -85,6 +85,23 @@ const result = await run.complete; // { runId, terminalStatus, outputs }
 
 `POST /api/tenants/:t/workflows/deployments` installs, probes (on an airlocked sidecar), gates on the operator's approval set, freezes, then provisions a sidecar. Trigger with `/:runId/mail`, answer waits with `/:runId/signals`. The in-tree hub registers no provisioner, so it cannot deploy until one is injected: `use_skill interchange-run-modes`.
 
+## Handoff between workflows
+
+There is no primitive that starts or signals another deployment from inside a workflow. Choose by need:
+
+| Need                                     | Use                                                          |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| Human turn into a run                    | Mail to the run address                                      |
+| Human decision into a parked run         | `deliverWorkflowSignal` with a stable `signalId`             |
+| Agent to agent, conversational           | `mail_send` to the peer's run address (unverified: triggers) |
+| Bounded sub-task, no human               | `childWorkflow` (an untimed park inside fails the child)     |
+| Rework loop with a human gate in one run | `loop` with `awaitSignal` in the body                        |
+| Many human turns in one living run       | `onTrigger` section                                          |
+| Large or durable content                 | Artifact or memory reference plus sha256, not the payload    |
+| Start a different deployment             | The client or host (ensure deploy, then trigger)             |
+
+Solution Builder orchestrates from the client: it mails per-stage specialists, sends `project.decision` signals to one project workflow, and passes artifact references. On redeploy it starts a new generation and replays recorded decisions through it.
+
 ## Need more
 
 - Full pitfall list: upstream `docs/WORKFLOW_AUTHORING.md` and `examples/workflow-quickstart`.

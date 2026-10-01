@@ -6,7 +6,7 @@ user-invocable: false
 
 # Embedding an Interchange hub
 
-Use this when your app owns the hub process: a desktop host, a single binary, or a server that mounts Interchange next to its own routes. For what the app then does over HTTP, see `use_skill interchange-client-apps`.
+An embedded hub is a local control plane. `runLocal` has no control plane, and a remote hub has one elsewhere. Client code is identical for embedded and remote, so build against `Transport` and a base URL (`use_skill interchange-run-modes` for when to pick which). Use this when your app owns the hub process: a desktop host, a single binary, or a server that mounts Interchange next to its own routes. For what the app then does over HTTP, see `use_skill interchange-client-apps`.
 
 ## Stock vs composed
 

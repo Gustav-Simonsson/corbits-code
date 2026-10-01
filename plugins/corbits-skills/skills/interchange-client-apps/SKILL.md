@@ -26,6 +26,24 @@ The flagship example is Corbits Solution Builder (`corbitsdev/corbits-solution-b
 6. **Deploy.** `deployWorkflow(transport, tenantId, { source: { kind: "asset", assetId, package: { format: "source", commitSha } }, entry, sourceOfferingIds, defaultSourceOfferingId })`. The chain freezes at deploy, so a model switch is a new deployment. A deploy needs a non-empty chain and a sidecar provisioner.
 7. **Run.** `triggerWorkflowRun`, then fold `readWorkflowRunEvents` (or `createRunSession`, which polls every 2 s). Answer waits with `deliverWorkflowSignal(transport, tenantId, runId, { runId, signalName, signalId, payload })`. A repeated `signalId` with a different payload is a 409. Resolve tool approvals with `POST /approvals/:id/approve` or `/reject`, which needs `approval:*` / `resolve`.
 
+## Sharing a hub between apps
+
+- Tenant slugs are one global namespace per hub, so prefix them: an app root tenant (`<appid>`) and child tenants per project (`<appid>-<project>-<id>`). Solution Builder finds its root by slug in `GET /api/me/principals` and creates it if absent. A slug clash returns 409, so re-resolve instead of failing.
+- Catalog, providers, OAuth clients, credentials, and placement policy inherit down the tenant chain. Assets, roles, principals, and grants do not. Put shared keys in a parent tenant, and keep per-project assets, deployments, artifacts, and mail in a child.
+- Do not put two apps in one tenant unless every asset and credential name is prefixed. Names are unique per tenant.
+- Apps share the hub's provisioner pool, not a sidecar. Every deployment gets its own sidecar allocation.
+- Every `ensure*` step adopts what exists and never overwrites. The tenant create is the only step that is not idempotent.
+
+## Chat is mail
+
+Chat is not a stock hub feature. The host mounts `@corbits/mailbox` (`use_skill corbits-hub-libs`).
+
+- A person's turn is a mail send to the run address (`<deploymentId>@<tenant.domain>`). The mailbox `deliver` hook calls the hub's `POST /workflows/:runId/mail`. The first message fires the run, and later ones resume an `onTrigger` section.
+- Replies arrive in the person's inbox over mailbox SSE (`/mailbox/me/inbox/events`). Threads follow `In-Reply-To` and `References`.
+- Mail carries plain text only. Progress, tool calls, and approvals come from polled run events (`readWorkflowRunEvents`) and `/approvals`.
+- `ChatThread` takes `messages` as a prop. You write the adapter from mail rows plus run events.
+- Agent model context lives in the sidecar's agent repo and is not the transcript.
+
 ## Rules that save time
 
 - Only the browser transport ships. Outside a browser, supply your own: base URL, cookie jar, JSON content type, `ApiError` mapping, empty 202 and 204 bodies. In process you can call `hub.app.fetch(new Request(origin + path))` with the session cookie.
