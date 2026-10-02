@@ -10,7 +10,7 @@ Corbits-specific rules that the other skills rely on. Load alongside `style` and
 
 ## Test runner
 
-Corbits tests use `bun:test` (`bun test`, `bun run test`). `opsh` scripts are bash and use TAP via `prove`; that harness is separate from `bun:test`. Agent commands run through `bash`.
+Corbits tests use `bun:test` (`bun test`, `bun run test`). Agent commands run through `bash`.
 
 ## Fleet
 
@@ -28,9 +28,7 @@ Move the issue to In Review when the PR is ready for review. Draft or WIP PRs st
 
 ## Non-git folders
 
-A folder without `.git` is a valid working directory (scratch, unpacked tarball, new project). Git-using skills (`implement`, `review`, `git-rebase`, `pull-request-review`) no-op or ask when they need a repo. Do not invent a git repo to satisfy them.
-
-The primary plans sequenced git and the coder executes it via `bash`, using inline `GIT_SEQUENCE_EDITOR` instead of writing editor scripts.
+A folder without `.git` is a valid working directory (scratch, unpacked tarball, new project). Git-using skills (`implement`, `review`, `pull-request-review`) no-op or ask when they need a repo. Do not invent a git repo to satisfy them.
 
 ## Tracker-agnostic issues
 
