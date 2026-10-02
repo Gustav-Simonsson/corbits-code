@@ -13,10 +13,8 @@ import {
 // cancels by id.
 
 export const MAX_RUNNING_BACKGROUND_SHELLS = 8;
-export const MAX_COMPLETED_BACKGROUND_SHELLS = 8;
-export const MAX_SHELL_COLLECT_WAIT_MS = 300_000;
 // Prefer close so trailing stdio is captured, but never require it: a grandchild
-// holding the pipe must not park collect after the child has already exited.
+// holding the pipe must not delay the completion message after the child exits.
 const STDIO_DRAIN_MS = 100;
 
 /**
@@ -61,44 +59,18 @@ export interface BackgroundShellExit {
   spillUri?: string;
 }
 
-export type BackgroundShellSnapshot =
-  | { state: "running" }
-  | { state: "completed"; exit: BackgroundShellExit }
-  | { state: "not-found" };
-
 export interface BackgroundShellRegistry {
   start: (args: StartBackgroundShellArgs) => { id: string } | { error: string };
-  collect: (
-    id: string,
-    waitMs?: number,
-    signal?: AbortSignal,
-  ) => Promise<BackgroundShellSnapshot>;
   cancel: (id: string) => boolean;
   disposeAll: (reason: string) => void;
-  releaseWaiters: () => void;
   runningCount: () => number;
 }
 
-function resolveCollectWaitMs(waitMs: number, maxMs: number): number {
-  if (typeof waitMs !== "number" || Number.isNaN(waitMs) || waitMs <= 0) {
-    return 0;
-  }
-  if (!Number.isFinite(waitMs)) return maxMs;
-  return Math.min(waitMs, maxMs);
-}
-
 export function createBackgroundShellRegistry(
-  options: {
-    onExit?: (exit: BackgroundShellExit) => void;
-    maxCollectWaitMs?: number;
-  } = {},
+  options: { onExit?: (exit: BackgroundShellExit) => void } = {},
 ): BackgroundShellRegistry {
   const { onExit } = options;
-  const maxCollectWaitMs =
-    options.maxCollectWaitMs ?? MAX_SHELL_COLLECT_WAIT_MS;
   const running = new Map<string, ChildProcess>();
-  const completed = new Map<string, BackgroundShellExit>();
-  const exitWaiters = new Map<string, Set<() => void>>();
 
   const record =
     (id: string, command: string, collector: BoundedShellOutput) =>
@@ -113,19 +85,6 @@ export function createBackgroundShellRegistry(
         output,
         outputTruncated: truncated,
       };
-      completed.set(id, exit);
-      // Ring eviction drops the oldest completed entry; the completion message
-      // already carried a spill URI for truncated output, so nothing is lost.
-      while (completed.size > MAX_COMPLETED_BACKGROUND_SHELLS) {
-        const oldest = completed.keys().next().value;
-        if (oldest === undefined) break;
-        completed.delete(oldest);
-      }
-      const waiters = exitWaiters.get(id);
-      if (waiters !== undefined) {
-        exitWaiters.delete(id);
-        for (const wake of waiters) wake();
-      }
       onExit?.(exit);
     };
 
@@ -134,7 +93,7 @@ export function createBackgroundShellRegistry(
   ): { id: string } | { error: string } => {
     if (running.size >= MAX_RUNNING_BACKGROUND_SHELLS) {
       return {
-        error: `background shell limit reached (${MAX_RUNNING_BACKGROUND_SHELLS} running); collect or cancel one first`,
+        error: `background shell limit reached (${MAX_RUNNING_BACKGROUND_SHELLS} running); stop one first`,
       };
     }
     const id = randomUUID();
@@ -184,64 +143,6 @@ export function createBackgroundShellRegistry(
     return { id };
   };
 
-  const collect = async (
-    id: string,
-    waitMs = 0,
-    signal?: AbortSignal,
-  ): Promise<BackgroundShellSnapshot> => {
-    const done = completed.get(id);
-    if (done !== undefined) return { state: "completed", exit: done };
-    if (!running.has(id)) return { state: "not-found" };
-    const budget = resolveCollectWaitMs(waitMs, maxCollectWaitMs);
-    if (budget > 0) {
-      // An already-aborted collect releases immediately as still-running:
-      // interrupt must not park the session on a live descendant, and must
-      // not kill it either — the child belongs to the still-alive session.
-      if (signal?.aborted === true) return { state: "running" };
-      // Concurrent collects on the same shell each park their own waiter so
-      // they resolve independently: a waiter removes only itself on
-      // timeout/abort/settle, never a sibling's registration.
-      let wake: (() => void) | undefined;
-      const forget = (): void => {
-        const waiters = exitWaiters.get(id);
-        if (wake !== undefined) waiters?.delete(wake);
-        if (waiters !== undefined && waiters.size === 0) exitWaiters.delete(id);
-      };
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          forget();
-          signal?.removeEventListener("abort", onAbort);
-          resolve();
-        }, budget);
-        const onAbort = (): void => {
-          clearTimeout(timer);
-          forget();
-          resolve();
-        };
-        wake = (): void => {
-          clearTimeout(timer);
-          signal?.removeEventListener("abort", onAbort);
-          resolve();
-        };
-        signal?.addEventListener("abort", onAbort, { once: true });
-        let waiters = exitWaiters.get(id);
-        if (waiters === undefined) {
-          waiters = new Set();
-          exitWaiters.set(id, waiters);
-        }
-        waiters.add(wake);
-      }).finally(() => {
-        // Belt-and-braces: record() already dropped the whole entry when it
-        // woke us, and timeout/abort self-removed above — this only trims a
-        // waiter whose settle path raced out.
-        forget();
-      });
-      const finished = completed.get(id);
-      if (finished !== undefined) return { state: "completed", exit: finished };
-    }
-    return { state: "running" };
-  };
-
   const cancel = (id: string): boolean => {
     const child = running.get(id);
     if (child === undefined) return false;
@@ -249,24 +150,9 @@ export function createBackgroundShellRegistry(
     return true;
   };
 
-  /**
-   * Wake every parked `collect` waiter as still-running without touching the
-   * children. Interrupt paths call this so a live descendant releases the
-   * session instead of wedging teardown; close paths use `disposeAll`, which
-   * wakes waiters and then kills the trees.
-   */
-  const releaseWaiters = (): void => {
-    for (const waiters of exitWaiters.values()) {
-      for (const wake of waiters) wake();
-    }
-    exitWaiters.clear();
-  };
-
   const disposeAll = (reason: string): void => {
     for (const child of running.values()) killProcessTree(child);
     running.clear();
-    completed.clear();
-    releaseWaiters();
     // onExit is intentionally not fired for disposed shells: the session is
     // gone, so there is no later turn to deliver to (`reason` is for callers
     // that log it).
@@ -275,10 +161,8 @@ export function createBackgroundShellRegistry(
 
   return {
     start,
-    collect,
     cancel,
     disposeAll,
-    releaseWaiters,
     runningCount: () => running.size,
   };
 }

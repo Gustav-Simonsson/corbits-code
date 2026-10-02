@@ -10,6 +10,7 @@ import { spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 import { createBackgroundShellRegistry } from "../shell/background-shell.js";
+import { createExitRecorder } from "../shell/background-shell-test-harness.js";
 import { createShellOutputFeed } from "../session/shell-output-feed.js";
 
 import {
@@ -267,7 +268,10 @@ describe("background run_shell (shellGuardPlugin)", () => {
   }
 
   test("background:true returns a running handle immediately", async () => {
-    const registry = createBackgroundShellRegistry();
+    const recorder = createExitRecorder();
+    const registry = createBackgroundShellRegistry({
+      onExit: recorder.onExit,
+    });
     const start = Date.now();
     const result = await runWith(registry, {
       id: "bg1",
@@ -283,8 +287,7 @@ describe("background run_shell (shellGuardPlugin)", () => {
     expect(parsed.shell_id.length).toBeGreaterThan(0);
     // The START call resolved while the child was still sleeping.
     expect(Date.now() - start).toBeLessThan(400);
-    const snapshot = await registry.collect(parsed.shell_id, 5_000);
-    expect(snapshot.state).toBe("completed");
+    await recorder.waitFor(parsed.shell_id);
     registry.disposeAll("test done");
   });
 
@@ -334,7 +337,10 @@ describe("background run_shell (shellGuardPlugin)", () => {
   });
 
   test("background omitted timeout skips the foreground default", async () => {
-    const registry = createBackgroundShellRegistry();
+    const recorder = createExitRecorder();
+    const registry = createBackgroundShellRegistry({
+      onExit: recorder.onExit,
+    });
     const handler = defined(
       shellGuardPlugin(process.cwd(), { defaultMs: 90 }, undefined, {
         getBackgroundShellRegistry: () => registry,
@@ -353,12 +359,9 @@ describe("background run_shell (shellGuardPlugin)", () => {
     );
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(String(result.content)) as { shell_id: string };
-    const snapshot = await registry.collect(parsed.shell_id, 5_000);
-    expect(snapshot.state).toBe("completed");
-    if (snapshot.state === "completed") {
-      expect(snapshot.exit.timedOut).toBe(false);
-      expect(snapshot.exit.output).toContain("survived");
-    }
+    const exit = await recorder.waitFor(parsed.shell_id);
+    expect(exit.timedOut).toBe(false);
+    expect(exit.output).toContain("survived");
     registry.disposeAll("test done");
   });
 
