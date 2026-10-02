@@ -48,8 +48,44 @@ describe("createAdvertisedToolset", () => {
       def("write_file"),
       def("mystery_tool"),
     ]).map((d) => d.name);
-    expect(names).toContain("write");
     expect(names).not.toContain("mystery_tool");
+  });
+
+  test("claude sees write/edit/delete; gpt sees one apply_patch instead", () => {
+    const registry = [
+      def("write_file"),
+      def("edit_file"),
+      def("delete_file"),
+      def("apply_patch"),
+      def("run_shell"),
+      def("manage_tasks"),
+    ];
+    const claude = createAdvertisedToolset(
+      wiring({
+        getProvider: () => ({
+          providerName: "anthropic",
+          model: "claude-sonnet-5-5",
+        }),
+      }),
+    ).computeAdvertised(registry);
+    expect(claude.map((d) => d.name)).toEqual([
+      "write",
+      "edit",
+      "delete",
+      "bash",
+      "todowrite",
+    ]);
+
+    const gpt = createAdvertisedToolset(
+      wiring({
+        getProvider: () => ({ providerName: "openai", model: "gpt-5-codex" }),
+      }),
+    ).computeAdvertised(registry);
+    expect(gpt.map((d) => d.name)).toEqual([
+      "apply_patch",
+      "shell",
+      "update_plan",
+    ]);
   });
 
   // Activation opens the call gate but does not reshape the wire set until
@@ -311,7 +347,7 @@ describe("createAdvertisedToolset", () => {
         def("use_skill"),
       ]).map((d) => d.name);
       expect(names).toContain("skill_search");
-      expect(names).toContain("use_skill");
+      expect(names).toContain("skill");
       expect(isAdvertised("skill_search")).toBe(true);
     }
   });

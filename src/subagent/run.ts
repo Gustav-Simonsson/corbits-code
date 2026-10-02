@@ -73,7 +73,9 @@ import {
 } from "./capability-preflight.js";
 import {
   advertisedToolName,
+  foldFileToolDefinitions,
   projectToolDefinitions,
+  toolProfileForModel,
   withAuthzParityDefinitions,
 } from "../agent/tool-aliases.js";
 
@@ -1089,7 +1091,10 @@ async function runSubAgentInner(
         : []),
       ...(attachedSection !== undefined ? [attachedSection] : []),
     ];
-    const toolNames = tools.map((t) => advertisedToolName(t.definition.name));
+    const toolProfile = toolProfileForModel(params.provider);
+    const toolNames = tools.map((t) =>
+      advertisedToolName(t.definition.name, toolProfile),
+    );
     const systemPrompt = buildSubAgentSystemPrompt(
       extensions.length > 0 ? extensions : undefined,
       environment,
@@ -1140,7 +1145,10 @@ async function runSubAgentInner(
         const director = new SubAgentDirector(
           agentCtx.systemPrompt,
           normalizeToolDefinitionsForProvider(
-            projectToolDefinitions([...agentCtx.toolDefinitions]),
+            projectToolDefinitions(
+              foldFileToolDefinitions(agentCtx.toolDefinitions, toolProfile),
+              toolProfile,
+            ),
             {
               providerName: params.provider.providerName,
               model: params.provider.model,
