@@ -13,7 +13,7 @@ import {
   thinkingSettledLine,
   type Thought,
 } from "./thinking.js";
-import { UI } from "./theme.js";
+import { UI, onThemeChange } from "./theme.js";
 import { pastTenseToolLabel } from "./tool-formatter.js";
 
 /**
@@ -953,47 +953,57 @@ export function streamRowGutter(
  * markdown rows read as the same product skin as plain rows.
  * Native scope names: `markup.*` for markdown, the rest for fenced-code
  * syntax highlighting.
+ *
+ * A function of the live `UI` binding, never a module snapshot: the values
+ * are read when a fresh registry is built, so a theme pin rebuilds them.
  */
-const MARKDOWN_STYLES = {
-  default: { fg: UI.text },
-  conceal: { fg: UI.textFaint, dim: true },
-  // Tree-sitter markdown tags headings by level, and SyntaxStyle matches whole
-  // scope names, so the unnumbered scope alone would never be hit.
-  "markup.heading": { fg: UI.heading, bold: true },
-  "markup.heading.1": { fg: UI.heading, bold: true },
-  "markup.heading.2": { fg: UI.heading, bold: true },
-  "markup.heading.3": { fg: UI.heading, bold: true },
-  "markup.heading.4": { fg: UI.heading, bold: true },
-  "markup.heading.5": { fg: UI.heading, bold: true },
-  "markup.heading.6": { fg: UI.heading, bold: true },
-  "markup.strong": { fg: UI.text, bold: true },
-  "markup.italic": { fg: UI.text, italic: true },
-  "markup.strikethrough": { fg: UI.textFaint },
-  "markup.raw": { fg: UI.inFlight },
-  "markup.list": { fg: UI.inFlightBright },
-  "markup.quote": { fg: UI.textDim, italic: true },
-  "markup.link": { fg: UI.inFlightBright },
-  "markup.link.label": { fg: UI.inFlightBright },
-  "markup.link.url": { fg: UI.inFlightBright },
-  keyword: { fg: UI.inFlightBright },
-  string: { fg: UI.done },
-  number: { fg: UI.done },
-  comment: { fg: UI.textFaint, italic: true },
-  function: { fg: UI.inFlight },
-  type: { fg: UI.inFlightBright },
-  variable: { fg: UI.text },
-  punctuation: { fg: UI.textDim },
-} as const;
+function markdownStyles() {
+  return {
+    default: { fg: UI.text },
+    conceal: { fg: UI.textFaint, dim: true },
+    // Tree-sitter markdown tags headings by level, and SyntaxStyle matches whole
+    // scope names, so the unnumbered scope alone would never be hit.
+    "markup.heading": { fg: UI.heading, bold: true },
+    "markup.heading.1": { fg: UI.heading, bold: true },
+    "markup.heading.2": { fg: UI.heading, bold: true },
+    "markup.heading.3": { fg: UI.heading, bold: true },
+    "markup.heading.4": { fg: UI.heading, bold: true },
+    "markup.heading.5": { fg: UI.heading, bold: true },
+    "markup.heading.6": { fg: UI.heading, bold: true },
+    "markup.strong": { fg: UI.text, bold: true },
+    "markup.italic": { fg: UI.text, italic: true },
+    "markup.strikethrough": { fg: UI.textFaint },
+    "markup.raw": { fg: UI.inFlight },
+    "markup.list": { fg: UI.inFlightBright },
+    "markup.quote": { fg: UI.textDim, italic: true },
+    "markup.link": { fg: UI.inFlightBright },
+    "markup.link.label": { fg: UI.inFlightBright },
+    "markup.link.url": { fg: UI.inFlightBright },
+    keyword: { fg: UI.inFlightBright },
+    string: { fg: UI.done },
+    number: { fg: UI.done },
+    comment: { fg: UI.textFaint, italic: true },
+    function: { fg: UI.inFlight },
+    type: { fg: UI.inFlightBright },
+    variable: { fg: UI.text },
+    punctuation: { fg: UI.textDim },
+  };
+}
 
 let cachedSyntaxStyle: SyntaxStyle | null = null;
 
 /**
  * Shared transcript SyntaxStyle. Lazy because construction reaches into the
- * native render lib, which is unavailable until a renderer exists.
+ * native render lib, which is unavailable until a renderer exists. Dropped
+ * by `setTheme`, so the next read rebuilds from the new palette.
  */
 export function transcriptSyntaxStyle(): SyntaxStyle {
   if (cachedSyntaxStyle === null) {
-    cachedSyntaxStyle = SyntaxStyle.fromStyles({ ...MARKDOWN_STYLES });
+    cachedSyntaxStyle = SyntaxStyle.fromStyles({ ...markdownStyles() });
   }
   return cachedSyntaxStyle;
 }
+
+onThemeChange(() => {
+  cachedSyntaxStyle = null;
+});

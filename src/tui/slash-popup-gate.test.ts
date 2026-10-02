@@ -165,10 +165,12 @@ function settingsOnCommand(
           waitForApproval: true,
           telemetryEnabled: false,
           showPromptCost: false,
+          theme: "auto",
         }),
         setWaitForApproval: () => undefined,
         setTelemetryEnabled: () => undefined,
         setShowPromptCost: () => undefined,
+        setTheme: () => undefined,
       },
       permissions: {
         list: () => list,
@@ -720,10 +722,12 @@ describe("overlay host occupancy and opt-in deferral", () => {
               waitForApproval: true,
               telemetryEnabled: false,
               showPromptCost: false,
+              theme: "auto",
             }),
             setWaitForApproval: () => undefined,
             setTelemetryEnabled: () => undefined,
             setShowPromptCost: () => undefined,
+            setTheme: () => undefined,
           },
           permissions: {
             list: () => hanging.list,
@@ -878,10 +882,12 @@ describe("overlay host occupancy and opt-in deferral", () => {
                 waitForApproval: true,
                 telemetryEnabled: false,
                 showPromptCost: false,
+                theme: "auto",
               }),
               setWaitForApproval: () => undefined,
               setTelemetryEnabled: () => undefined,
               setShowPromptCost: () => undefined,
+              setTheme: () => undefined,
             },
             permissions: {
               list: () => {

@@ -39,6 +39,7 @@ import {
   setOwnedOverlayItems,
 } from "./shell/overlay-host.js";
 import { openHelpOverlay, openSettingsOverlay } from "./shell/palette.js";
+import type { ThemeSetting } from "./theme-detect.js";
 
 /** A remembered approval, flattened for display and revocation by id. */
 export interface GrantEntry {
@@ -104,6 +105,7 @@ export interface SettingsSnapshot {
   readonly waitForApproval: boolean;
   readonly telemetryEnabled: boolean;
   readonly showPromptCost: boolean;
+  readonly theme: ThemeSetting;
 }
 
 export interface PermissionsSurfaceDeps {
@@ -216,6 +218,8 @@ export interface SettingsSurfaceDeps {
   readonly setWaitForApproval: (value: boolean) => void;
   readonly setTelemetryEnabled: (value: boolean) => void;
   readonly setShowPromptCost: (value: boolean) => void;
+  /** Pins the terminal palette (auto follows terminal/OS detection). */
+  readonly setTheme: (value: ThemeSetting) => void;
   /** Live counts for the hooks row summary. Omitted while hooks discovery is unbuilt. */
   readonly hooksSummary?: () => HooksSurfaceSummary;
   /** Opens the hooks surface. Omitted while it is unbuilt (row still shows, Enter no-ops). */
@@ -423,6 +427,19 @@ const ON_OFF_OPTIONS: readonly CycleOption<"on" | "off">[] = [
   { id: "on", label: "on" },
   { id: "off", label: "off" },
 ];
+const THEME_OPTIONS: readonly CycleOption<ThemeSetting>[] = [
+  { id: "auto", label: "auto" },
+  { id: "dark", label: "dark" },
+  { id: "light", label: "light" },
+];
+
+/** Step the theme pin forward or back through auto → dark → light. */
+function stepTheme(current: ThemeSetting, direction: -1 | 1): ThemeSetting {
+  const index = THEME_OPTIONS.findIndex((o) => o.id === current);
+  const next =
+    (index + direction + THEME_OPTIONS.length) % THEME_OPTIONS.length;
+  return THEME_OPTIONS[next]?.id ?? "auto";
+}
 const SETTINGS_NAME_WIDTH = 16;
 
 /** One inline-cycled settings row: label, live value, description, and its cycle step. */
@@ -484,6 +501,18 @@ function settingsCycleRows(
           "it's a running total that draws the eye every time it changes — off by default; /cost still gives the full breakdown on demand.",
       },
       cycle: () => settings.setShowPromptCost(!snapshot.showPromptCost),
+    },
+    {
+      id: "theme",
+      value: `${"theme".padEnd(SETTINGS_NAME_WIDTH)}${cycleField(THEME_OPTIONS, snapshot.theme)}`,
+      chosenLabel: activeOptionLabel(THEME_OPTIONS, snapshot.theme),
+      describe: {
+        what: "which terminal palette the shell paints with.",
+        impact:
+          "applies immediately — auto follows the terminal and OS appearance; dark or light pins the palette instead.",
+      },
+      cycle: (direction) =>
+        settings.setTheme(stepTheme(snapshot.theme, direction)),
     },
   ];
 }

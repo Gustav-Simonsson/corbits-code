@@ -43,7 +43,16 @@ import {
 import { isOpenCodeGoProvider } from "../../../packages/opencode-go/src/index.js";
 import { isZenProvider } from "../../../packages/zen/src/index.js";
 import { applyLiveModelSwitch } from "../../session/live-model-switch.js";
-import { applyFocus } from "../shell/chrome.js";
+import type { ThemeSetting } from "../theme-detect.js";
+import { applyStartupTheme } from "../theme-startup.js";
+import type { ThemeName } from "../theme.js";
+import {
+  applyFocus,
+  paintChrome,
+  paintPromptBorder,
+  repaintTranscriptWindow,
+} from "../shell/chrome.js";
+import type { AppShell } from "../shell/internals.js";
 import { setShellInputSuspended } from "../shell/prompt.js";
 import { warningsForPluginEntry } from "../../plugins/diagnostics.js";
 import { isPluginEnabledForSurface } from "../plugin-surface.js";
@@ -633,6 +642,37 @@ function createHooksSurface(
   };
 }
 
+/**
+ * Live-apply a theme pin: resolve it exactly as startup does (explicit pins
+ * win, `auto` re-detects) and swap the shared `UI` binding, then repaint.
+ * The swap is synchronous — an instant rebinding, never an animated
+ * transition. Returns the resolved palette name so callers can report the
+ * outcome the pin settled on. Exported for tests; the settings surface is
+ * the only caller.
+ */
+export function applyThemePinLive(
+  value: ThemeSetting,
+  repaint: () => void,
+): ThemeName {
+  const applied = applyStartupTheme(value);
+  repaint();
+  return applied;
+}
+
+/**
+ * Unconditional post-pin repaint for the settings surface. The cost/context
+ * meter path (`refreshCostContext` → `setPromptCostContext`) skips painting
+ * when the meter did not move — the common pin-cycle case — so cycling pins
+ * with no cost movement repainted nothing behind the overlay. Force the
+ * chrome, repaint the border, and rebuild the transcript rows so markdown
+ * bodies pick up the fresh SyntaxStyle registry. Synchronous, like the swap.
+ */
+export function repaintShellForTheme(shell: AppShell): void {
+  paintChrome(shell, { force: true });
+  paintPromptBorder(shell);
+  repaintTranscriptWindow(shell);
+}
+
 function createSettingsSurface(
   state: RunnerState,
   services: RunnerServices,
@@ -647,6 +687,7 @@ function createSettingsSurface(
       waitForApproval: resolveWaitForApproval(services.liveToolWatchdog),
       telemetryEnabled: state.liveTelemetryIntent,
       showPromptCost: state.liveShowPromptCost,
+      theme: state.liveTheme,
     }),
     setWaitForApproval: (value: boolean) => {
       services.liveToolWatchdog.waitForApproval = value;
@@ -673,6 +714,19 @@ function createSettingsSurface(
       void persistGlobalSettings("show prompt cost", (base) => ({
         ...base,
         showPromptCost: value,
+      }));
+    },
+    setTheme: (value: ThemeSetting) => {
+      state.liveTheme = value;
+      // The pin used to record-and-persist only, leaving the old palette on
+      // screen until relaunch. Resolve it the same way startup does and paint
+      // now: the swap is an instant rebinding of the shared UI object, never
+      // an animated transition. The repaint is unconditional — the meter path
+      // would skip it whenever the cost context did not move.
+      applyThemePinLive(value, () => repaintShellForTheme(hostOf(state).shell));
+      void persistGlobalSettings("theme", (base) => ({
+        ...base,
+        theme: value,
       }));
     },
     hooksSummary: () => {

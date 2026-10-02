@@ -36,11 +36,13 @@ import { wireMcp } from "./mcp.js";
 import { wirePostStartup } from "./wiring.js";
 import { createRunnerState, liveAgent } from "./state.js";
 import { applyCredentialRecoverySelection } from "./credential-recovery.js";
+import { applyStartupTheme } from "../theme-startup.js";
 import { getLogger } from "@intx/log";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
 
 export async function runTUI(initialConfig: Config): Promise<number> {
   const tuiLogger = getLogger([LOG_NAMESPACE_ROOT, "tui"]);
+  applyStartupTheme(initialConfig.settings?.theme);
   const start = await prepareTUISession(initialConfig, liveTelemetry);
   if (start === null) return 0;
   const state = createRunnerState(start);

@@ -35,7 +35,7 @@ import {
   enqueueSteer,
   interrupt,
 } from "../delivery-queue.js";
-import { UI } from "../theme.js";
+import { UI, onThemeChange } from "../theme.js";
 
 import {
   type AppShell,
@@ -184,6 +184,16 @@ let cachedPromptSyntaxStyle: SyntaxStyle | null = null;
 
 let cachedPromptRecognizedStyleId: number | null = null;
 
+let promptStyleGeneration = 0;
+
+const promptHighlightGenerations = new WeakMap<AppShell, number>();
+
+onThemeChange(() => {
+  cachedPromptSyntaxStyle = null;
+  cachedPromptRecognizedStyleId = null;
+  promptStyleGeneration += 1;
+});
+
 /**
  * The style registry backing the prompt's highlights, plus the one style id
  * this feature uses. Lazy for the same reason as `transcriptSyntaxStyle`:
@@ -214,8 +224,13 @@ export function syncPromptHighlights(shell: AppShell): void {
   const source = shellRecognitionSource.get(shell);
   if (source === undefined) return;
   const value = shell.prompt.value;
-  if (promptHighlightedValue.get(shell) === value) return;
+  if (
+    promptHighlightedValue.get(shell) === value &&
+    promptHighlightGenerations.get(shell) === promptStyleGeneration
+  )
+    return;
   promptHighlightedValue.set(shell, value);
+  promptHighlightGenerations.set(shell, promptStyleGeneration);
 
   const styleId = promptRecognizedStyleId();
   shell.prompt.syntaxStyle = cachedPromptSyntaxStyle;
