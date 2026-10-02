@@ -36,6 +36,7 @@ import { wireMcp } from "./mcp.js";
 import { wirePostStartup } from "./wiring.js";
 import { createRunnerState, liveAgent } from "./state.js";
 import { applyCredentialRecoverySelection } from "./credential-recovery.js";
+import { createReconnectRecoveryPresenter } from "./reconnect-recovery.js";
 import { applyStartupTheme } from "../theme-startup.js";
 import { getLogger } from "@intx/log";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
@@ -248,6 +249,18 @@ export async function runTUI(initialConfig: Config): Promise<number> {
       });
       if (!opened) state.credentialRecovery.cancel(pending.generation);
     };
+    // Settled reconnect-class failures surface the idle one-action reconnect
+    // offer: Enter re-keys the exact kind/profile scope that failed via a
+    // pre-scoped /connect (the phase-1 executor forwarding), Esc dismisses
+    // with no cascade to the credential picker, and a successful re-key
+    // replays the preserved turn once only when nothing committed.
+    state.presentReconnectRecovery = createReconnectRecoveryPresenter({
+      recovery: state.reconnectRecovery,
+      openDialog: (dialog) => host.openReconnectRecovery(dialog),
+      openReconnect: (scope) => host.openSurface("add-provider", scope),
+      readDirector: () => services.directorHolder.instance,
+      deliverContinuation: (message) => liveAgent(state).deliver(message),
+    });
 
     wirePostStartup(state, services, mcp.mcpConnectCallbacks);
 

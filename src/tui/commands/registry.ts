@@ -1,5 +1,6 @@
 import type { CostSummary } from "../../cost/cost-summary.js";
 import type { PluginOrigin } from "../../trust/project-trust.js";
+import type { ReconnectScope } from "../connect-scope.js";
 
 export interface CommandContext {
   signalClear: () => void;
@@ -55,8 +56,12 @@ export type CommandResult =
         | "plugins"
         | "settings"
         | "hooks"
-        | "mcp"
-        | "add-provider";
+        | "mcp";
+    }
+  | {
+      type: "overlay";
+      overlay: "add-provider";
+      connectScope?: ReconnectScope;
     }
   | { type: "modal"; modal: "agent" | "codex-login" | "xai-login" }
   | { type: "workflow"; name: string; args?: string }

@@ -16,6 +16,8 @@ import {
 
 export interface ConnectProviderInput {
   readonly providerId: string;
+  /** Prefill the OAuth account-name step with the profile slug being re-keyed. */
+  readonly initialOAuthProfile?: string;
   readonly settingsPath: string;
   /** Project-local selection file, or null when it aliases global settings. */
   readonly localSettingsPath: string | null;
@@ -54,6 +56,9 @@ export async function connectProviderInline(
   const submitted = await runProviderSetup({
     showTelemetryNotice: false,
     initialProviderId: input.providerId,
+    ...(input.initialOAuthProfile !== undefined
+      ? { initialOAuthProfile: input.initialOAuthProfile }
+      : {}),
     existingProviderNames: Object.keys(input.existing?.providers ?? {}),
     ...(input.createRenderer !== undefined
       ? { createRenderer: input.createRenderer }

@@ -36,6 +36,7 @@ import {
   closeAgentForRebuild,
   createRunLifecycle,
   finalizeTUIRun,
+  observeRecoveryAttempts,
   resetSessionForRotation,
   resyncIdleWithFleetFlag,
   startInterruptRebuild,
@@ -45,6 +46,10 @@ import {
   createCompactionLifecycle,
 } from "../../session/compaction-lifecycle.js";
 import type { RunnerServices, RunnerState } from "./state.js";
+import type { InboundMessage } from "@intx/types/runtime";
+import { createCredentialRecoveryState } from "./credential-recovery.js";
+import { createReconnectRecoveryState } from "./reconnect-recovery.js";
+import type { ProviderFailureAttempt } from "../provider/failure-attempt.js";
 
 function stubQuit(args: {
   awaitTail: () => Promise<void>;
@@ -924,5 +929,137 @@ describe("rebuild close helpers", () => {
     });
     expect(order[0]).toBe("bump");
     expect(order.indexOf("enqueue")).toBeGreaterThan(0);
+  });
+});
+
+describe("observeRecoveryAttempts fan-out", () => {
+  function operatorMessage(): InboundMessage {
+    return {
+      ref: { uid: 1, mailbox: "INBOX" },
+      headers: {
+        from: "user@local",
+        to: ["agent@local"],
+        date: "2026-09-26T00:00:00.000Z",
+        messageId: "<original@local>",
+        interchangeType: "conversation.message",
+      },
+      flags: ["operator-originated"],
+      signatureStatus: "missing" as const,
+      content: "inspect this",
+    };
+  }
+
+  function credentialRetry() {
+    return {
+      type: "inference.retry",
+      data: {
+        previousError: { category: "credential_failure", message: "401" },
+      },
+    };
+  }
+
+  function credentialFailure(providerId: string) {
+    return {
+      type: "inference.error",
+      data: {
+        error: { category: "credential_failure", message: "401", providerId },
+      },
+    };
+  }
+
+  function recoverySeat() {
+    const credentialRecovery = createCredentialRecoveryState();
+    const reconnectRecovery = createReconnectRecoveryState();
+    const credentialRecoveryAttempts = new WeakMap();
+    const reconnectRecoveryAttempts = new WeakMap();
+    return {
+      state: {
+        credentialRecovery,
+        credentialRecoveryAttempts,
+        reconnectRecovery,
+        reconnectRecoveryAttempts,
+      },
+      credentialRecovery,
+      reconnectRecovery,
+      credentialRecoveryAttempts,
+      reconnectRecoveryAttempts,
+    };
+  }
+
+  test("the same sink event reaches both credential and reconnect attempts", () => {
+    const seat = recoverySeat();
+    const providerAttempt = {} as ProviderFailureAttempt;
+    const credentialAttempt = seat.credentialRecovery.begin(
+      operatorMessage(),
+      "xai",
+    );
+    const reconnectAttempt = seat.reconnectRecovery.begin(
+      operatorMessage(),
+      "xai",
+    );
+    seat.credentialRecoveryAttempts.set(providerAttempt, credentialAttempt);
+    seat.reconnectRecoveryAttempts.set(providerAttempt, reconnectAttempt);
+    observeRecoveryAttempts(seat.state, providerAttempt, credentialRetry());
+    observeRecoveryAttempts(
+      seat.state,
+      providerAttempt,
+      credentialFailure("xai/default-2"),
+    );
+    expect(
+      seat.credentialRecovery.settle(credentialAttempt, [
+        {
+          id: "openai/gpt-5",
+          label: "GPT-5 (openai)",
+          provider: "openai",
+          model: "gpt-5",
+        },
+      ]),
+    ).not.toBeNull();
+    expect(seat.reconnectRecovery.settle(reconnectAttempt)).not.toBeNull();
+  });
+
+  test("no current provider attempt observes nothing on either state", () => {
+    const seat = recoverySeat();
+    const credentialAttempt = seat.credentialRecovery.begin(
+      operatorMessage(),
+      "xai",
+    );
+    const reconnectAttempt = seat.reconnectRecovery.begin(
+      operatorMessage(),
+      "xai",
+    );
+    observeRecoveryAttempts(seat.state, undefined, credentialRetry());
+    observeRecoveryAttempts(
+      seat.state,
+      undefined,
+      credentialFailure("xai/default-2"),
+    );
+    expect(seat.credentialRecovery.settle(credentialAttempt, [])).toBeNull();
+    expect(seat.reconnectRecovery.settle(reconnectAttempt)).toBeNull();
+  });
+
+  test("an attempt tracked under another key sees only its own stream", () => {
+    const seat = recoverySeat();
+    const tracked = {} as ProviderFailureAttempt;
+    const untracked = {} as ProviderFailureAttempt;
+    const reconnectAttempt = seat.reconnectRecovery.begin(
+      operatorMessage(),
+      "xai",
+    );
+    seat.reconnectRecoveryAttempts.set(tracked, reconnectAttempt);
+    observeRecoveryAttempts(seat.state, untracked, credentialRetry());
+    observeRecoveryAttempts(
+      seat.state,
+      untracked,
+      credentialFailure("xai/default-2"),
+    );
+    expect(seat.reconnectRecovery.settle(reconnectAttempt)).toBeNull();
+    observeRecoveryAttempts(seat.state, tracked, credentialRetry());
+    observeRecoveryAttempts(
+      seat.state,
+      tracked,
+      credentialFailure("xai/default-2"),
+    );
+    expect(seat.reconnectRecovery.settle(reconnectAttempt)).not.toBeNull();
   });
 });

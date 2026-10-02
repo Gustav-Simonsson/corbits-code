@@ -47,6 +47,7 @@ import {
   mountProductHost,
   type ProductHost,
   type ProductHostAddProviderChoice,
+  type ProductHostConnectRequest,
 } from "../product-host.js";
 import { onTurnBoundary } from "../../agent/reactor-events.js";
 import type { CostSummary } from "../../cost/cost-summary.js";
@@ -61,6 +62,11 @@ import type { StreamRow } from "../stream.js";
 import type { QueueKind } from "../delivery-queue.js";
 import type { ShellOutputFeed } from "../../session/shell-output-feed.js";
 import { openModelPickerOverlay } from "../overlays.js";
+import type { ReconnectScope } from "../connect-scope.js";
+import {
+  reconnectRecoveryItemId,
+  reconnectRecoveryItemLabel,
+} from "./reconnect-recovery.js";
 import type { CredentialRecoveryAlternative } from "./credential-recovery.js";
 
 export interface RunnerHostDeps {
@@ -97,7 +103,10 @@ export interface RunnerHostDeps {
   readonly activeModel?: () => ModelCatalogRef | undefined;
   readonly onModelSelect: (id: string) => void;
   /** Picking a row in the Alt+A add-provider selector; runner owns the connect flow. */
-  readonly onConnectProvider?: (providerName: string) => void;
+  readonly onConnectProvider?: (
+    providerName: string,
+    req?: ProductHostConnectRequest,
+  ) => void;
   /** `f` on a focused model row; runner owns the favorite persist + refresh. */
   readonly onFavoriteToggle?: (id: string) => void;
   /** Alt+D on a focused model row; runner owns the default persist. */
@@ -166,8 +175,12 @@ export type RunnerHost = ProductHost & {
   /**
    * Open a command surface. Returns false when the requested surface has no
    * OpenTUI implementation, so the caller can report the gap.
+   * `connectScope` pre-scopes add-provider to one kind/profile (reconnects).
    */
-  readonly openSurface: (kind: CommandSurfaceKind) => boolean;
+  readonly openSurface: (
+    kind: CommandSurfaceKind,
+    connectScope?: ReconnectScope,
+  ) => boolean;
   /**
    * Recompute the models-first catalog from fresh recent/favorite refs and
    * push it into the already-open host — the picker's Recent/Favorites
@@ -186,6 +199,16 @@ export type RunnerHost = ProductHost & {
   readonly refreshCostContext: () => void;
   readonly openCredentialRecovery: (args: {
     alternatives: readonly CredentialRecoveryAlternative[];
+    onAccept: (id: string) => void;
+    onCancel: () => void;
+  }) => boolean;
+  /**
+   * Idle-only one-action reconnect offer for a reconnect-class terminal
+   * failure. Single row, no type-to-filter, Enter re-keys via a pre-scoped
+   * /connect, Esc dismisses. Returns false when the run is not idle.
+   */
+  readonly openReconnectRecovery: (args: {
+    scope: ReconnectScope;
     onAccept: (id: string) => void;
     onCancel: () => void;
   }) => boolean;
@@ -457,6 +480,20 @@ export async function mountRunnerHost(
     return true;
   };
 
+  const openReconnectRecovery: RunnerHost["openReconnectRecovery"] = (args) => {
+    if (host.shell.session.run !== "idle") return false;
+    openModelPickerOverlay(host.shell, {
+      items: [reconnectRecoveryItemLabel(args.scope)],
+      itemIds: [reconnectRecoveryItemId(args.scope)],
+      typeToFilter: false,
+      onCancel: args.onCancel,
+      onAccept: (selection) => {
+        if (selection.id !== undefined) args.onAccept(selection.id);
+      },
+    });
+    return true;
+  };
+
   const refreshModels = (
     recentModels: readonly ModelCatalogRef[],
     favoriteModels: readonly ModelCatalogRef[],
@@ -474,9 +511,11 @@ export async function mountRunnerHost(
   return {
     ...host,
     dispose,
-    openSurface: (kind) => openCommandSurface(host.shell, kind, surfaceDeps),
+    openSurface: (kind, connectScope) =>
+      openCommandSurface(host.shell, kind, surfaceDeps, connectScope),
     refreshModels,
     refreshCostContext: pushCostContext,
     openCredentialRecovery,
+    openReconnectRecovery,
   };
 }

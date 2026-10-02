@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { normalizeInferenceErrorForTerminal } from "./inference-gateway-error.js";
 import {
+  CREDENTIAL_FAILURE_USER_MESSAGE,
   inferenceErrorMessage,
   terminalProviderFailureMessage,
 } from "./inference-error-message.js";
@@ -198,6 +199,155 @@ describe("terminalProviderFailureMessage", () => {
     const message = terminalProviderFailureMessage("codex/default", normalized);
     expect(message.toLowerCase()).toMatch(/rate limit/);
     expect(message.toLowerCase()).not.toContain("retrying");
+  });
+
+  test("terminal xAI OAuth 426 names the profile and spells the reconnect command", () => {
+    const normalized = normalizeInferenceErrorForTerminal(
+      {
+        category: "fatal",
+        message: "Upgrade Required",
+        statusCode: 426,
+        raw: { error: { code: "upgrade_required" } },
+      },
+      "xai/default-2",
+    );
+    const message = terminalProviderFailureMessage("xai/default-2", normalized);
+    expect(message).toContain('xAI profile "default-2"');
+    expect(message).toContain('"/connect xai default-2"');
+    expect(message).toContain('reconnect profile "default-2"');
+  });
+
+  test("terminal xAI 401 credential failure spells the reconnect command", () => {
+    const message = terminalProviderFailureMessage("xai/default-2", {
+      category: "credential_failure",
+      message: '{"error":{"code":401}}',
+      statusCode: 401,
+      providerId: "xai/default-2",
+    });
+    expect(message).toContain("/connect");
+    expect(message).toContain('"/connect xai default-2"');
+    expect(message).toContain('reconnect profile "default-2"');
+  });
+
+  test("terminal Codex credential failure keeps branded wording plus the explicit command", () => {
+    const normalized = normalizeInferenceErrorForTerminal(
+      {
+        category: "fatal",
+        message: "Not Found",
+        statusCode: 404,
+        raw: {
+          error: {
+            code: "invalid_token",
+            message: "Not authorized: the access token has been revoked",
+          },
+        },
+      },
+      "codex/work",
+    );
+    const message = terminalProviderFailureMessage("codex/work", normalized);
+    expect(message).toContain('Codex profile "work"');
+    // Branded line keeps its wording (bare /connect); the explicit command is
+    // additive, never a stutter of the generic line.
+    expect(message).toContain("/connect");
+    expect(message).toContain('"/connect codex work"');
+    expect(message).not.toContain("run /connect to reconnect");
+  });
+
+  test.each([
+    {
+      name: "bare 404",
+      providerId: "codex/work",
+      error: {
+        category: "fatal" as const,
+        message: "Not Found",
+        statusCode: 404,
+      },
+      exact:
+        'codex/work Provider failed (fatal): Not Found. Try again or switch models with "/model".',
+    },
+    {
+      name: "quota",
+      providerId: "xai/alice",
+      error: {
+        category: "quota_exhausted" as const,
+        message: "Too Many Requests",
+        statusCode: 429,
+      },
+      exact:
+        "xai/alice Provider failed (retryable): Rate limited. Wait a moment and try again.",
+    },
+    {
+      name: "overflow",
+      providerId: "xai/alice",
+      error: {
+        category: "context_overflow" as const,
+        message: "context length exceeded",
+      },
+      exact:
+        "xai/alice Provider failed (context_overflow): context length exceeded. Try /clear to start fresh.",
+    },
+    {
+      name: "non-OAuth 426",
+      providerId: "custom-provider",
+      error: {
+        category: "fatal" as const,
+        message: "Upgrade Required",
+        statusCode: 426,
+      },
+      exact:
+        'custom-provider Provider failed (fatal): Upgrade Required. Try again or switch models with "/model".',
+    },
+  ])(
+    "non-reconnect $name keeps byte-identical guidance",
+    ({ providerId, error, exact }) => {
+      const normalized = normalizeInferenceErrorForTerminal(error, providerId);
+      const message = terminalProviderFailureMessage(providerId, normalized);
+      expect(message).toBe(exact);
+      expect(message).not.toContain('"/connect ');
+    },
+  );
+
+  test.each([
+    {
+      providerId: "xai/alice",
+      command: '"/connect xai alice"',
+      profile: "alice",
+    },
+    {
+      providerId: "codex/alice",
+      command: '"/connect codex alice"',
+      profile: "alice",
+    },
+  ])(
+    "reconnect-class $providerId spells the explicit reconnect command",
+    ({ providerId, command, profile }) => {
+      const normalized = normalizeInferenceErrorForTerminal(
+        {
+          category: "credential_failure",
+          message: "Unauthorized",
+          statusCode: 401,
+        },
+        providerId,
+      );
+      const message = terminalProviderFailureMessage(providerId, normalized);
+      expect(message).toContain(
+        `Run ${command} to reconnect profile "${profile}".`,
+      );
+    },
+  );
+
+  test("bare kind-only id is not reconnect-class and keeps base guidance", () => {
+    const normalized = normalizeInferenceErrorForTerminal(
+      {
+        category: "credential_failure",
+        message: "Unauthorized",
+        statusCode: 401,
+      },
+      "xai",
+    );
+    const message = terminalProviderFailureMessage("xai", normalized);
+    expect(message).not.toContain('"/connect ');
+    expect(message).toContain(CREDENTIAL_FAILURE_USER_MESSAGE);
   });
 
   test("retryable 429 guidance asks the operator to wait before trying again", () => {

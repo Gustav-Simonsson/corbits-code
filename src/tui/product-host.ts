@@ -121,6 +121,17 @@ export interface ProductHostAddProviderChoice {
   readonly accountCount: number;
 }
 
+/**
+ * Pre-scoped reconnect context for a provider connect (`/connect <kind>
+ * [profile]` args, or the idle one-action reconnect offer). `profile` is the
+ * existing slug being re-keyed — the connect flow prefills it, never skips
+ * the confirm-to-re-key.
+ */
+export interface ProductHostConnectRequest {
+  readonly kind?: string;
+  readonly profile?: string;
+}
+
 export interface ProductHostConfig {
   readonly title: string;
   /** Working directory carried by the prompt box's bottom border. */
@@ -149,9 +160,15 @@ export interface ProductHostConfig {
   /**
    * Picking a provider in the Alt+A add-provider selector calls this. Caller
    * runs the connect flow and, on success, updates `models`/`describeModel`
-   * via `setModels` and reopens the picker.
+   * via `setModels` and reopens the picker. `req.profile` pre-scopes a
+   * reconnect (`/connect <kind> <profile>`): the connect flow prefills the
+   * account-name step with the existing slug; the confirm-to-re-key runs
+   * unchanged.
    */
-  readonly onConnectProvider?: (providerName: string) => void;
+  readonly onConnectProvider?: (
+    providerName: string,
+    req?: ProductHostConnectRequest,
+  ) => void;
   /** Alt+F on a focused model row. Bare `f` is claimed by type-to-filter. */
   readonly onFavoriteToggle?: (itemId: string) => void;
   /** Alt+D on a focused model row. Bare `d` is claimed by type-to-filter. */
@@ -243,9 +260,15 @@ export interface ProductHost {
    * Opens the add-provider selector; absent when connect choices are not wired.
    * Pass `returnToModels: true` when opening from the model picker (Alt+A) so
    * Esc returns there. `/connect` and other closed-prompt callers omit it so
-   * Esc dismisses to a closed overlay.
+   * Esc dismisses to a closed overlay. `initialKind`/`initialProfile` pre-scope
+   * a reconnect (`/connect <kind> <profile>`): the kind row is focused and the
+   * profile rides to the connect flow via ProductHostConnectRequest.
    */
-  readonly openAddProvider?: (opts?: { returnToModels?: boolean }) => void;
+  readonly openAddProvider?: (opts?: {
+    returnToModels?: boolean;
+    initialKind?: string;
+    initialProfile?: string;
+  }) => void;
   /** Swap the picker's rows/descriptions in place (e.g. after a provider connects). */
   readonly setModels?: (
     models: readonly ProductHostModelOption[],
@@ -571,7 +594,11 @@ export async function mountProductHost(
   let currentDescribeModel = config.describeModel;
   let openModels: ((focusId?: string) => void) | undefined;
   let openAddProvider:
-    | ((opts?: { returnToModels?: boolean }) => void)
+    | ((opts?: {
+        returnToModels?: boolean;
+        initialKind?: string;
+        initialProfile?: string;
+      }) => void)
     | undefined;
   if (config.onModelSelect) {
     const onSelect = config.onModelSelect;
@@ -589,17 +616,37 @@ export async function mountProductHost(
     // underneath it, which does not apply here.
     openAddProvider =
       addProviderChoices !== undefined && onConnect !== undefined
-        ? (opts?: { returnToModels?: boolean }): void => {
+        ? (opts?: {
+            returnToModels?: boolean;
+            initialKind?: string;
+            initialProfile?: string;
+          }): void => {
             const rows = addProviderChoices();
+            const scopedIndex =
+              opts?.initialKind !== undefined
+                ? rows.findIndex((r) => r.id === opts.initialKind)
+                : -1;
             openAddProviderOverlay(shell, {
               items: rows.map(
                 (r) =>
                   `${r.label} — ${r.accountCount} account${r.accountCount === 1 ? "" : "s"}`,
               ),
               itemIds: rows.map((r) => r.id),
+              ...(scopedIndex >= 0 ? { activeIndex: scopedIndex } : {}),
               onAccept: (sel) => {
                 const id = sel.id;
                 if (id === undefined || id.length === 0) return;
+                // A pre-scoped reconnect carries the profile to the connect
+                // flow (account-name prefill); anything else connects bare.
+                // Unknown kinds fall back to the full list — the overlay
+                // opened unscoped, so there is nothing stale to carry.
+                if (
+                  opts?.initialProfile !== undefined &&
+                  (opts.initialKind === undefined || opts.initialKind === id)
+                ) {
+                  onConnect(id, { kind: id, profile: opts.initialProfile });
+                  return;
+                }
                 onConnect(id);
               },
               describe: (itemId) => {

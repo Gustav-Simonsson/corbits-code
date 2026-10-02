@@ -18,6 +18,7 @@ import {
   gatewayOverloadUserMessage,
   isCodexShortRateLimitInferenceError,
   isGatewayOverloadInferenceError,
+  isKnownOAuthProviderId,
   isXaiShortRateLimitInferenceError,
   parseCodexUsageLimitFromError,
   RATE_LIMIT_USER_MESSAGE,
@@ -167,22 +168,71 @@ export function terminalProviderFailureMessage(
   const diagnosticSentence = /[.!?]$/.test(diagnostic)
     ? diagnostic
     : `${diagnostic}.`;
-  const guidance = terminalProviderFailureGuidance(error, category);
+  const guidance = terminalProviderFailureGuidance(error, category, providerId);
   const tail = guidance.length > 0 ? ` ${guidance}` : "";
   return `${label} Provider failed (${category}): ${diagnosticSentence}${tail}`;
+}
+
+/**
+ * Split a `kind/name` provider id into its reconnect scope. Unslashed ids
+ * reconnect the `default` profile. Returns undefined for malformed ids so the
+ * guidance never spells a broken command. Shared with the reconnect
+ * descriptor (Phase 3) — one split, not two.
+ */
+export function splitReconnectScope(
+  providerId: string,
+): { kind: string; profile: string } | undefined {
+  const slash = providerId.indexOf("/");
+  if (slash <= 0) {
+    return providerId.length > 0
+      ? { kind: providerId, profile: "default" }
+      : undefined;
+  }
+  const kind = providerId.slice(0, slash);
+  const profile = providerId.slice(slash + 1);
+  if (kind.length === 0 || profile.length === 0) return undefined;
+  return { kind, profile };
+}
+
+/**
+ * Explicit one-action reconnect command for reconnect-class terminal failures
+ * (credential_failure on a known-OAuth id): `Run "/connect <kind> <profile>"
+ * to reconnect profile "<profile>".` Empty for anything else, and empty when
+ * the diagnostic already carries the explicit command — never a stutter.
+ */
+function reconnectCommandGuidance(
+  providerId: string,
+  diagnosticMessage: string,
+): string {
+  if (!isKnownOAuthProviderId(providerId)) return "";
+  const scope = splitReconnectScope(providerId);
+  if (scope === undefined) return "";
+  const command = `"/connect ${scope.kind} ${scope.profile}"`;
+  if (diagnosticMessage.includes(command)) return "";
+  return `Run ${command} to reconnect profile "${scope.profile}".`;
 }
 
 function terminalProviderFailureGuidance(
   error: InferenceErrorLike,
   category: string,
+  providerId: string,
 ): string {
   if (category === "credential_failure") {
     // Normalized credential failures already carry the re-login hint in the
     // diagnostic (e.g. Codex profile copy); repeating it reads as a stutter.
     // Shared with the classifier via carriesCodexReLoginHint — one predicate.
-    return carriesCodexReLoginHint(error.message ?? "")
+    const base = carriesCodexReLoginHint(error.message ?? "")
       ? ""
       : CREDENTIAL_FAILURE_USER_MESSAGE;
+    // Reconnect-class failures additionally spell the explicit command so the
+    // operator can repair the named profile in one action (issue #1295). The
+    // Codex branded line keeps its wording; the explicit command is additive.
+    const explicit = reconnectCommandGuidance(
+      error.providerId ?? providerId,
+      error.message ?? "",
+    );
+    if (explicit.length === 0) return base;
+    return base.length > 0 ? `${base} ${explicit}` : explicit;
   }
   if (category === "context_overflow") return "Try /clear to start fresh.";
   // A 429 that survived the harness's paced retries is a wait-it-out rate
@@ -210,7 +260,7 @@ function terminalProviderFailureSummary(
 ): string {
   const label = terminalProviderFailureLabel(providerId, displayLabel);
   const category = terminalProviderFailureCategory(error);
-  const guidance = terminalProviderFailureGuidance(error, category);
+  const guidance = terminalProviderFailureGuidance(error, category, providerId);
   const tail = guidance.length > 0 ? ` ${guidance}` : "";
   return `${label} Provider failed (${category}).${tail}`;
 }

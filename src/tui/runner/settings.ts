@@ -58,6 +58,7 @@ import { warningsForPluginEntry } from "../../plugins/diagnostics.js";
 import { isPluginEnabledForSurface } from "../plugin-surface.js";
 import { resolveWaitForApproval } from "../tool-execution-watchdog.js";
 import { hostOf, type RunnerServices, type RunnerState } from "./state.js";
+import type { ProductHostConnectRequest } from "../product-host.js";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
 
 const tuiLogger = getLogger([LOG_NAMESPACE_ROOT, "tui"]);
@@ -81,7 +82,10 @@ export function telemetryStartupNotice(
 
 export interface SettingsWiring {
   telemetryNotice: string | undefined;
-  onConnectProvider: (providerName: string) => void;
+  onConnectProvider: (
+    providerName: string,
+    req?: ProductHostConnectRequest,
+  ) => void;
   onModelSelect: (id: string) => void;
   onFavoriteToggle: (id: string) => void;
   onSetDefault: (id: string) => void;
@@ -241,7 +245,10 @@ export async function wireSettings(
     return false;
   };
 
-  const onConnectProvider = (providerName: string): void => {
+  const onConnectProvider = (
+    providerName: string,
+    req?: ProductHostConnectRequest,
+  ): void => {
     void (async () => {
       let result: Awaited<ReturnType<typeof connectProviderInline>>;
       // The setup surface shares the live session's renderer — a second
@@ -252,6 +259,12 @@ export async function wireSettings(
       try {
         result = await connectProviderInline({
           providerId: providerName,
+          // A pre-scoped reconnect (`/connect <kind> <profile>` or the idle
+          // one-action offer) prefills the account-name step with the slug
+          // being re-keyed; the confirm-to-re-key still runs unchanged.
+          ...(req?.profile !== undefined
+            ? { initialOAuthProfile: req.profile }
+            : {}),
           settingsPath: trueGlobalSettingsPath,
           localSettingsPath: state.localSettingsFile,
           existing: state.config.settings ?? null,

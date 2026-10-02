@@ -41,6 +41,11 @@ import {
   type CredentialRecoveryAttempt,
   type PendingCredentialRecovery,
 } from "./credential-recovery.js";
+import {
+  createReconnectRecoveryState,
+  type PendingReconnectRecovery,
+  type ReconnectRecoveryAttempt,
+} from "./reconnect-recovery.js";
 import type { mountRunnerHost } from "./host.js";
 import { EventEmitter } from "node:events";
 
@@ -271,9 +276,15 @@ export interface RunnerState {
     ProviderFailureAttempt,
     CredentialRecoveryAttempt
   >;
+  reconnectRecovery: ReturnType<typeof createReconnectRecoveryState>;
+  reconnectRecoveryAttempts: WeakMap<
+    ProviderFailureAttempt,
+    ReconnectRecoveryAttempt
+  >;
 
   // Late-wired cross-module callbacks, in original wiring order.
   presentCredentialRecovery?: (pending: PendingCredentialRecovery) => void;
+  presentReconnectRecovery?: (pending: PendingReconnectRecovery) => void;
   enqueueAgentDeliver?: (
     deliverToLiveAgent: () => void,
     onSettle?: (result: AgentDeliveryResult) => void,
@@ -417,6 +428,8 @@ export function createRunnerState(start: TUIStart): RunnerState {
     approvalPersistNotice: {},
     credentialRecovery: createCredentialRecoveryState(),
     credentialRecoveryAttempts: new WeakMap(),
+    reconnectRecovery: createReconnectRecoveryState(),
+    reconnectRecoveryAttempts: new WeakMap(),
   };
   // Saved through onboarding's "save anyway" bypass without a passing
   // connection test — warn now instead of a bare adapter error on first send.

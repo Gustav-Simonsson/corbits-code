@@ -14,7 +14,10 @@ import {
   codexProfileFromProviderName,
   isCodexProviderName,
 } from "./config/codex-providers.js";
-import { isXaiProviderName } from "./config/xai-providers.js";
+import {
+  isXaiProviderName,
+  xaiProfileFromProviderName,
+} from "./config/xai-providers.js";
 import { isXaiGrokLeafProvider } from "./subagent/provider-family.js";
 
 export interface InferenceErrorLike {
@@ -667,14 +670,154 @@ function normalizeCodexFatal400Message(
 }
 
 /**
+ * OAuth provider ids eligible for upgrade-class reconnect (issue #1295):
+ * known-xAI / Grok-leaf and known-Codex ids. Shared with the transcript
+ * guidance and the reconnect descriptor so all three agree on the set.
+ */
+export function isKnownOAuthProviderId(
+  providerId: string | undefined,
+): providerId is string {
+  if (providerId === undefined || providerId.length === 0) return false;
+  if (isCodexProviderName(providerId)) return true;
+  return isKnownXaiProviderId(providerId);
+}
+
+/**
+ * Upgrade/auth-rejection signals for the OAuth 426 classifier: the 426
+ * "Upgrade Required" reason phrase plus the auth-rejection phrasing shared
+ * with the Codex credential-404 markers. On an OAuth profile a 426 means the
+ * request reached the provider unauthenticated (CL-6973), so recognized
+ * phrasing marks it reconnect-class.
+ */
+const OAUTH_UPGRADE_426_MARKERS = [
+  "upgrade",
+  "unauthenticated",
+  "unauthorized",
+  "unauthorised",
+  "invalid token",
+  "invalid_token",
+  "expired",
+  "revoked",
+  "reconnect",
+  "reauthenticate",
+  "re-authenticate",
+] as const;
+
+function hasOAuthUpgrade426Signal(error: InferenceErrorLike): boolean {
+  return combinedTextIncludesMarker(
+    [error.message ?? "", stringFromRaw(error.raw)],
+    OAUTH_UPGRADE_426_MARKERS,
+  );
+}
+
+/**
+ * Deprecation phrasing that vetoes the 426 classifier. A retired-model or
+ * sunset-API 426 is a fatal migrate-models failure, never a credential
+ * failure — same rationale as the Codex model-deprecation veto above.
+ */
+const OAUTH_UPGRADE_426_DEPRECATION_MARKERS = [
+  "deprecated",
+  "deprecation",
+  "retired",
+  "sunset",
+  "end of life",
+  "no longer supported",
+  "no longer available",
+  "migrate",
+] as const;
+
+function looksLikeOAuthUpgrade426Deprecation(
+  error: InferenceErrorLike,
+): boolean {
+  return combinedTextIncludesMarker(
+    [error.message ?? "", stringFromRaw(error.raw)],
+    OAUTH_UPGRADE_426_DEPRECATION_MARKERS,
+  );
+}
+
+/**
+ * Branded re-auth line for a non-Codex OAuth 426, mirroring
+ * formatCodexCredential404Message: profile named, bare /connect spelled, the
+ * server diagnostic in parens when recognized. An empty diagnostic leaves the
+ * branded line standing alone.
+ */
+function formatOAuthUpgrade426Message(
+  kindLabel: string,
+  chooseClause: string,
+  profile: string,
+  originalDiagnostic: string,
+): string {
+  const branded = `${kindLabel} profile "${profile}" needs re-authentication. Run /connect${chooseClause} and reconnect profile "${profile}".`;
+  const oneLine = originalDiagnostic.replace(/\s+/g, " ").trim();
+  if (oneLine.length === 0 || branded.includes(oneLine)) return branded;
+  const clipped = oneLine.length > 200 ? `${oneLine.slice(0, 199)}…` : oneLine;
+  return `${branded} (${clipped})`;
+}
+
+/**
+ * OAuth 426 (Upgrade Required) is an unauthenticated-provider rejection
+ * (CL-6973), not a bad model name: a fatal 426 on a known-OAuth id becomes
+ * credential_failure so the transcript can offer a reconnect. Quota markers
+ * veto (a quota-flavored 426 stays on its existing path), as does
+ * deprecation phrasing. There is deliberately no body-signal requirement: the
+ * reported xAI 426 arrives bare (issue #1295), so status-426 on an OAuth id
+ * is sufficient — non-OAuth 426s never reach here. Recognized upgrade-class
+ * phrasing is echoed in the branded line; unrecognized server copy stays on
+ * `raw` for logs instead of the action line.
+ */
+function normalizeOAuthUpgradeRequiredError(
+  error: InferenceErrorWithGoContext,
+): InferenceError {
+  if (error.category !== "fatal") return error;
+  if (error.statusCode !== 426) return error;
+  const providerId = error.providerId;
+  if (!isKnownOAuthProviderId(providerId)) return error;
+  if (looksLikeOAuthUpgrade426Deprecation(error)) return error;
+  if (textHasXaiQuotaMarkers(error.message ?? "", stringFromRaw(error.raw))) {
+    return error;
+  }
+  const recognized = hasOAuthUpgrade426Signal(error);
+  const diagnostic = recognized ? (error.message ?? "") : "";
+  const profile =
+    codexProfileFromProviderName(providerId) ??
+    xaiProfileFromProviderName(providerId) ??
+    (providerId.split("/").slice(1).join("/") || providerId);
+  const message = isCodexProviderName(providerId)
+    ? formatCodexCredential404Message(profile, diagnostic)
+    : providerId.split("/")[0] === "xai"
+      ? formatOAuthUpgrade426Message(
+          "xAI",
+          ", choose xAI,",
+          profile,
+          diagnostic,
+        )
+      : formatOAuthUpgrade426Message(
+          providerId.split("/")[0] ?? providerId,
+          "",
+          profile,
+          diagnostic,
+        );
+  return {
+    category: "credential_failure",
+    message,
+    statusCode: 426,
+    ...(error.raw !== undefined ? { raw: error.raw } : {}),
+    ...(error.retryAfterMs !== undefined
+      ? { retryAfterMs: error.retryAfterMs }
+      : {}),
+  };
+}
+
+/**
  * Reclassify gateway overload errors so the default retry policy treats them as
  * transient instead of aborting on protocol_mismatch. Also normalizes OpenCode
  * Go quota/rate-limit shapes (including HTTP 400 mis-status), known-xAI short
  * 429s, attributable xAI capacity protocol_mismatch, Codex usage limits
  * (nested detail.error with resets_in_seconds), known-Codex short 429s that
  * are not usage_limit_reached, known-Codex 404s carrying an
- * auth-rejection signal (expired/revoked credential), and known-Codex fatal
- * 400s whose message is empty or "Bad Request" (nested diagnostic on raw).
+ * auth-rejection signal (expired/revoked credential), known-Codex fatal
+ * 400s whose message is empty or "Bad Request" (nested diagnostic on raw), and
+ * known-OAuth fatal 426s (unauthenticated-provider upgrade rejection).
  */
 export function normalizeInferenceErrorForRetry(
   error: InferenceErrorWithGoContext,
@@ -699,6 +842,9 @@ export function normalizeInferenceErrorForRetry(
 
   const codexFatal400 = normalizeCodexFatal400Message(error);
   if (codexFatal400 !== error) return codexFatal400;
+
+  const oauthUpgrade = normalizeOAuthUpgradeRequiredError(error);
+  if (oauthUpgrade !== error) return oauthUpgrade;
 
   if (!isGatewayOverloadInferenceError(error)) return error;
   if (error.category === "retryable" || error.category === "timeout")
