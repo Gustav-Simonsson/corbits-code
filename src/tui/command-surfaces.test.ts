@@ -1840,6 +1840,37 @@ describe("mcp surface", () => {
 });
 
 describe("host-routed surfaces", () => {
+  test("scoped add-provider forwards its completion callback", async () => {
+    await withShell((shell) => {
+      let received:
+        | {
+            initialKind?: string;
+            initialProfile?: string;
+            onComplete?: (connected: boolean) => void;
+          }
+        | undefined;
+      const completed: boolean[] = [];
+      expect(
+        openCommandSurface(
+          shell,
+          "add-provider",
+          {
+            notify: () => undefined,
+            openAddProvider: (opts) => {
+              received = opts;
+            },
+          },
+          { kind: "xai", profile: "default-2" },
+          (connected) => completed.push(connected),
+        ),
+      ).toBe(true);
+      expect(received?.initialKind).toBe("xai");
+      expect(received?.initialProfile).toBe("default-2");
+      received?.onComplete?.(true);
+      expect(completed).toEqual([true]);
+    });
+  });
+
   test.each([
     {
       surface: "models" as const,

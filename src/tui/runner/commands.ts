@@ -321,7 +321,12 @@ export function createCommandLayer(
       case "noop":
         return;
       case "overlay":
-        if (!hostOf(state).openSurface(result.overlay)) {
+        if (
+          !hostOf(state).openSurface(
+            result.overlay,
+            result.overlay === "add-provider" ? result.connectScope : undefined,
+          )
+        ) {
           const named =
             result.overlay === "add-provider" ? "connect" : result.overlay;
           state.systemNotice?.(`No surface for /${named}.`);

@@ -63,6 +63,7 @@ import { warningsForPluginEntry } from "../../plugins/diagnostics.js";
 import { isPluginEnabledForSurface } from "../plugin-surface.js";
 import { resolveWaitForApproval } from "../tool-execution-watchdog.js";
 import { hostOf, type RunnerServices, type RunnerState } from "./state.js";
+import type { ProductHostConnectRequest } from "../product-host.js";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
 
 const tuiLogger = getLogger([LOG_NAMESPACE_ROOT, "tui"]);
@@ -120,7 +121,10 @@ function removeNotice(
 
 export interface SettingsWiring {
   telemetryNotice: string | undefined;
-  onConnectProvider: (providerName: string) => void;
+  onConnectProvider: (
+    providerName: string,
+    req?: ProductHostConnectRequest,
+  ) => void;
   onModelSelect: (id: string) => void;
   onFavoriteToggle: (id: string) => void;
   onSetDefault: (id: string) => void;
@@ -286,8 +290,17 @@ export async function wireSettings(
     return false;
   };
 
-  const onConnectProvider = (providerName: string): void => {
+  const onConnectProvider = (
+    providerName: string,
+    req?: ProductHostConnectRequest,
+  ): void => {
     void (async () => {
+      let completionReported = false;
+      const reportCompletion = (connected: boolean): void => {
+        if (completionReported) return;
+        completionReported = true;
+        req?.onComplete?.(connected);
+      };
       let result: Awaited<ReturnType<typeof connectProviderInline>>;
       // The setup surface shares the live session's renderer — a second
       // CliRenderer cannot exist on the same stdin. Shell input stays
@@ -297,6 +310,12 @@ export async function wireSettings(
       try {
         result = await connectProviderInline({
           providerId: providerName,
+          // A pre-scoped reconnect (`/connect <kind> <profile>` or the idle
+          // one-action offer) prefills the account-name step with the slug
+          // being re-keyed; the confirm-to-re-key still runs unchanged.
+          ...(req?.profile !== undefined
+            ? { initialOAuthProfile: req.profile }
+            : {}),
           settingsPath: trueGlobalSettingsPath,
           localSettingsPath: state.localSettingsFile,
           existing: state.config.settings ?? null,
@@ -313,6 +332,7 @@ export async function wireSettings(
           createRenderer: () => Promise.resolve(hostOf(state).renderer),
         });
       } catch (err) {
+        reportCompletion(false);
         state.systemNotice?.(
           `Connecting ${providerName} failed: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -323,7 +343,11 @@ export async function wireSettings(
         // whatever shell zone owned it before the surface mounted.
         applyFocus(hostOf(state).shell);
       }
-      if (!result.connected) return;
+      if (!result.connected) {
+        reportCompletion(false);
+        return;
+      }
+      reportCompletion(true);
 
       const onDisk = await loadSettings(trueGlobalSettingsPath);
       const resolvedForCatalog: ResolvedProvider = {

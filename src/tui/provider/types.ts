@@ -157,6 +157,12 @@ export interface ProviderSetupConfig {
    */
   readonly initialProviderId?: string;
   /**
+   * Prefill the OAuth account-name step with the existing profile slug being
+   * re-keyed (e.g. `/connect xai default-2`). The collision confirm still runs
+   * unchanged — prefill never skips the confirm-to-re-key.
+   */
+  readonly initialOAuthProfile?: string;
+  /**
    * Catalog keys already present in global settings. Used by the API-key
    * multi-instance name step for suggested slugs and collision confirms.
    * OAuth still reads live profiles from the auth store.

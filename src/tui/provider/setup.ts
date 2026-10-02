@@ -164,6 +164,9 @@ export async function runProviderSetup(
       state.values.name = preselected.label;
       state.values.baseURL = preselected.baseURL;
       state.values.model = preselected.defaultModel;
+      if (config.initialOAuthProfile !== undefined) {
+        state.values.oauthProfile = config.initialOAuthProfile;
+      }
     }
   }
 

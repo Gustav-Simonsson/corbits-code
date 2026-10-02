@@ -41,7 +41,10 @@ import { printResumeHint } from "../../session/resume-hint.js";
 import { clearActiveDisposeHost } from "../../session/active-host.js";
 import { syncRunStateHandle } from "../../session/active-run.js";
 import { startRunHeartbeat } from "../../session/run-liveness.js";
-import { suppressProviderFailurePresentation } from "../provider/failure-attempt.js";
+import {
+  suppressProviderFailurePresentation,
+  type ProviderFailureAttempt,
+} from "../provider/failure-attempt.js";
 import { normalizeInferenceErrorForTerminal } from "../../inference-gateway-error.js";
 import { ensureFreshInferenceSource } from "../../subagent/refresh-inference-source.js";
 import { peekSourceCredentialSecret } from "../../config/source-credentials.js";
@@ -260,6 +263,35 @@ function createRunPersistence(state: RunnerState, services: RunnerServices) {
 }
 
 /**
+ * Fan one sink event out to whichever recovery attempts track the current
+ * provider-failure attempt. The credential picker and the reconnect offer
+ * share this submit/exit seat, so both observe the same retry/error stream
+ * and settle independently when the send ends.
+ */
+export function observeRecoveryAttempts(
+  state: Pick<
+    RunnerState,
+    | "credentialRecovery"
+    | "credentialRecoveryAttempts"
+    | "reconnectRecovery"
+    | "reconnectRecoveryAttempts"
+  >,
+  providerAttempt: ProviderFailureAttempt | undefined,
+  event: { readonly type: string; readonly data?: unknown },
+): void {
+  if (providerAttempt === undefined) return;
+  const credentialAttempt =
+    state.credentialRecoveryAttempts.get(providerAttempt);
+  if (credentialAttempt !== undefined) {
+    state.credentialRecovery.observe(credentialAttempt, event);
+  }
+  const reconnectAttempt = state.reconnectRecoveryAttempts.get(providerAttempt);
+  if (reconnectAttempt !== undefined) {
+    state.reconnectRecovery.observe(reconnectAttempt, event);
+  }
+}
+
+/**
  * Build the mutable run lifecycle over the assembled session: snapshot
  * persistence, the stream sink, the initial agent build, and the
  * rebuild/rotation paths. Wires interrupt/newSession/agentProxy onto the
@@ -310,14 +342,7 @@ export async function createRunLifecycle(
       providerFailureAttempts.advanceToNextMessage();
     }
     services.correlationAcceptance.observe(event);
-    const providerAttempt = providerFailureAttempts.current();
-    const recoveryAttempt =
-      providerAttempt === undefined
-        ? undefined
-        : state.credentialRecoveryAttempts.get(providerAttempt);
-    if (recoveryAttempt !== undefined) {
-      state.credentialRecovery.observe(recoveryAttempt, event);
-    }
+    observeRecoveryAttempts(state, providerFailureAttempts.current(), event);
     if (event.type === "inference.start" || event.type === "inference.done") {
       providerFailureAttempts.reset();
     } else if (event.type === "inference.error") {

@@ -54,6 +54,8 @@ import {
 } from "./state.js";
 import { LOG_NAMESPACE_ROOT } from "../../branding.js";
 import { buildCredentialRecoveryAlternatives } from "./credential-recovery.js";
+import type { PendingCredentialRecovery } from "./credential-recovery.js";
+import type { PendingReconnectRecovery } from "./reconnect-recovery.js";
 import { listCommands } from "../commands/registry.js";
 
 const tuiLogger = getLogger([LOG_NAMESPACE_ROOT, "tui"]);
@@ -265,6 +267,34 @@ export function userInboundMessage(
 }
 
 /**
+ * Present at most one recovery surface when a send settles. The reconnect
+ * offer re-auths the exact scope that failed, so it wins whenever it arms
+ * and its presenter is wired; otherwise fall through to the credential
+ * picker's provider switch. An armed reconnect with no presenter (a wiring
+ * gap, never the steady state) must not swallow the credential fallback.
+ * Dismissing the reconnect offer never cascades to the credential picker —
+ * one offer per failure; /model stays available for a manual switch.
+ */
+export function presentSendRecoveryOffer(args: {
+  credential: PendingCredentialRecovery | null;
+  reconnect: PendingReconnectRecovery | null;
+  presentCredentialRecovery?:
+    | ((pending: PendingCredentialRecovery) => void)
+    | undefined;
+  presentReconnectRecovery?:
+    | ((pending: PendingReconnectRecovery) => void)
+    | undefined;
+}): void {
+  if (args.reconnect !== null && args.presentReconnectRecovery !== undefined) {
+    args.presentReconnectRecovery(args.reconnect);
+    return;
+  }
+  if (args.credential !== null) {
+    args.presentCredentialRecovery?.(args.credential);
+  }
+}
+
+/**
  * Wire the runtime submit path: system notices, the send-failure settle
  * path, attempt-tracked sends, and the full user-prompt send.
  */
@@ -343,6 +373,11 @@ export function createSubmitPath(
       attempt.providerId,
     );
     state.credentialRecoveryAttempts.set(providerFailure, recoveryAttempt);
+    const reconnectAttempt = state.reconnectRecovery.begin(
+      message,
+      attempt.providerId,
+    );
+    state.reconnectRecoveryAttempts.set(providerFailure, reconnectAttempt);
     try {
       await runWhileAgentBusy(state, async () => {
         const result = await send(message);
@@ -375,7 +410,12 @@ export function createSubmitPath(
           recoveryAttempt.failedProvider,
         ),
       );
-      if (pending !== null) state.presentCredentialRecovery?.(pending);
+      presentSendRecoveryOffer({
+        credential: pending,
+        reconnect: state.reconnectRecovery.settle(reconnectAttempt),
+        presentCredentialRecovery: state.presentCredentialRecovery,
+        presentReconnectRecovery: state.presentReconnectRecovery,
+      });
       services.providerFailureAttempts.sendSettled(providerFailure);
     }
   };

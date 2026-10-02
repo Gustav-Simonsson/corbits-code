@@ -1,4 +1,5 @@
 import { registerCommand } from "./registry.js";
+import { parseConnectScopeArgs } from "../connect-scope.js";
 import { formatCostCommandOutput } from "../../cost/cost-summary.js";
 import {
   formatStartupChangelog,
@@ -57,11 +58,26 @@ export function registerBuiltInCommands(): void {
 
   // Layout-proof add-provider path: `/` works on every keyboard. There is no
   // standalone /login; OAuth sign-in is still reached only through this flow.
+  // `/connect <kind> [profile]` pre-scopes the overlay to one account so a
+  // reconnect offer (or a pasted terminal command) lands on the failed row.
   registerCommand({
     name: "connect",
     description:
       "Connect or reauthenticate a provider account (auth, login, credentials)",
-    handler: () => ({ type: "overlay", overlay: "add-provider" }),
+    argumentHint: "[<kind> [profile]]",
+    handler: (args) => {
+      if (args.trim().length === 0) {
+        return { type: "overlay", overlay: "add-provider" };
+      }
+      const scope = parseConnectScopeArgs(args);
+      if (scope === undefined) {
+        return {
+          type: "message",
+          text: 'Usage: /connect <kind> [profile] — e.g. "/connect xai default-2".',
+        };
+      }
+      return { type: "overlay", overlay: "add-provider", connectScope: scope };
+    },
   });
 
   // signalClear rotates to a fresh session: the on-screen transcript and run

@@ -1343,6 +1343,36 @@ describe("flat type-to-filter model picker", () => {
     }
   });
 
+  test("scoped add-provider forwards completion with the reconnect request", async () => {
+    const completed: boolean[] = [];
+    let finish: ((connected: boolean) => void) | undefined;
+    const { harness, host } = await mountPicker({
+      onConnectProvider: (_name, req) => {
+        expect(req?.kind).toBe("xai");
+        expect(req?.profile).toBe("default-2");
+        finish = req?.onComplete;
+      },
+      addProviderChoices: () => [
+        { id: "openai", label: "OpenAI", hint: "", accountCount: 0 },
+        { id: "xai", label: "xAI", hint: "", accountCount: 1 },
+      ],
+    });
+    try {
+      host.openAddProvider?.({
+        initialKind: "xai",
+        initialProfile: "default-2",
+        onComplete: (connected) => completed.push(connected),
+      });
+      await harness.renderOnce();
+      acceptOverlaySelection(host.shell);
+      finish?.(true);
+      expect(completed).toEqual([true]);
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
   test("typed /connect then Enter opens add-provider and Esc leaves overlay null", async () => {
     const queued: { open?: () => void } = {};
     const { harness, host } = await mountPicker({

@@ -17,6 +17,7 @@ import {
   isOwnedDiskInstall,
 } from "../plugins/uninstall.js";
 import { maskEcho, maskSecret } from "./provider/form.js";
+import type { ReconnectScope } from "./connect-scope.js";
 import { writeClipboard } from "./copy-path.js";
 import {
   residualIdFromSelection,
@@ -234,8 +235,18 @@ export interface CommandSurfaceDeps {
   readonly settings?: SettingsSurfaceDeps;
   /** Opens the host's model/provider picker (owned by the product host). */
   readonly openModels?: () => void;
-  /** Opens the host's add-provider selector (owned by the product host). `/connect` omits returnToModels. */
-  readonly openAddProvider?: (opts?: { returnToModels?: boolean }) => void;
+  /**
+   * Opens the host's add-provider selector (owned by the product host).
+   * `/connect` omits returnToModels. `/connect <kind> [profile]` pre-scopes
+   * via initialKind/initialProfile (kind row focused, profile to the flow),
+   * with completion reported after that interactive flow settles.
+   */
+  readonly openAddProvider?: (opts?: {
+    returnToModels?: boolean;
+    initialKind?: string;
+    initialProfile?: string;
+    onComplete?: (connected: boolean) => void;
+  }) => void;
   /** Fallback channel for surfaces with no live data source. */
   readonly notify: (text: string) => void;
 }
@@ -1649,12 +1660,15 @@ function errorText(err: unknown): string {
 /**
  * Open the surface a command asked for.
  * Returns false when no surface exists for the kind, so the caller can report
- * the gap rather than silently swallowing the command.
+ * the gap rather than silently swallowing the command. `connectScope`
+ * pre-scopes the add-provider selector to one kind/profile for reconnects.
  */
 export function openCommandSurface(
   shell: AppShell,
   kind: CommandSurfaceKind,
   deps: CommandSurfaceDeps,
+  connectScope?: ReconnectScope,
+  onConnectComplete?: (connected: boolean) => void,
 ): boolean {
   switch (kind) {
     case "help":
@@ -1681,7 +1695,17 @@ export function openCommandSurface(
       return true;
     case "add-provider":
       if (deps.openAddProvider === undefined) return false;
-      deps.openAddProvider();
+      deps.openAddProvider(
+        connectScope !== undefined
+          ? {
+              initialKind: connectScope.kind,
+              initialProfile: connectScope.profile,
+              ...(onConnectComplete !== undefined
+                ? { onComplete: onConnectComplete }
+                : {}),
+            }
+          : undefined,
+      );
       return true;
   }
 }

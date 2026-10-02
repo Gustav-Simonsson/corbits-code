@@ -67,6 +67,83 @@ describe("/connect command", () => {
     });
   });
 
+  it("returns the scope for /connect <kind> [profile]", () => {
+    expect(
+      defined(getCommand("connect"), "connect").handler(
+        "xai default-2",
+        makeCtx(),
+      ),
+    ).toEqual({
+      type: "overlay",
+      overlay: "add-provider",
+      connectScope: { kind: "xai", profile: "default-2" },
+    });
+    expect(
+      defined(getCommand("connect"), "connect").handler("xai", makeCtx()),
+    ).toEqual({
+      type: "overlay",
+      overlay: "add-provider",
+      connectScope: { kind: "xai", profile: "default" },
+    });
+  });
+
+  it("dispatch forwards the pre-scope to the add-provider surface", () => {
+    const calls: { kind: string; scope: unknown }[] = [];
+    const state = {
+      host: {
+        openSurface: (kind: string, scope?: unknown) => {
+          calls.push({ kind, scope });
+          return true;
+        },
+      },
+    } as unknown as RunnerState;
+    createCommandLayer(state, {} as unknown as RunnerServices);
+    defined(state.dispatchCommand, "dispatchCommand")(
+      "connect",
+      "xai default-2",
+    );
+    expect(calls).toEqual([
+      { kind: "add-provider", scope: { kind: "xai", profile: "default-2" } },
+    ]);
+  });
+
+  it("dispatch opens the add-provider surface unscoped for bare /connect", () => {
+    const calls: { kind: string; scope: unknown }[] = [];
+    const state = {
+      host: {
+        openSurface: (kind: string, scope?: unknown) => {
+          calls.push({ kind, scope });
+          return true;
+        },
+      },
+    } as unknown as RunnerState;
+    createCommandLayer(state, {} as unknown as RunnerServices);
+    defined(state.dispatchCommand, "dispatchCommand")("connect", "");
+    expect(calls).toEqual([{ kind: "add-provider", scope: undefined }]);
+  });
+
+  it("dispatch reports usage for invalid scope args without opening a surface", () => {
+    const notices: string[] = [];
+    const state = {
+      systemNotice: (text: string) => {
+        notices.push(text);
+      },
+      host: {
+        openSurface: (): boolean => {
+          throw new Error("must not open a surface for invalid args");
+        },
+      },
+    } as unknown as RunnerState;
+    createCommandLayer(state, {} as unknown as RunnerServices);
+    defined(state.dispatchCommand, "dispatchCommand")(
+      "connect",
+      "too many parts here",
+    );
+    expect(notices).toEqual([
+      'Usage: /connect <kind> [profile] — e.g. "/connect xai default-2".',
+    ]);
+  });
+
   it("is discoverable by auth recovery terms", () => {
     const catalog = commandItemsFromRegistry(listCommands());
     for (const query of ["auth", "login", "reauth", "credential"]) {

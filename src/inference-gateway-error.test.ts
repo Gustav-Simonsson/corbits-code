@@ -12,6 +12,18 @@ const CLOUDFLARE_503_HTML = `<!DOCTYPE html>
 <body><h1>503 Service Temporarily Unavailable</h1>
 <p>Cloudflare Ray ID: abc</p></body></html>`;
 
+// PROVISIONAL (Phase 0, issue #1295): the real xAI 426 body for xai/default-2
+// is unknown — the issue reports a bare "HTTP 426 Upgrade Required". Grounded
+// in the status code, the reason phrase, and the OAuth provider id only; no
+// body-signal assertions until a real payload lands.
+const PROVISIONAL_XAI_426_UPGRADE_REQUIRED = {
+  category: "fatal" as const,
+  message: "Upgrade Required",
+  statusCode: 426,
+  providerId: "xai/default-2",
+  raw: { error: { code: "upgrade_required", message: "Upgrade Required" } },
+};
+
 describe("looksLikeHtmlGatewayBody", () => {
   test("detects doctype HTML", () => {
     expect(looksLikeHtmlGatewayBody(CLOUDFLARE_503_HTML)).toBe(true);
@@ -70,6 +82,120 @@ describe("normalizeInferenceErrorForRetry", () => {
 
   test("leaves unrelated errors unchanged", () => {
     const err = { category: "fatal" as const, message: "bad request" };
+    expect(normalizeInferenceErrorForRetry(err)).toEqual(err);
+  });
+
+  // Phase 1 (issue #1295): normalizeOAuthUpgradeRequiredError grounds the
+  // provisional marker list — OAuth 426 with upgrade signal is reconnect-class.
+  test("PROVISIONAL: xAI OAuth 426 with upgrade signal normalizes to credential_failure", () => {
+    const normalized = normalizeInferenceErrorForRetry(
+      PROVISIONAL_XAI_426_UPGRADE_REQUIRED,
+    );
+    expect(normalized.category).toBe("credential_failure");
+    expect(normalized.statusCode).toBe(426);
+    expect(normalized.message).toContain('xAI profile "default-2"');
+    expect(normalized.message).toContain("/connect");
+    expect(normalized.raw).toEqual(PROVISIONAL_XAI_426_UPGRADE_REQUIRED.raw);
+  });
+
+  test("xAI OAuth 426 with raw-body auth signal names the profile", () => {
+    const normalized = normalizeInferenceErrorForRetry({
+      category: "fatal",
+      message: "",
+      statusCode: 426,
+      providerId: "xai/default-2",
+      raw: { error: { message: "Not authorized: token revoked" } },
+    });
+    expect(normalized.category).toBe("credential_failure");
+    expect(normalized.message).toContain('xAI profile "default-2"');
+  });
+
+  test("Codex OAuth 426 with auth signal reuses the branded re-login line", () => {
+    const normalized = normalizeInferenceErrorForRetry({
+      category: "fatal",
+      message: "Upgrade Required",
+      statusCode: 426,
+      providerId: "codex/work",
+      raw: { error: { code: "invalid_token" } },
+    });
+    expect(normalized.category).toBe("credential_failure");
+    expect(normalized.message).toContain('Codex profile "work"');
+    expect(carriesCodexReLoginHint(normalized.message)).toBe(true);
+  });
+
+  test("OAuth 426 without body signal is still reconnect-class on an OAuth id", () => {
+    const normalized = normalizeInferenceErrorForRetry({
+      category: "fatal",
+      message: "",
+      statusCode: 426,
+      providerId: "xai/default-2",
+    });
+    expect(normalized.category).toBe("credential_failure");
+    expect(normalized.statusCode).toBe(426);
+    expect(normalized.message).toContain('xAI profile "default-2"');
+  });
+
+  test.each([
+    {
+      name: "API-key 426",
+      error: {
+        category: "fatal" as const,
+        message: "Upgrade Required",
+        statusCode: 426,
+        providerId: "openai/prod",
+      },
+    },
+    {
+      name: "custom-provider 426",
+      error: {
+        category: "fatal" as const,
+        message: "Upgrade Required",
+        statusCode: 426,
+        providerId: "custom-provider",
+      },
+    },
+    {
+      name: "provider-less 426",
+      error: {
+        category: "fatal" as const,
+        message: "Upgrade Required",
+        statusCode: 426,
+      },
+    },
+    {
+      name: "bare OAuth 426 without signal on a non-OAuth id",
+      error: {
+        category: "fatal" as const,
+        message: "",
+        statusCode: 426,
+        providerId: "openai/prod",
+      },
+    },
+  ])("non-OAuth $name stays fatal", ({ error }) => {
+    expect(normalizeInferenceErrorForRetry(error)).toEqual(error);
+  });
+
+  test("OAuth 426 with quota text stays fatal", () => {
+    const err = {
+      category: "fatal" as const,
+      message: "Upgrade Required",
+      statusCode: 426,
+      providerId: "xai/default-2",
+      raw: { error: { message: "exceeded your current quota" } },
+    };
+    expect(normalizeInferenceErrorForRetry(err)).toEqual(err);
+  });
+
+  test("OAuth 426 with deprecation text stays fatal", () => {
+    const err = {
+      category: "fatal" as const,
+      message: "Upgrade Required",
+      statusCode: 426,
+      providerId: "xai/default-2",
+      raw: {
+        error: { message: "model 'grok-x' has expired — migrate to 'grok-y'" },
+      },
+    };
     expect(normalizeInferenceErrorForRetry(err)).toEqual(err);
   });
 
