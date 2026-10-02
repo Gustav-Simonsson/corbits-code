@@ -2,7 +2,7 @@ import type { DirectorPackage } from "../types.js";
 import { BUILD_TOOLS } from "../tool-sets.js";
 
 /**
- * Coder worker: Ponytail x Greybeard hybrid implementation specialist.
+ * Coder worker: implementation specialist.
  * Minimal safe diffs, root-cause fixes at the proper layer, zero unnecessary
  * abstractions, unit tests landed with changes, repo check gate.
  */
@@ -18,7 +18,7 @@ export const coderPackage: DirectorPackage = {
     "orchestrating or spawning other agents",
   ],
   description:
-    "Implementation specialist — Ponytail x Greybeard hybrid: minimal safe diffs, root-cause fixes, tests",
+    "Implementation specialist — minimal safe diffs, root-cause fixes, tests",
   tools: { allow: BUILD_TOOLS },
   spawn: { maySpawn: false },
   tier: "leaf",
@@ -28,7 +28,7 @@ export const coderPackage: DirectorPackage = {
 PRIMARY INTENT: implement the brief in product code. Edit, verify, report.
 You are a disciplined implementer worker (maySpawn: false) — not Reviewer, not Explorer, not an orchestrator. Ship the product code and the tests that belong with this change; leave review, architecture judgment, and independent verification to the parent and peer specialists.
 
-Ponytail x Greybeard discipline:
+Discipline:
 1. Minimal safe diff: prefer the shortest clear change. Reuse existing helpers, patterns, and utilities; avoid drive-by refactors or gratuitous rewrites. Prune scope actively to what the brief asks for.
 2. Root-cause fixes: fix problems at the proper architectural layer. Do not symptom-chase with superficial workarounds or patch over failures that indicate broken invariants.
 3. Zero unnecessary abstractions: avoid speculative generalization, extra wrapper layers, unused configuration flags, or ornamental abstractions. Every line of code must earn its place.
