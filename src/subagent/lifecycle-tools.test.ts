@@ -955,6 +955,98 @@ describe("send_input", () => {
     expect(sessions.get(closed.id)?.lifecycleStatus).toBe("shutdown");
   });
 
+  test("completed send_input error redirects to resume_agent and mailbox mail", async () => {
+    const sessions = createSubAgentSessionStore();
+    const fleetRecords = createFleetMailbox(sessions);
+    const sendInput = createSendInputTool({ sessions, fleetRecords });
+
+    const completed = startSession(sessions, {
+      description: "done",
+      retained: true,
+    });
+    sessions.markRunning(completed.id);
+    sessions.registerDeliver(completed.id, () => {
+      throw new Error("must not deliver to a completed session");
+    });
+    sessions.complete(completed.id, "## Summary\nDone.");
+    const err = await callFleetToolRaw(sendInput, {
+      target: completed.id,
+      message: "late steer",
+    });
+    expect(err.isError).toBe(true);
+    expect(err.content).toContain(`cannot send_input to "${completed.id}"`);
+    expect(err.content).toContain("status: completed");
+    expect(err.content).toContain("resume_agent");
+    expect(err.content).toContain("mailbox mail");
+    expect(err.content).toContain("do not retry send_input");
+    expect(err.content).toContain("Summary: Done.");
+    expect(err.content).toContain(
+      `report_uri: tool-output:///fleet-dry:${completed.id}:report`,
+    );
+    expect(err.content).toContain("read_file");
+  });
+
+  test("interrupted send_input error resumes without a false report-delivered claim", async () => {
+    const sessions = createSubAgentSessionStore();
+    const fleetRecords = createFleetMailbox(sessions);
+    const sendInput = createSendInputTool({ sessions, fleetRecords });
+
+    const worker = startSession(sessions, {
+      description: "paused",
+      retained: true,
+    });
+    sessions.markRunning(worker.id);
+    sessions.registerInterrupt(worker.id, () => undefined);
+    sessions.registerDeliver(worker.id, () => {
+      throw new Error("must not deliver to an interrupted session");
+    });
+    await callTool(createInterruptAgentTool({ sessions, fleetRecords }), {
+      target: worker.id,
+    });
+    const err = await callFleetToolRaw(sendInput, {
+      target: worker.id,
+      message: "late steer",
+    });
+    expect(err.isError).toBe(true);
+    expect(err.content).toContain(`cannot send_input to "${worker.id}"`);
+    expect(err.content).toContain("status: interrupted");
+    expect(err.content).toContain("resume_agent");
+    expect(err.content).toContain("do not retry send_input");
+    expect(err.content).toContain("no report delivered");
+    expect(err.content).not.toContain("report was delivered");
+    expect(err.content).not.toContain("mailbox mail");
+  });
+
+  test("shutdown send_input error points at trace/spawn, never resume_agent", async () => {
+    const sessions = createSubAgentSessionStore();
+    const fleetRecords = createFleetMailbox(sessions);
+    const sendInput = createSendInputTool({ sessions, fleetRecords });
+
+    const worker = startSession(sessions, {
+      description: "closed",
+      retained: true,
+    });
+    sessions.markRunning(worker.id);
+    sessions.registerClose(worker.id, async () => undefined);
+    sessions.registerDeliver(worker.id, () => {
+      throw new Error("must not deliver to a closed session");
+    });
+    await callTool(createCloseAgentTool({ sessions, fleetRecords }), {
+      target: worker.id,
+    });
+    expect(sessions.get(worker.id)?.lifecycleStatus).toBe("shutdown");
+    const err = await callFleetToolRaw(sendInput, {
+      target: worker.id,
+      message: "late steer",
+    });
+    expect(err.isError).toBe(true);
+    expect(err.content).toContain(`cannot send_input to "${worker.id}"`);
+    expect(err.content).toContain("status: shutdown");
+    expect(err.content).toContain("read_agent_trace");
+    expect(err.content).not.toContain("use resume_agent for another turn");
+    expect(err.content).not.toContain("report was delivered");
+  });
+
   test("enforces nested orchestrator descendant authority", async () => {
     const sessions = createSubAgentSessionStore();
     const nested = startSession(sessions, {
