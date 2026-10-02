@@ -395,6 +395,13 @@ export interface PermissionGateOptions {
   // No operator is attached (headless). An unresolved "ask" becomes a denial
   // unless skipPermissions is set.
   interactive: boolean;
+  // Headless operator surface: fired with the deny reason when decide() denies
+  // because no operator is attached (the !interactive exits above). Exec wires
+  // it to stderr so the denial names the action and the remedy; gates without
+  // an operator surface omit it and stay silent by construction. The reason
+  // already carries the secret-path distinction (no bypass remedy on
+  // sensitive-path denials), so callers emit it verbatim.
+  onHeadlessDeny?: ((reason: string) => void) | undefined;
   // The --dangerously-skip-permissions escape hatch: auto-allow anything the
   // authorization layer did not already deny.
   skipPermissions: boolean;
@@ -1023,6 +1030,7 @@ export function createPermissionGate(
             ? `${request.action} references a sensitive path and requires operator approval, which is unavailable in a non-interactive run.`
             : `${request.action} requires operator approval, which is unavailable in a non-interactive run. Re-run with --dangerously-skip-permissions to bypass, or narrow the action.`;
           denialMemory.record(stableId, reason);
+          options.onHeadlessDeny?.(reason);
           return { kind: "deny", reason };
         }
 
@@ -1067,6 +1075,7 @@ export function createPermissionGate(
         recordAutoDecision(request.tool, "non-interactive", "deny");
         const reason = `${request.action} requires operator approval, which is unavailable in a non-interactive run. Re-run with --dangerously-skip-permissions to bypass, or narrow the action.`;
         denialMemory.record(stableId, reason);
+        options.onHeadlessDeny?.(reason);
         return { kind: "deny", reason };
       }
 

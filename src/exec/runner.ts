@@ -688,7 +688,7 @@ export async function runExec(config: Config): Promise<ExecResult> {
       model: config.model,
       telemetry: liveTelemetry,
       requestApproval: (request: PermissionRequest): Promise<ApprovalOutcome> =>
-        promptPermission(request, interactive),
+        promptPermission(request),
       getActiveProviderModel: () => `${config.providerName}:${config.model}`,
       onPersistNotice: (text) => {
         stderr.write(`${text}\n`);
@@ -697,6 +697,14 @@ export async function runExec(config: Config): Promise<ExecResult> {
         stderr.write(`${text}\n`);
       },
       interactive,
+      // Headless operator surface: the gate denies without an operator before
+      // ever reaching requestApproval, so the explicit denial lives here —
+      // naming the action and the remedy on stderr (never stdout: piped stdout
+      // may feed JSON consumers). The reason already omits the bypass remedy
+      // on sensitive-path denials; emit it verbatim.
+      onHeadlessDeny: (reason) => {
+        stderr.write(`Permission denied: ${reason}\n`);
+      },
       skipPermissions: config.dangerouslySkipPermissions,
       auto: config.auto,
       // Main session: gating rides the reactor's approval-suspend seam. In
@@ -1415,7 +1423,9 @@ export async function runExec(config: Config): Promise<ExecResult> {
  * stdin and write stderr, so a piped stdout must not disable them: stdin TTY
  * alone means an operator can answer. Fully headless (stdin not a TTY) fails
  * closed — denials name the action and the remedy on stderr instead of
- * prompting. stdoutTTY rides along so the call site stays explicit that a
+ * prompting (gate onHeadlessDeny wiring above, not the prompt seam: the gate
+ * denies headless asks before requestApproval is ever reached). stdoutTTY
+ * rides along so the call site stays explicit that a
  * piped stdout is a supported prompting configuration, not an oversight.
  */
 export function resolveExecInteractive(stdio: {
@@ -1450,22 +1460,9 @@ async function promptOperator(
   }
 }
 
-export async function promptPermission(
+async function promptPermission(
   request: PermissionRequest,
-  interactive: boolean,
 ): Promise<ApprovalOutcome> {
-  if (!interactive) {
-    // Fail closed and say so on stderr (never stdout: piped stdout may feed
-    // JSON consumers — see printResumeHint). A headless ask has no operator
-    // to answer, so the denial names the action and the bypass instead of
-    // vanishing into a generic block. Same sentence as the gate's
-    // non-interactive deny reasons (src/permission/gate.ts) by intent; the
-    // gate stays canonical for model-facing text, this seam for the operator.
-    stderr.write(
-      `Permission denied: ${request.action} requires operator approval, which is unavailable in a non-interactive run. Re-run with --dangerously-skip-permissions to bypass, or narrow the action.\n`,
-    );
-    return { allow: false };
-  }
   // Same freeze-while-deciding contract as the TUI gate: the tool wall-clock
   // budget must not run down while the operator reads the prompt.
   const budget = getToolApprovalBudget();

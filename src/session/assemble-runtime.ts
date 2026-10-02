@@ -265,6 +265,12 @@ export interface SessionGateArgs {
    */
   onPendingProjectGrants?: ((text: string) => void) | undefined;
   interactive: boolean;
+  /**
+   * Headless operator surface (see PermissionGateOptions.onHeadlessDeny):
+   * fired with the deny reason when the gate denies for want of an operator.
+   * Exec writes it to stderr; the TUI omits it.
+   */
+  onHeadlessDeny?: ((reason: string) => void) | undefined;
   skipPermissions: boolean;
   auto?: boolean | undefined;
   /** Route this gate's decisions through the reactor authz seam (main session). */
@@ -308,6 +314,7 @@ export async function assembleSessionGate(
     ),
     approvalLog: createApprovalLog(sessionDir(args.cwd, args.sessionId)),
     interactive: args.interactive,
+    onHeadlessDeny: args.onHeadlessDeny,
     skipPermissions: args.skipPermissions,
     auto: args.auto,
     reactorGated: args.reactorGated,
