@@ -6,7 +6,7 @@ description: Document a directory's design and plan improvements with the operat
 
 # Refactor
 
-Use this skill to analyze existing code, produce a structured design document, and collaboratively plan improvements for future implementation.
+Analyze existing code, document its design, and agree an improvement plan with the operator. This skill does not change code: the plan is executed later through `/plan` and `/implement`.
 
 ## Preflight
 
@@ -73,7 +73,7 @@ Append an **Improvement Plan** section to the document with:
 
 ## Output
 
-A single markdown file in the user's current working directory containing both the design analysis and the improvement plan.
+A single markdown file in the worktree containing both the design analysis and the improvement plan. End by telling the operator to run `/plan` on it, then `/issue` and `/implement`.
 
 ## Guiding Principles
 
