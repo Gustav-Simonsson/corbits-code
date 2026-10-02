@@ -83,15 +83,15 @@ const BUILT_IN_AGENT_NAMES: ReadonlySet<string> = new Set([
 // never a leak). Project- or plugin-authored skills are never reported by
 // name.
 const FIRST_PARTY_SKILL_NAMES: ReadonlySet<string> = new Set([
-  "create-issue",
   "docs",
   "git-worktrees",
   "implement",
   "interview",
+  "issue",
   "linear-issue-workflow",
   "philosophy",
   "plan",
-  "pull-request-review",
+  "pull-request",
   "refactor",
   "review",
   "style",

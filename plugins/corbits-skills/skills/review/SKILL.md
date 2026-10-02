@@ -28,7 +28,14 @@ Then the primary dispatches the warranted lenses with `spawn_agent`, one target 
 - Designer or Warden only when the touched files warrant that lens
   (UI surface, or security-sensitive code).
 
-When the target is a PR, read the PR tree from the worktree — worktree checkout belongs to `/pull-request-review`; never review the local checkout as a stand-in for the PR.
+When the target is a PR (number, URL, or branch), review it from a worktree, never from the local checkout:
+
+1. Resolve the PR and its head branch with `gh pr view <ref> --json headRefName,baseRefName,number,url`. Stop and ask if it does not exist.
+2. `git fetch origin <head-branch>`, then create a worktree for it with `use_skill("git-worktrees")`.
+3. Review there. Use the PR's base as the diff base.
+4. Post the finished review on the PR (see the GitHub posting rules), then remove the worktree.
+
+If any step fails, stop and ask instead of working around it.
 
 ## Base Branch Determination
 
