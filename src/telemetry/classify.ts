@@ -88,12 +88,10 @@ const FIRST_PARTY_SKILL_NAMES: ReadonlySet<string> = new Set([
   "implement",
   "interview",
   "issue",
-  "philosophy",
   "plan",
   "pull-request",
   "refactor",
   "review",
-  "style",
   "typescript",
 ]);
 

@@ -81,8 +81,7 @@ director ids from `DIRECTOR_IDS` (and the legacy `worker` alias) are reported
 by id; project-defined or marketplace profile ids become `custom`.
 `skill_used` carries `skill_name`: a first-party skill name reportable by
 name from the closed `corbits-skills` allowlist in `src/telemetry/classify.ts`
-(the slash workflows plus `git-worktrees`, `philosophy`, `style`,
-`typescript`), or `custom` for anything else, including bundled background
+(the slash workflows plus `git-worktrees`, `typescript`), or `custom` for anything else, including bundled background
 skills outside the list. Unknown, project-local, and plugin-authored skill
 names are never transmitted; `skill_name` is the only identifying-adjacent
 property the event can carry.

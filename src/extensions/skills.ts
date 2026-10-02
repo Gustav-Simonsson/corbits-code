@@ -23,7 +23,7 @@ export interface ResolveSkillBodyOptions {
   pluginRoot?: string;
   /**
    * Skip project-local `.agents/.claude/.codex/skills` fallbacks. Attached
-   * product skills (style/philosophy) use this so a repo SKILL.md cannot
+   * bundled product skills use this so a repo SKILL.md cannot
    * become system-prompt constraints.
    */
   pluginDirsOnly?: boolean;

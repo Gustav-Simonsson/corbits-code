@@ -768,7 +768,7 @@ async function runSubAgentInner(
     // tool; the scope cannot widen — use_skill refuses names outside the
     // allowlist and refuses attached/already-loaded names without dumping the
     // body again. Plugin skill dirs match the primary so bundled
-    // corbits-skills (style/philosophy) resolve.
+    // corbits-skills resolve.
     const modelFamilyPolicy = resolveModelFamilyPolicy({
       providerName: params.provider.providerName,
       model: params.provider.model,

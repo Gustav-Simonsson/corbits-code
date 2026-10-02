@@ -270,11 +270,11 @@ shape.
   and optional `skills/<name>/SKILL.md` needs no `index.ts`; `loadDataOnlyAgentPlugin`
   synthesizes the same `agentPlugin` shape after frontmatter validation.
 - **Skill refs on agent frontmatter / body.** A skill name is either:
-  - **Bare** — `style`, `philosophy`, or a namespaced `plugin:style`. Resolved by
+  - **Bare** — `typescript`, `plan`, or a namespaced `plugin:typescript`. Resolved by
     searching the plugin's `skills/` dir first, then project-local fallbacks
     (`.agents/skills`, `.claude/skills`, `.codex/skills`). Prefer bare names for
     co-located skills; they are the portable, discoverable form.
-  - **Path-like** — `./skills/style`, `skills/style`, `../sibling-skill`, or any
+  - **Path-like** — `./skills/typescript`, `skills/typescript`, `../sibling-skill`, or any
     ref containing `/` (including a trailing `SKILL.md`). Resolved only under the
     plugin root (`pluginRoot`), with lexical containment plus a realpath check so
     a symlink under the root cannot escape. Absolute paths, bare `.` / `..`, and
@@ -331,7 +331,7 @@ shape.
   `resolveSkillBody`), so the model does not auto-suggest background libraries.
   First-party recipes that are not operator slashes remain listed for
   `skill_search` / `use_skill` when they only set `user-invocable: false`
-  (`style`, `philosophy`, `typescript`). Background libs such as `git-worktrees` set both flags: not a
+  (`typescript`). Background libs such as `git-worktrees` set both flags: not a
   slash and not listed by `skill_search`/`discoverSkills`, but still loadable
   by explicit `use_skill`/`resolveSkillBody` name. The slash
   command is a direct user entry point on top.
