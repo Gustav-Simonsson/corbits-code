@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import {
+  XAI_CLIENT_IDENTIFIER,
+  XAI_CLIENT_VERSION,
+} from "@corbits/xai-provider";
 import { BEARER_CREDENTIAL_SENTINEL } from "@intx/inference";
 import type {
   ConversationTurn,
@@ -254,8 +258,8 @@ describe("grok-responses buildRequest", () => {
     );
     expect(req.url).toBe("/responses");
     expect(req.headers["authorization"]).toBe(BEARER_CREDENTIAL_SENTINEL);
-    expect(req.headers["x-grok-client-identifier"]).toBe("grok-shell");
-    expect(req.headers["x-grok-client-version"]).toBe("0.2.93");
+    expect(req.headers["x-grok-client-identifier"]).toBe(XAI_CLIENT_IDENTIFIER);
+    expect(req.headers["x-grok-client-version"]).toBe(XAI_CLIENT_VERSION);
     expect(req.headers["x-grok-model-override"]).toBe("grok-4.5");
     expect(req.headers["x-grok-user-id"]).toBe("user-123");
     expect(req.headers["accept"]).toBe("text/event-stream");

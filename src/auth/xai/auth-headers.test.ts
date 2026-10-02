@@ -1,4 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import {
+  XAI_CLIENT_IDENTIFIER,
+  XAI_CLIENT_VERSION,
+  XAI_USER_AGENT,
+} from "@corbits/xai-provider";
 
 import { xaiAuthHeadersForToken } from "./auth-headers.js";
 
@@ -17,6 +22,9 @@ describe("xaiAuthHeadersForToken", () => {
     expect(headers.authorization).toBe(
       `Bearer ${accessTokenWithSub("user-123")}`,
     );
+    expect(headers["user-agent"]).toBe(XAI_USER_AGENT);
+    expect(headers["x-grok-client-identifier"]).toBe(XAI_CLIENT_IDENTIFIER);
+    expect(headers["x-grok-client-version"]).toBe(XAI_CLIENT_VERSION);
   });
 
   test("omits x-grok-user-id when the JWT sub carries CR, LF, or NUL", () => {

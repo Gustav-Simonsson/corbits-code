@@ -18,7 +18,7 @@ import {
 describe("xAI OAuth provider projection", () => {
   test("default models lead with the CLI coding model", () => {
     expect(XAI_DEFAULT_MODELS.length).toBeGreaterThan(1);
-    expect(XAI_DEFAULT_MODELS[0]).toBe("grok-4.5");
+    expect(XAI_DEFAULT_MODELS[0]).toBe("grok-4.7");
   });
 
   test("skips grok-4.7 insert when the vendor list already includes it", () => {
