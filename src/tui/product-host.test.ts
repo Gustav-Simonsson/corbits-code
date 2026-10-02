@@ -14,7 +14,12 @@ import {
   runOverlayAction,
 } from "./shell/overlay-list.js";
 import { handleListFilterKey } from "./shell/palette.js";
-import { mountProductHost, type ProductHostConfig } from "./product-host.js";
+import {
+  decideRemoveKey,
+  mountProductHost,
+  REMOVE_ARM_MS,
+  type ProductHostConfig,
+} from "./product-host.js";
 import { buildModelsFirstCatalog, modelOptionId } from "./model-catalog.js";
 import { hydrateHistoryRows } from "./history-hydrate.js";
 import { MAX_RETAINED_STREAM_ROWS } from "./long-log.js";
@@ -855,6 +860,238 @@ describe("flat type-to-filter model picker", () => {
     }
   });
 
+  const altR = {
+    name: "r",
+    ctrl: false,
+    meta: false,
+    option: true,
+  } as KeyEvent;
+
+  const REMOVE_WIRING = (removed: string[]) => ({
+    onRemoveProvider: (id: string) => removed.push(id),
+    describeRemoveProvider: (id: string): string | null =>
+      id.length === 0
+        ? null
+        : `Remove provider for ${id}? Forgets catalog entry. Alt+R again to confirm, Esc cancels.`,
+  });
+
+  // Index 0 of the fixture catalog is the acme-labs favorite; index 1 is the
+  // next surviving row of the same provider.
+  const firstRowId = modelOptionId("codex/acme-labs", "gpt-5.5");
+  const secondRowId = modelOptionId("codex/acme-labs", "gpt-5.6-sol");
+
+  test("Alt+R arms the focused row with the blast-radius line and deletes nothing", async () => {
+    const removed: string[] = [];
+    const { harness, host } = await mountPicker(REMOVE_WIRING(removed));
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(removed).toEqual([]);
+      expect(host.shell.overlayKind).toBe("model_picker");
+      expect(host.shell.statusFlash).toContain("codex/acme-labs");
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("Alt+R again on the armed row executes exactly once and clears the line", async () => {
+    const removed: string[] = [];
+    const { harness, host } = await mountPicker(REMOVE_WIRING(removed));
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(removed).toEqual([firstRowId]);
+      expect(host.shell.statusFlash).toBeNull();
+      expect(host.shell.overlayKind).toBe("model_picker");
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("Alt+R on a different row re-arms instead of deleting", async () => {
+    const removed: string[] = [];
+    const { harness, host } = await mountPicker(REMOVE_WIRING(removed));
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      moveOverlaySelection(host.shell, 1);
+      await harness.renderOnce();
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(removed).toEqual([]);
+      expect(host.shell.statusFlash).toContain("gpt-5.6-sol");
+      // The re-arm belongs to the new row: confirming now deletes it, never
+      // the row armed before the focus move.
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(removed).toEqual([secondRowId]);
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("moving focus off the armed row disarms: coming back needs a fresh arm", async () => {
+    const removed: string[] = [];
+    const { harness, host } = await mountPicker(REMOVE_WIRING(removed));
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      moveOverlaySelection(host.shell, 1);
+      await harness.renderOnce();
+      moveOverlaySelection(host.shell, -1);
+      await harness.renderOnce();
+      // Back on the first row, but the arm died with the focus move: this
+      // press re-arms instead of executing.
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(removed).toEqual([]);
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(removed).toEqual([firstRowId]);
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("Esc after arming closes disarmed with the line cleared", async () => {
+    const removed: string[] = [];
+    const { harness, host } = await mountPicker(REMOVE_WIRING(removed));
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(host.shell.statusFlash).not.toBeNull();
+      harness.pressKey("Escape");
+      await new Promise((r) => setTimeout(r, 30));
+      await harness.renderOnce();
+      expect(host.shell.overlayKind).toBeNull();
+      expect(host.shell.statusFlash).toBeNull();
+      // Reopening starts clean: Alt+R arms anew instead of executing.
+      host.openModels?.();
+      await harness.renderOnce();
+      expect(runOverlayAction(host.shell, altR)).toBe(true);
+      expect(removed).toEqual([]);
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("Alt+R on the no-matches sentinel and ghost rows is inert", async () => {
+    const removed: string[] = [];
+    const grokId = modelOptionId("xai/alice", "grok-4.5");
+    const { harness, host } = await mountPicker({
+      onRemoveProvider: (id: string) => removed.push(id),
+      // The xai row is a ghost: present in the picker but gone from settings.
+      describeRemoveProvider: (id: string): string | null =>
+        id === grokId || id.length === 0
+          ? null
+          : `Remove provider for ${id}? Forgets catalog entry. Alt+R again to confirm, Esc cancels.`,
+    });
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      await typeFilter(harness, "zzzz-no-such-model");
+      expect(host.shell.overlayItems).toEqual(["(no matches)"]);
+      expect(runOverlayAction(host.shell, altR)).toBe(false);
+      expect(removed).toEqual([]);
+
+      host.openModels?.();
+      await harness.renderOnce();
+      await typeFilter(harness, "grok");
+      expect(runOverlayAction(host.shell, altR)).toBe(false);
+      expect(removed).toEqual([]);
+      expect(host.shell.statusFlash).toBeNull();
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("Alt+R is inert and unadvertised when removal is not wired", async () => {
+    const { harness, host } = await mountPicker({
+      onSetDefault: () => undefined,
+    });
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      expect(runOverlayAction(host.shell, altR)).toBe(false);
+      expect(host.shell.statusFlash).toBeNull();
+      expect(harness.captureCharFrame()).not.toContain("Alt+R");
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("the footer advertises Alt+R only when removal is wired", async () => {
+    const footer = async (
+      overrides: Parameters<typeof mountPicker>[0],
+    ): Promise<string> => {
+      const mounted = await mountPicker(overrides);
+      try {
+        mounted.host.openModels?.();
+        await mounted.harness.renderOnce();
+        return mounted.harness.captureCharFrame();
+      } finally {
+        mounted.host.dispose();
+        mounted.harness.destroy();
+      }
+    };
+
+    const removed: string[] = [];
+    expect(await footer(REMOVE_WIRING(removed))).toContain("Alt+R");
+    expect(await footer({})).not.toContain("Alt+R");
+  });
+
+  test("bare r types into the filter; composed ® arms when wired and filters when not", async () => {
+    const removed: string[] = [];
+    const { harness, host } = await mountPicker(REMOVE_WIRING(removed));
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      // Composed Option+R yields from the filter so the chord still works.
+      const composed = composedKey("®");
+      expect(handleListFilterKey(host.shell, composed)).toBe(false);
+      expect(runOverlayAction(host.shell, composed)).toBe(true);
+      expect(removed).toEqual([]);
+      expect(host.shell.statusFlash).toContain("codex/acme-labs");
+      // Bare `r` never reaches the action: the filter claims it (checked
+      // last — claiming types the character and re-narrows the list).
+      expect(
+        handleListFilterKey(host.shell, {
+          name: "r",
+          sequence: "r",
+          ctrl: false,
+          meta: false,
+          option: false,
+        } as KeyEvent),
+      ).toBe(true);
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
+  test("composed ® remains filter text when removal is not wired", async () => {
+    const { harness, host } = await mountPicker();
+    try {
+      host.openModels?.();
+      await harness.renderOnce();
+      const composed = composedKey("®");
+      expect(handleListFilterKey(host.shell, composed)).toBe(true);
+      expect(runOverlayAction(host.shell, composed)).toBe(false);
+    } finally {
+      host.dispose();
+      harness.destroy();
+    }
+  });
+
   const altA = {
     name: "a",
     ctrl: false,
@@ -1358,5 +1595,58 @@ describe("mount failure", () => {
       }),
     ).rejects.toThrow("gate wiring failed");
     expect(destroyed).toBe(1);
+  });
+});
+
+describe("decideRemoveKey", () => {
+  const row = 'model:["xai","grok-4"]';
+  const other = 'model:["openai","gpt-5"]';
+
+  test("ghost rows and the empty filter sentinel are inert", () => {
+    expect(decideRemoveKey(null, row, false, 1000)).toBe("inert");
+    expect(decideRemoveKey(null, "", true, 1000)).toBe("inert");
+    expect(
+      decideRemoveKey({ itemId: row, armedAt: 1000 }, row, false, 1001),
+    ).toBe("inert");
+  });
+
+  test("first press arms; second press on the same row confirms", () => {
+    expect(decideRemoveKey(null, row, true, 1000)).toBe("armed");
+    expect(
+      decideRemoveKey({ itemId: row, armedAt: 1000 }, row, true, 1000),
+    ).toBe("confirmed");
+    expect(
+      decideRemoveKey(
+        { itemId: row, armedAt: 1000 },
+        row,
+        true,
+        1000 + REMOVE_ARM_MS - 1,
+      ),
+    ).toBe("confirmed");
+  });
+
+  test("an expired arm re-arms instead of executing", () => {
+    expect(
+      decideRemoveKey(
+        { itemId: row, armedAt: 1000 },
+        row,
+        true,
+        1000 + REMOVE_ARM_MS,
+      ),
+    ).toBe("armed");
+    expect(
+      decideRemoveKey(
+        { itemId: row, armedAt: 1000 },
+        row,
+        true,
+        1000 + REMOVE_ARM_MS + 60_000,
+      ),
+    ).toBe("armed");
+  });
+
+  test("a press on a different row re-arms instead of executing", () => {
+    expect(
+      decideRemoveKey({ itemId: row, armedAt: 1000 }, other, true, 1001),
+    ).toBe("armed");
   });
 });

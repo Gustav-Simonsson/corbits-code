@@ -171,6 +171,7 @@ export function handlePaletteFilterKey(
  */
 const OPTION_A_COMPOSED_CHARS = new Set(["å", "Å"]);
 const OPTION_D_COMPOSED_CHARS = new Set(["∂"]);
+const OPTION_R_COMPOSED_CHARS = new Set(["®"]);
 
 /**
  * True when a key event is the model-picker Alt+A add-provider chord.
@@ -196,6 +197,21 @@ export function isSetDefaultShortcutKey(key: KeyEvent): boolean {
   const seq = typeof key.sequence === "string" ? key.sequence : "";
   if ((key.meta || key.option) && name.toLowerCase() === "d") return true;
   if (OPTION_D_COMPOSED_CHARS.has(name) || OPTION_D_COMPOSED_CHARS.has(seq))
+    return true;
+  return false;
+}
+
+/**
+ * True when a key event is the model-picker Alt+R remove-provider chord.
+ * Terminals may deliver Option+R as ® without meta/option. Bare `r` is
+ * always false here — type-to-filter claims ordinary printables.
+ */
+export function isRemoveProviderShortcutKey(key: KeyEvent): boolean {
+  if (key.ctrl) return false;
+  const name = typeof key.name === "string" ? key.name : "";
+  const seq = typeof key.sequence === "string" ? key.sequence : "";
+  if ((key.meta || key.option) && name.toLowerCase() === "r") return true;
+  if (OPTION_R_COMPOSED_CHARS.has(name) || OPTION_R_COMPOSED_CHARS.has(seq))
     return true;
   return false;
 }
@@ -229,6 +245,16 @@ export function handleListFilterKey(shell: AppShell, key: KeyEvent): boolean {
     bag?.primaryBindings.setDefaultHint === true &&
     shell.overlayKind === "model_picker" &&
     isSetDefaultShortcutKey(key)
+  ) {
+    return false;
+  }
+
+  // removeProviderHint similarly gates the composed Option+R (®) bypass.
+  // Outside this model-picker action context, ® remains ordinary filter text.
+  if (
+    bag?.primaryBindings.removeProviderHint === true &&
+    shell.overlayKind === "model_picker" &&
+    isRemoveProviderShortcutKey(key)
   ) {
     return false;
   }

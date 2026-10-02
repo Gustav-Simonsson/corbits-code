@@ -285,6 +285,86 @@ export function listFavoriteModels(settings: Settings): ModelRef[] {
   return settings.favoriteModels ?? [];
 }
 
+// Removal report for removeProviderFromSettings, so the caller can build a
+// truthful notice without re-deriving what changed.
+export interface ProviderRemovalRepair {
+  /** True when defaultProvider pointed at the removed provider. */
+  removedDefault: boolean;
+  /** Repointed default; absent when the default was unset instead. */
+  newDefaultProvider?: string;
+  droppedRecents: number;
+  droppedFavorites: number;
+}
+
+// Delete one provider catalog entry plus every reference to it (recents,
+// favorites, default). Unknown names are a no-op returning the input
+// unchanged. Default repair is deterministic: the live session's provider if
+// still configured, else the newest surviving recent whose provider still
+// exists, else the sole remaining provider, else unset (valid — optional).
+// Pure: no disk I/O, no auth-store knowledge.
+export function removeProviderFromSettings(
+  settings: Settings,
+  providerName: string,
+  liveProvider?: string,
+): {
+  settings: Settings;
+  removed: boolean;
+  repair: ProviderRemovalRepair;
+} {
+  const emptyRepair: ProviderRemovalRepair = {
+    removedDefault: false,
+    droppedRecents: 0,
+    droppedFavorites: 0,
+  };
+  if (settings.providers[providerName] === undefined) {
+    return { settings, removed: false, repair: emptyRepair };
+  }
+  const remaining = Object.fromEntries(
+    Object.entries(settings.providers).filter(
+      ([name]) => name !== providerName,
+    ),
+  );
+  const recents = settings.recentModels ?? [];
+  const keptRecents = recents.filter((r) => r.provider !== providerName);
+  const favorites = settings.favoriteModels ?? [];
+  const keptFavorites = favorites.filter((r) => r.provider !== providerName);
+  let next: Settings = {
+    ...settings,
+    providers: remaining,
+    ...(settings.recentModels !== undefined
+      ? { recentModels: keptRecents }
+      : {}),
+    ...(settings.favoriteModels !== undefined
+      ? { favoriteModels: keptFavorites }
+      : {}),
+  };
+  const repair: ProviderRemovalRepair = {
+    removedDefault: settings.defaultProvider === providerName,
+    droppedRecents: recents.length - keptRecents.length,
+    droppedFavorites: favorites.length - keptFavorites.length,
+  };
+  if (settings.defaultProvider === providerName) {
+    const remainingNames = Object.keys(remaining);
+    const newestSurvivor = keptRecents.find(
+      (r) => remaining[r.provider] !== undefined,
+    )?.provider;
+    const nextDefault =
+      liveProvider !== undefined && remaining[liveProvider] !== undefined
+        ? liveProvider
+        : (newestSurvivor ??
+          (remainingNames.length === 1 ? remainingNames[0] : undefined));
+    if (nextDefault === undefined) {
+      const { defaultProvider: _dropped, ...withoutDefault } = next;
+      void _dropped;
+      next = withoutDefault;
+    } else {
+      next = { ...next, defaultProvider: nextDefault };
+      repair.newDefaultProvider = nextDefault;
+    }
+  }
+  return { settings: next, removed: true, repair };
+}
+
 // Maps the settings shell block to the shape the shell-guard plugin expects.
 // Returns undefined when unset so the plugin applies the 120s foreground
 // default itself. timeoutMs overrides that default; maxTimeoutMs clamps the

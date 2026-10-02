@@ -669,6 +669,11 @@ interface PrimaryOverlayBindings {
   addProviderHint: boolean;
   /** Whether the open primary advertises Alt+D in the footer hints. */
   setDefaultHint: boolean;
+  /**
+   * Whether the open primary advertises Alt+R remove in the footer hints and
+   * yields the composed Option+R (®) from type-to-filter.
+   */
+  removeProviderHint: boolean;
   /** Whether the open `/mcp` list advertises Alt+D / Alt+R. */
   mcpManageHint: boolean;
   /** Whether the open `/mcp` list advertises Alt+A add. */
@@ -689,6 +694,7 @@ export const EMPTY_PRIMARY_BINDINGS: Readonly<PrimaryOverlayBindings> = {
   isGate: false,
   addProviderHint: false,
   setDefaultHint: false,
+  removeProviderHint: false,
   mcpManageHint: false,
   mcpAddHint: false,
 };
@@ -980,6 +986,12 @@ export interface OpenListOverlayOpts {
    * only when the caller actually wired an Alt+D handler via `onAction`.
    */
   readonly setDefaultHint?: boolean;
+  /**
+   * Advertise the Alt+R remove-provider hint in the footer for this open and
+   * yield the composed Option+R (®) from type-to-filter. Set only when the
+   * caller actually wired an Alt+R handler via `onAction`.
+   */
+  readonly removeProviderHint?: boolean;
   /**
    * Advertise Alt+D disable / Alt+R remove in the `/mcp` footer. Confirm
    * overlays leave this unset so they fall back to DEFAULT_OVERLAY_HINTS.

@@ -60,6 +60,7 @@ import {
 import { setOwnedOverlayItems } from "./shell/overlay-host.js";
 import {
   isAddProviderShortcutKey,
+  isRemoveProviderShortcutKey,
   isSetDefaultShortcutKey,
   setPaletteCatalog,
 } from "./shell/palette.js";
@@ -82,6 +83,44 @@ function annotateCurrent(
   return rows.map((r) =>
     r.id === activeId ? { ...r, label: `${r.label} (current)` } : r,
   );
+}
+
+/**
+ * Armed-confirm window for the model-picker Alt+R remove action. Expiry is
+ * checked lazily at the second press (no timer): the arm flash carries the
+ * same TTL, so the line is gone by the time the state reads expired.
+ */
+export const REMOVE_ARM_MS = 5000;
+
+export interface RemoveArmed {
+  readonly itemId: string;
+  readonly armedAt: number;
+}
+
+export type RemoveKeyDecision = "inert" | "armed" | "confirmed";
+
+/**
+ * Pure Alt+R transition for one focused picker row. Ghost rows (not
+ * removable) and the empty filter sentinel are inert; a second press on the
+ * same row inside the window confirms; anything else (re)arms the row —
+ * which is also what disarms a stale arm, since only the latest arm can
+ * ever confirm.
+ */
+export function decideRemoveKey(
+  armed: RemoveArmed | null,
+  itemId: string,
+  removable: boolean,
+  now: number,
+): RemoveKeyDecision {
+  if (!removable || itemId.length === 0) return "inert";
+  if (
+    armed !== null &&
+    armed.itemId === itemId &&
+    now - armed.armedAt < REMOVE_ARM_MS
+  ) {
+    return "confirmed";
+  }
+  return "armed";
 }
 
 export type ProductHostSend = (
@@ -156,6 +195,22 @@ export interface ProductHostConfig {
   readonly onFavoriteToggle?: (itemId: string) => void;
   /** Alt+D on a focused model row. Bare `d` is claimed by type-to-filter. */
   readonly onSetDefault?: (itemId: string) => void;
+  /**
+   * Alt+R on a focused model row. Bare `r` is claimed by type-to-filter.
+   * Two-press armed confirm owned by the picker: the first press arms the
+   * row and flashes the `describeRemoveProvider` line, the second press on
+   * the same armed row calls this. Esc, focus moves, and the arm timeout
+   * disarm with no call. Requires `describeRemoveProvider` — without it the
+   * chord is inert so the hint never names a dead action.
+   */
+  readonly onRemoveProvider?: (itemId: string) => void;
+  /**
+   * Blast-radius line for the Alt+R arm step, keyed by row id. Null means
+   * the row is not removable (ghost/residual rows, the "(no matches)"
+   * filter sentinel) and Alt+R stays inert there. Only read when
+   * `onRemoveProvider` is wired.
+   */
+  readonly describeRemoveProvider?: (itemId: string) => string | null;
   /**
    * Every first-class provider kind, read fresh on each Alt+A open so a
    * just-connected account's count is current. Omitted hosts get no Alt+A
@@ -578,7 +633,26 @@ export async function mountProductHost(
     const onConnect = config.onConnectProvider;
     const onFavoriteToggle = config.onFavoriteToggle;
     const onSetDefault = config.onSetDefault;
+    const onRemoveProvider = config.onRemoveProvider;
+    const describeRemoveProvider = config.describeRemoveProvider;
     const addProviderChoices = config.addProviderChoices;
+    const removeEnabled =
+      onRemoveProvider !== undefined && describeRemoveProvider !== undefined;
+
+    // Alt+R armed-confirm state, per picker mount. Only the latest arm can
+    // ever confirm (a new arm replaces it), and every picker exit clears it
+    // — Esc/dismiss, Enter, the Alt+A switch, and each fresh open. Focus
+    // moves disarm through the describe wrapper below, whose repaints
+    // evaluate on every focus change.
+    let armedRemove: RemoveArmed | null = null;
+    let armedRemoveFlash: string | null = null;
+    const disarmRemove = (): void => {
+      armedRemove = null;
+      if (armedRemoveFlash !== null && shell.statusFlash === armedRemoveFlash) {
+        setStatusFlash(shell, null);
+      }
+      armedRemoveFlash = null;
+    };
 
     // Alt+A from the model picker: close it and open a fresh selector over
     // every first-class provider kind, no already-connected filtering. This
@@ -625,6 +699,8 @@ export async function mountProductHost(
         : undefined;
 
     openModels = (focusId?: string): void => {
+      // A fresh open is never armed: a stale arm belongs to a closed picker.
+      disarmRemove();
       const activeId = config.activeModelId?.();
       const items = annotateCurrent(currentModels, activeId);
       const focusIndex =
@@ -636,8 +712,10 @@ export async function mountProductHost(
         typeToFilter: true,
         addProviderHint: openAddProvider !== undefined,
         setDefaultHint: onSetDefault !== undefined,
+        removeProviderHint: removeEnabled,
         ...(focusIndex >= 0 ? { activeIndex: focusIndex } : {}),
         onAccept: (sel) => {
+          disarmRemove();
           // Prefer the stable id from the (possibly filtered) row. Do not fall
           // back to `items[sel.index]` — that index is into the filtered list,
           // not the unfiltered catalog, so it would pick the wrong model.
@@ -645,10 +723,29 @@ export async function mountProductHost(
           if (id === undefined) return;
           onSelect(id);
         },
-        describe: (itemId) => currentDescribeModel?.(itemId) ?? null,
+        describe: (itemId) => {
+          if (armedRemove !== null && armedRemove.itemId !== itemId) {
+            // Focus left the armed row (arrows, filter re-narrow): disarm
+            // with no write. State only — paint-safe; the arm flash expires
+            // on its own TTL, and Esc still clears it early via onCancel.
+            armedRemove = null;
+          }
+          if (armedRemove !== null && armedRemoveFlash !== null) {
+            return {
+              what: armedRemoveFlash,
+              impact: "Alt+R again to confirm · Esc cancels",
+              tone: "consequence",
+            };
+          }
+          return currentDescribeModel?.(itemId) ?? null;
+        },
+        onCancel: () => {
+          disarmRemove();
+        },
         ...(onFavoriteToggle !== undefined ||
         openAddProvider !== undefined ||
-        onSetDefault !== undefined
+        onSetDefault !== undefined ||
+        removeEnabled
           ? {
               onAction: (itemId, key) => {
                 if (key.ctrl) return false;
@@ -658,6 +755,7 @@ export async function mountProductHost(
                   openAddProvider !== undefined &&
                   isAddProviderShortcutKey(key)
                 ) {
+                  disarmRemove();
                   openAddProvider({ returnToModels: true });
                   return true;
                 }
@@ -682,6 +780,25 @@ export async function mountProductHost(
                 ) {
                   if (itemId.length === 0) return true;
                   onSetDefault(itemId);
+                  return true;
+                }
+                // Alt+R remove stays modifier-only (plus the composed ®
+                // glyph); bare `r` is type-to-filter text and never arrives.
+                if (removeEnabled && isRemoveProviderShortcutKey(key)) {
+                  // Null arm line: ghost/residual row with no settings entry.
+                  const armLine = describeRemoveProvider?.(itemId) ?? null;
+                  if (armLine === null) return false;
+                  if (
+                    decideRemoveKey(armedRemove, itemId, true, Date.now()) ===
+                    "confirmed"
+                  ) {
+                    disarmRemove();
+                    onRemoveProvider?.(itemId);
+                    return true;
+                  }
+                  armedRemove = { itemId, armedAt: Date.now() };
+                  armedRemoveFlash = armLine;
+                  setStatusFlash(shell, armLine, { ttlMs: REMOVE_ARM_MS });
                   return true;
                 }
                 return false;

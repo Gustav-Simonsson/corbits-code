@@ -12,16 +12,21 @@ import { getLogger } from "@intx/log";
 import {
   listFavoriteModels,
   listRecentModels,
+  loadLocalSettings,
   loadSettings,
   markLastChangelogVersion,
   markTelemetryNoticeShown,
   pushRecentModel,
+  removeProviderFromSettings,
+  saveLocalSettings,
   setDefaultModel,
   toggleFavoriteModel,
   type ModelRef,
+  type ProviderRemovalRepair,
   type ResolvedProvider,
   type Settings,
 } from "../../config/settings.js";
+import { oauthStoreForProvider } from "../../auth/remove-provider.js";
 import { getTelemetry } from "../../telemetry/singleton.js";
 import { refreshLiveProviderCatalog } from "../../config/index.js";
 import { createTelemetryToggleHandler } from "../../telemetry/toggle.js";
@@ -79,12 +84,52 @@ export function telemetryStartupNotice(
     : undefined;
 }
 
+/**
+ * Post-delete summary: what was forgotten, which refs were dropped, where
+ * the default went, and whether anything still needs attention. Names and
+ * counts only — the credential bit never carries key material.
+ */
+function removeNotice(
+  provider: string,
+  credentialBit: string,
+  repair: ProviderRemovalRepair,
+  orphanedProfile: string | null,
+  survivorCount: number,
+): string {
+  const parts = [`Removed ${provider} (${credentialBit} forgotten).`];
+  const drops: string[] = [];
+  if (repair.droppedRecents > 0) drops.push(`${repair.droppedRecents} recent`);
+  if (repair.droppedFavorites > 0)
+    drops.push(`${repair.droppedFavorites} favorite`);
+  if (drops.length > 0) parts.push(`Dropped ${drops.join(" + ")} refs.`);
+  if (repair.removedDefault) {
+    parts.push(
+      repair.newDefaultProvider !== undefined
+        ? `Default moved to ${repair.newDefaultProvider}.`
+        : `No default provider set.`,
+    );
+  }
+  if (survivorCount === 0)
+    parts.push(`No providers left — /connect to add one.`);
+  if (orphanedProfile !== null)
+    parts.push(
+      `Auth profile '${orphanedProfile}' may remain — retry removal to clear it.`,
+    );
+  return parts.join(" ");
+}
+
 export interface SettingsWiring {
   telemetryNotice: string | undefined;
   onConnectProvider: (providerName: string) => void;
   onModelSelect: (id: string) => void;
   onFavoriteToggle: (id: string) => void;
   onSetDefault: (id: string) => void;
+  onRemoveProvider: (id: string) => void;
+  /**
+   * Blast-radius line for the Alt+R arm step, or null when the row is not
+   * removable. Read by the picker before arming; never prints key material.
+   */
+  describeRemoveProvider: (id: string) => string | null;
   surfaces: {
     permissions: ReturnType<typeof createPermissionsSurface>;
     plugins: ReturnType<typeof createPluginsSurface>;
@@ -375,10 +420,13 @@ export async function wireSettings(
     });
   };
 
+  const pendingProviderRemovals = new Set<string>();
+
   const onModelSelect = (id: string): void => {
     const identity = modelOptionRef(id);
     if (identity === null) return;
     const { provider, model } = identity;
+    if (pendingProviderRemovals.has(provider)) return;
     applyLiveModelSwitch(
       { providerName: provider, model },
       {
@@ -497,12 +545,228 @@ export async function wireSettings(
     });
   };
 
+  // Credential bit shared by the arm line and the post-delete notice: names
+  // what will be (or was) forgotten. Names and counts only, never secrets.
+  const removeCredentialBit = (
+    provider: string,
+    entry: { keyless?: boolean; apiKey?: string },
+  ): string => {
+    const target = oauthStoreForProvider(provider);
+    if (target !== null)
+      return `auth profile '${target.profile}' + catalog entry`;
+    if (entry.keyless === true) return `catalog entry (no stored secret)`;
+    if (entry.apiKey !== undefined && entry.apiKey.length > 0)
+      return `catalog entry + stored key`;
+    return `catalog entry`;
+  };
+
+  const describeRemoveProvider = (id: string): string | null => {
+    const ref = modelOptionRef(id);
+    if (ref === null) return null;
+    const settings = state.config.settings;
+    const entry = settings?.providers[ref.provider];
+    if (entry === undefined) {
+      const target = oauthStoreForProvider(ref.provider);
+      return target === null
+        ? null
+        : `Remove ${ref.provider} residual? Forgets auth profile '${target.profile}'. Alt+R again to confirm, Esc cancels.`;
+    }
+    const modelCount = entry.models.length;
+    const modelsBit = modelCount === 1 ? "1 model" : `${modelCount} models`;
+    let repairPreview = "";
+    if (settings?.defaultProvider === ref.provider) {
+      const preview = removeProviderFromSettings(
+        settings,
+        ref.provider,
+        state.config.providerName,
+      ).repair;
+      repairPreview =
+        preview.newDefaultProvider !== undefined
+          ? ` Default moves to ${preview.newDefaultProvider}.`
+          : ` Default will be unset.`;
+    }
+    return `Remove ${ref.provider} (${modelsBit})? Forgets ${removeCredentialBit(ref.provider, entry)}.${repairPreview} Alt+R again to confirm, Esc cancels.`;
+  };
+
+  const onRemoveProvider = (id: string): void => {
+    const ref = modelOptionRef(id);
+    if (ref === null) return;
+    const provider = ref.provider;
+    if (pendingProviderRemovals.has(provider)) return;
+    pendingProviderRemovals.add(provider);
+    void (async () => {
+      const entry = state.config.settings?.providers[provider];
+      if (entry === undefined) {
+        // Orphan retry: the catalog row is gone but an OAuth profile may
+        // linger on disk (state after a failed removeProfile). Clear it so
+        // the "retry removal" promise stays truthful; "already gone" is only
+        // for when nothing remains anywhere.
+        const orphanTarget = oauthStoreForProvider(provider);
+        if (orphanTarget !== null) {
+          try {
+            const removed = await orphanTarget.removeProfile(
+              orphanTarget.profile,
+            );
+            if (removed.includes(orphanTarget.profile)) {
+              state.systemNotice?.(
+                `Removed ${provider} (auth profile '${orphanTarget.profile}' forgotten).`,
+              );
+              return;
+            }
+          } catch (err) {
+            tuiLogger.warn("provider removal auth cleanup failed: {error}", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+            state.systemNotice?.(
+              `Auth profile '${orphanTarget.profile}' may remain — retry removal to clear it.`,
+            );
+            return;
+          }
+        }
+        state.systemNotice?.(`${provider} is already gone.`);
+        return;
+      }
+      // Live-session guard (FR5): never orphan the running session mid-run.
+      if (provider === state.config.providerName) {
+        state.systemNotice?.(
+          `${provider} is running this session — switch with /model first.`,
+        );
+        return;
+      }
+      const credentialBit = removeCredentialBit(provider, entry);
+      const liveProvider = state.config.providerName;
+      let removal:
+        | { settings: Settings; repair: ProviderRemovalRepair }
+        | undefined;
+      const result = await services.globalSettingsWriter.mutateAt(
+        trueGlobalSettingsPath,
+        (base) => {
+          const out = removeProviderFromSettings(base, provider, liveProvider);
+          if (!out.removed) return null;
+          removal = { settings: out.settings, repair: out.repair };
+          return out.settings;
+        },
+      );
+      if (result === "skipped") {
+        tuiLogger.warn(
+          "Skipping provider removal write: unreadable global settings at {path}",
+          { path: state.config.globalSettingsPath },
+        );
+        state.systemNotice?.(
+          `Could not remove ${provider}: settings are unreadable.`,
+        );
+        return;
+      }
+      if (removal === undefined) {
+        state.systemNotice?.(`${provider} is already gone.`);
+        return;
+      }
+      // OAuth credential, after the settings row is gone: retry-safe, since
+      // an unknown settings name is a notice + no-op on the next attempt.
+      const target = oauthStoreForProvider(provider);
+      let orphanedProfile: string | null = null;
+      if (target !== null) {
+        try {
+          await target.removeProfile(target.profile);
+        } catch (err) {
+          tuiLogger.warn("provider removal auth cleanup failed: {error}", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          orphanedProfile = target.profile;
+        }
+      }
+      // Per-repo local selection: clear a dangling pick so the next launch
+      // falls back to the global default. Selection only, never secrets.
+      if (state.localSettingsFile !== null) {
+        try {
+          const local = await loadLocalSettings(state.localSettingsFile);
+          if (local?.provider === provider) {
+            const {
+              provider: _droppedProvider,
+              model: _droppedModel,
+              ...rest
+            } = local;
+            await saveLocalSettings(state.localSettingsFile, rest);
+          }
+        } catch (err) {
+          tuiLogger.warn(
+            "provider removal local selection clear failed: {error}",
+            { error: err instanceof Error ? err.message : String(err) },
+          );
+        }
+      }
+      // Post-delete refresh tail, mirroring onConnectProvider.
+      const onDisk = await loadSettings(trueGlobalSettingsPath);
+      const resolvedForCatalog: ResolvedProvider = {
+        apiKey: state.config.apiKey,
+        baseURL: state.config.baseURL,
+        model: state.config.model,
+        providerName: state.config.providerName,
+        ...(state.config.keyless !== undefined
+          ? { keyless: state.config.keyless }
+          : {}),
+      };
+      const providers = await refreshLiveProviderCatalog(
+        onDisk,
+        resolvedForCatalog,
+      );
+      state.config = {
+        ...state.config,
+        providers,
+        ...(onDisk !== null ? { settings: onDisk } : {}),
+      };
+      hostOf(state).refreshModels(
+        listRecentModels(state.config.settings ?? { providers: {} }),
+        listFavoriteModels(state.config.settings ?? { providers: {} }),
+        providers,
+      );
+      // Reopen at the repaired default's model, else the first surviving
+      // row — never the top of the list by accident when avoidable.
+      const survivors = onDisk?.providers ?? {};
+      const focusProvider =
+        removal.repair.newDefaultProvider ?? Object.keys(survivors)[0];
+      let focusId: string | undefined;
+      if (focusProvider !== undefined) {
+        const survivorModels = survivors[focusProvider]?.models ?? [];
+        const survivorDefault = survivors[focusProvider]?.defaultModel;
+        const focusModel =
+          survivorDefault !== undefined &&
+          survivorModels.includes(survivorDefault)
+            ? survivorDefault
+            : survivorModels[0];
+        if (focusModel !== undefined) {
+          focusId = modelOptionId(focusProvider, focusModel);
+        }
+      }
+      hostOf(state).openModels?.(focusId);
+      state.systemNotice?.(
+        removeNotice(
+          provider,
+          credentialBit,
+          removal.repair,
+          orphanedProfile,
+          Object.keys(survivors).length,
+        ),
+      );
+    })()
+      .catch((err: unknown) => {
+        tuiLogger.debug("provider removal failed: {error}", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => {
+        pendingProviderRemovals.delete(provider);
+      });
+  };
+
   return {
     telemetryNotice,
     onConnectProvider,
     onModelSelect,
     onFavoriteToggle,
     onSetDefault,
+    onRemoveProvider,
+    describeRemoveProvider,
     surfaces: {
       permissions: createPermissionsSurface(state, services),
       plugins: createPluginsSurface(state, services),

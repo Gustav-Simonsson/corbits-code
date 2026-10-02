@@ -155,6 +155,8 @@ export async function runTUI(initialConfig: Config): Promise<number> {
       onModelSelect: settings.onModelSelect,
       onFavoriteToggle: settings.onFavoriteToggle,
       onSetDefault: settings.onSetDefault,
+      onRemoveProvider: settings.onRemoveProvider,
+      describeRemoveProvider: settings.describeRemoveProvider,
       commands: () =>
         listCommands().map((c) => ({
           name: c.name,

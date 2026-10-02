@@ -25,6 +25,7 @@ import {
   pushRecentModel,
   toggleFavoriteModel,
   setDefaultModel,
+  removeProviderFromSettings,
   listRecentModels,
   listFavoriteModels,
   normalizeMcpServers,
@@ -1241,6 +1242,171 @@ describe("recent and favorite model helpers", () => {
     const s: Settings = { providers: firepass.providers, recentModels: recent };
     expect(listRecentModels(s)).toHaveLength(5);
     expect(listRecentModels(s, 3)).toHaveLength(3);
+  });
+});
+
+describe("removeProviderFromSettings", () => {
+  const providerA: ProviderSettings = {
+    baseURL: "https://a/v1",
+    apiKey: "a-key",
+    models: ["a-model"],
+    defaultModel: "a-model",
+  };
+  const providerB: ProviderSettings = {
+    baseURL: "https://b/v1",
+    apiKey: "b-key",
+    models: ["b-model", "b-other"],
+    defaultModel: "b-model",
+  };
+  const providerC: ProviderSettings = {
+    baseURL: "https://c/v1",
+    apiKey: "c-key",
+    models: ["c-model"],
+    defaultModel: "c-model",
+  };
+  const removalBase: Settings = {
+    defaultProvider: "a",
+    providers: { a: providerA, b: providerB, c: providerC },
+    recentModels: [
+      { provider: "b", model: "b-model" },
+      { provider: "a", model: "a-model" },
+      { provider: "b", model: "b-other" },
+    ],
+    favoriteModels: [
+      { provider: "b", model: "b-model" },
+      { provider: "c", model: "c-model" },
+    ],
+  };
+
+  test("removes a non-default provider and filters its recents and favorites", () => {
+    const {
+      settings: next,
+      removed,
+      repair,
+    } = removeProviderFromSettings(removalBase, "b");
+    expect(removed).toBe(true);
+    expect(next.providers.b).toBeUndefined();
+    expect(next.providers.a).toEqual(providerA);
+    expect(next.providers.c).toEqual(providerC);
+    expect(next.recentModels).toEqual([{ provider: "a", model: "a-model" }]);
+    expect(next.favoriteModels).toEqual([{ provider: "c", model: "c-model" }]);
+    expect(next.defaultProvider).toBe("a");
+    expect(repair).toEqual({
+      removedDefault: false,
+      droppedRecents: 2,
+      droppedFavorites: 1,
+    });
+  });
+
+  test("unknown name returns the input unchanged with removed false", () => {
+    const {
+      settings: next,
+      removed,
+      repair,
+    } = removeProviderFromSettings(removalBase, "ghost");
+    expect(removed).toBe(false);
+    expect(next).toBe(removalBase);
+    expect(repair).toEqual({
+      removedDefault: false,
+      droppedRecents: 0,
+      droppedFavorites: 0,
+    });
+  });
+
+  test("default repair prefers the live provider when still configured", () => {
+    const { settings: next, repair } = removeProviderFromSettings(
+      removalBase,
+      "a",
+      "c",
+    );
+    expect(next.defaultProvider).toBe("c");
+    expect(repair).toEqual({
+      removedDefault: true,
+      newDefaultProvider: "c",
+      droppedRecents: 1,
+      droppedFavorites: 0,
+    });
+  });
+
+  test("default repair falls back to the newest surviving recent", () => {
+    const { settings: next, repair } = removeProviderFromSettings(
+      removalBase,
+      "a",
+    );
+    expect(next.defaultProvider).toBe("b");
+    expect(repair.newDefaultProvider).toBe("b");
+  });
+
+  test("default repair skips ghost recents whose provider is gone", () => {
+    const s: Settings = {
+      ...removalBase,
+      recentModels: [
+        { provider: "gone", model: "m" },
+        { provider: "c", model: "c-model" },
+      ],
+    };
+    const { settings: next } = removeProviderFromSettings(s, "a");
+    expect(next.defaultProvider).toBe("c");
+  });
+
+  test("default repair picks the sole remaining provider", () => {
+    const s: Settings = {
+      defaultProvider: "a",
+      providers: { a: providerA, b: providerB },
+    };
+    const { settings: next, repair } = removeProviderFromSettings(s, "a");
+    expect(next.defaultProvider).toBe("b");
+    expect(repair.newDefaultProvider).toBe("b");
+    // Absent recents/favorites stay absent instead of materializing as [].
+    expect("recentModels" in next).toBe(false);
+    expect("favoriteModels" in next).toBe(false);
+  });
+
+  test("removing the last provider unsets the default", () => {
+    const s: Settings = {
+      defaultProvider: "a",
+      providers: { a: providerA },
+      recentModels: [{ provider: "a", model: "a-model" }],
+      favoriteModels: [{ provider: "a", model: "a-model" }],
+    };
+    const { settings: next, repair } = removeProviderFromSettings(s, "a");
+    expect(next.providers).toEqual({});
+    expect("defaultProvider" in next).toBe(false);
+    expect(next.recentModels).toEqual([]);
+    expect(next.favoriteModels).toEqual([]);
+    expect(repair).toEqual({
+      removedDefault: true,
+      droppedRecents: 1,
+      droppedFavorites: 1,
+    });
+    expect(isSettings(next)).toBe(true);
+  });
+
+  test("OAuth-shaped names behave identically at this layer", () => {
+    const s: Settings = {
+      defaultProvider: "xai/default-2",
+      providers: {
+        "xai/default-2": {
+          baseURL: "https://api.x.ai/v1",
+          apiKey: "seed",
+          models: ["grok"],
+          defaultModel: "grok",
+        },
+        "openai/work": {
+          baseURL: "https://api.openai.com/v1",
+          apiKey: "k",
+          models: ["m"],
+          defaultModel: "m",
+        },
+      },
+    };
+    const { settings: next, removed } = removeProviderFromSettings(
+      s,
+      "xai/default-2",
+    );
+    expect(removed).toBe(true);
+    expect(next.providers["xai/default-2"]).toBeUndefined();
+    expect(next.defaultProvider).toBe("openai/work");
   });
 });
 

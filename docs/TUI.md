@@ -568,7 +568,12 @@ pair as the default (global `defaultProvider` + that provider's `defaultModel`
 
 - project-local selection) without switching the live session or closing the
   picker. Alt+F on a model row
-  still toggles favorite when a favorite hook is wired. While type-to-filter is
+  still toggles favorite when a favorite hook is wired. **Alt+R** on a model
+  row removes that whole provider after a two-press armed confirm: the first
+  press names what will be forgotten (catalog entry, stored key or auth
+  profile, and default repair), the second press on the same row deletes it;
+  Esc, moving focus, or the arm timeout cancels. The live session's own
+  provider is refused rather than orphaned. While type-to-filter is
   active, bare `j`/`k` type into the filter rather than moving the highlight —
   use arrow keys (or the filtered list's navigation) to move.
 
