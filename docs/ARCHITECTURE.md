@@ -312,13 +312,13 @@ Every shipped specialist is a **director package** — a prompt-first `DirectorP
 
 **Docs + QA**
 
-| Director    | Owns                                                                                    |
-| ----------- | --------------------------------------------------------------------------------------- |
-| shakespeare | Docs maintain (scribe core baked into prompt); PRODUCT/ARCHITECTURE/IMPLEMENTATION lane |
-| testsmith   | Test design only (what/how to test)                                                     |
-| tester      | Runtime verification; never fix product code                                            |
-| gauntlet    | Mutation/vacuity check that named tests can actually fail                               |
-| prober      | Measure-only latency/behavior probe per family/model                                    |
+| Director    | Owns                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------- |
+| shakespeare | Docs maintain (docs core baked into prompt); PRODUCT/ARCHITECTURE/IMPLEMENTATION lane |
+| testsmith   | Test design only (what/how to test)                                                   |
+| tester      | Runtime verification; never fix product code                                          |
+| gauntlet    | Mutation/vacuity check that named tests can actually fail                             |
+| prober      | Measure-only latency/behavior probe per family/model                                  |
 
 **Intent → director** (`spawn_agent(intent=…)` when `agent` is omitted). implement/review (and their default directors) fail closed without non-empty `success_criteria`.
 
@@ -468,7 +468,7 @@ Corbits Code **ships a bundled catalog** as the first-party data-only plugin `pl
 
 `discoverRepoPlugins` locates `plugins/` next to the source root, at `dist/plugins`, or at `dirname(execPath)/plugins`. It never scans the session cwd for the bundled catalog.
 
-Primary is Skywalker. Bundled skill bodies are **how-to playbooks** (steps, done-definition) — not director personas and not fleet routers. Identity and who-does-what live on director system prompts. Default slashes: `/implement`, `/plan`, `/refactor`, `/review`, `/pull-request-review`, `/create-issue`, `/scribe`, `/interview`. `/review` classifies the target first, then dispatches a selected fleet; `/pull-request-review` is worktree checkout plus a surface pass, loading `/review` for quality rules only; `/scribe` is how to maintain PRODUCT / ARCHITECTURE / IMPLEMENTATION; `/implement` is the per-commit greybeard → implement → gate → critic loop and does not steal planning from `/plan`; substantial Builder work consumes a counsel / `/plan` plan first; `/plan` authors an eng change plan and does not implement or file tickets; `/create-issue` remains the tracker command — Linear MCP when available, otherwise `ask_operator` for the platform and persists `Preferred issue tracker` in `.corbits/MEMORY.md` There is no first-party dispatch skill — Skywalker orchestrates natively. Draper and emil are closed directors via `spawn_agent(agent=…)`, not slashes. There is no catch-all worker. The operator types the slash; the primary follows the playbook.
+Primary is Skywalker. Bundled skill bodies are **how-to playbooks** (steps, done-definition) — not director personas and not fleet routers. Identity and who-does-what live on director system prompts. Default slashes: `/implement`, `/plan`, `/refactor`, `/review`, `/pull-request-review`, `/create-issue`, `/docs`, `/interview`. `/review` classifies the target first, then dispatches a selected fleet; `/pull-request-review` is worktree checkout plus a surface pass, loading `/review` for quality rules only; `/docs` is how to maintain PRODUCT / ARCHITECTURE / IMPLEMENTATION; `/implement` is the per-commit greybeard → implement → gate → critic loop and does not steal planning from `/plan`; substantial Builder work consumes a counsel / `/plan` plan first; `/plan` authors an eng change plan and does not implement or file tickets; `/create-issue` remains the tracker command — Linear MCP when available, otherwise `ask_operator` for the platform and persists `Preferred issue tracker` in `.corbits/MEMORY.md` There is no first-party dispatch skill — Skywalker orchestrates natively. Draper and emil are closed directors via `spawn_agent(agent=…)`, not slashes. There is no catch-all worker. The operator types the slash; the primary follows the playbook.
 
 #### Discovery and precedence
 
