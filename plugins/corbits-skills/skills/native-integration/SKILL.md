@@ -1,6 +1,6 @@
 ---
 name: native-integration
-description: Corbits rules for non-git folders, Linear status, tracker-agnostic issues, and posting reviews on GitHub
+description: Corbits rules for Linear status, tracker-agnostic issues, and posting reviews on GitHub
 user-invocable: false
 ---
 
@@ -25,10 +25,6 @@ When the work tracks a Linear issue and Linear MCP is available, set the issue t
 Move the issue to In Review when the PR is ready for review. Draft or WIP PRs stay In Progress. Never mark the issue Done on PR open, and do not leave it In Review after merge when work remains. If Linear MCP is unavailable, report that status could not be updated.
 
 `linear-issue-workflow` owns the full Linear ship loop.
-
-## Non-git folders
-
-A folder without `.git` is a valid working directory (scratch, unpacked tarball, new project). Git-using skills (`implement`, `review`, `pull-request`) no-op or ask when they need a repo. Do not invent a git repo to satisfy them.
 
 ## Tracker-agnostic issues
 
