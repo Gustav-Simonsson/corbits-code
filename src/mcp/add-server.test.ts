@@ -291,7 +291,11 @@ describe("persistMCPServerEnabled", () => {
         mcpServers: [linearHTTP],
       }),
     );
-    await saveAuthState(linearAuth, { codeVerifier: "keep-me" }, home);
+    await saveAuthState(
+      linearAuth,
+      { tokens: { access_token: "keep-me", token_type: "bearer" } },
+      home,
+    );
     const writer = createGlobalSettingsWriter(path);
 
     expect(
@@ -306,7 +310,7 @@ describe("persistMCPServerEnabled", () => {
       showPromptCost: true,
       mcpServers: [{ ...linearHTTP, enabled: false }],
     });
-    expect((await loadAuthState(linearAuth, home)).codeVerifier).toBe(
+    expect((await loadAuthState(linearAuth, home)).tokens?.access_token).toBe(
       "keep-me",
     );
 
@@ -388,7 +392,11 @@ describe("persistMCPServerRemoved", () => {
         ],
       }),
     );
-    await saveAuthState(linearAuth, { codeVerifier: "linear-secret" }, home);
+    await saveAuthState(
+      linearAuth,
+      { tokens: { access_token: "linear-secret", token_type: "bearer" } },
+      home,
+    );
     const writer = createGlobalSettingsWriter(path);
 
     const result = await persistMCPServerRemoved(writer, "linear", home);
@@ -480,7 +488,11 @@ describe("persistMCPServerRemoved", () => {
       path,
       JSON.stringify({ providers: {}, mcpServers: [custom] }),
     );
-    await saveAuthState(identity, { codeVerifier: "custom-exa" }, home);
+    await saveAuthState(
+      identity,
+      { tokens: { access_token: "custom-exa", token_type: "bearer" } },
+      home,
+    );
     const writer = createGlobalSettingsWriter(path);
 
     expect(await persistMCPServerRemoved(writer, "exa", home)).toMatchObject({
@@ -501,7 +513,11 @@ describe("persistMCPServerRemoved", () => {
       path,
       JSON.stringify({ providers: {}, mcpServers: [linearHTTP] }),
     );
-    await saveAuthState(linearAuth, { codeVerifier: "linear-secret" }, home);
+    await saveAuthState(
+      linearAuth,
+      { tokens: { access_token: "linear-secret", token_type: "bearer" } },
+      home,
+    );
     const authDir = mcpAuthDir(home);
     await chmod(authDir, 0o000);
     const writer = createGlobalSettingsWriter(path);
@@ -538,7 +554,11 @@ describe("local MCP persist", () => {
       localPath,
       JSON.stringify({ provider: "a", mcpServers: [linearHTTP] }),
     );
-    await saveAuthState(linearAuth, { codeVerifier: "local-linear" }, home);
+    await saveAuthState(
+      linearAuth,
+      { tokens: { access_token: "local-linear", token_type: "bearer" } },
+      home,
+    );
     const writer = createLocalSettingsWriter(localPath);
 
     expect(
@@ -582,7 +602,11 @@ describe("local MCP persist", () => {
       path,
       JSON.stringify({ provider: "a", mcpServers: [linearHTTP] }),
     );
-    await saveAuthState(linearAuth, { codeVerifier: "local-linear" }, home);
+    await saveAuthState(
+      linearAuth,
+      { tokens: { access_token: "local-linear", token_type: "bearer" } },
+      home,
+    );
     const authDir = mcpAuthDir(home);
     await chmod(authDir, 0o000);
     const writer = createLocalSettingsWriter(path);

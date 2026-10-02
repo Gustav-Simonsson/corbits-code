@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import {
   authFilePath,
@@ -111,13 +111,16 @@ async function expectStoredClient(
 describe("createOAuthProvider", () => {
   test("drops stale DCR client when redirect port changed and no tokens exist", async () => {
     const home = await tempHome();
-    await saveAuthState(
-      linear,
-      {
+    // Legacy file: stale registration plus a PKCE verifier from when the
+    // verifier flowed through disk. Both must be scrubbed, not persisted.
+    const path = authFilePath(linear, home);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({
         clientInformation: clientInfo(60435),
         codeVerifier: "old-verifier",
-      },
-      home,
+      }),
     );
 
     const provider = await createOAuthProvider({
@@ -129,9 +132,9 @@ describe("createOAuthProvider", () => {
     });
 
     expect(await syncValue(provider.clientInformation())).toBeUndefined();
-    const disk = await loadAuthState(linear, home);
-    expect(disk.clientInformation).toBeUndefined();
-    expect(disk.codeVerifier).toBeUndefined();
+    const raw = await readFile(path, "utf8");
+    expect(raw).not.toContain("client-on-60435");
+    expect(raw).not.toContain("codeVerifier");
   });
 
   test("keeps registered client and tokens when only the loopback port changed", async () => {
@@ -164,7 +167,7 @@ describe("createOAuthProvider", () => {
     expect((await syncValue(provider.tokens()))?.access_token).toBe("live");
   });
 
-  test("concurrent saveTokens and saveCodeVerifier from two providers keep both fields", async () => {
+  test("concurrent saveTokens and saveCodeVerifier keep tokens on disk and the verifier in memory", async () => {
     const home = await tempHome();
     await saveAuthState(linear, { clientInformation: clientInfo(1) }, home);
 
@@ -193,9 +196,141 @@ describe("createOAuthProvider", () => {
       b.saveCodeVerifier("verifier-b"),
     ]);
 
+    // The verifier is instance-local: b reads its own, a has none, and the
+    // concurrent memory-only save cannot clobber the disk tokens.
+    expect(b.codeVerifier()).toBe("verifier-b");
+    expect(() => a.codeVerifier()).toThrow("No PKCE code verifier saved");
     const disk = await loadAuthState(linear, home);
     expect(disk.tokens?.access_token).toBe("tok-a");
-    expect(disk.codeVerifier).toBe("verifier-b");
+    expect("codeVerifier" in disk).toBe(false);
+  });
+
+  test("never writes the PKCE verifier to disk across a full browser-flow save sequence", async () => {
+    const home = await tempHome();
+    const provider = await createOAuthProvider({
+      serverName: "linear",
+      serverURL: linear.serverURL,
+      redirectUrl: "http://127.0.0.1:62000/callback",
+      onAuthURL: () => undefined,
+      home,
+    });
+    // The SDK browser flow persists DCR client info, then the PKCE verifier,
+    // then the exchanged tokens — in that order.
+    await saveClient(provider, clientInfo(62000));
+    await provider.saveCodeVerifier("pkce-one-time");
+    await provider.saveTokens({
+      access_token: "tok",
+      token_type: "bearer",
+      expires_in: 3600,
+      refresh_token: "ref",
+    });
+
+    expect(provider.codeVerifier()).toBe("pkce-one-time");
+    const raw = await readFile(authFilePath(linear, home), "utf8");
+    expect(raw).not.toContain("codeVerifier");
+    expect(raw).not.toContain("pkce-one-time");
+    expect(Object.keys(JSON.parse(raw)).sort()).toEqual([
+      "clientInformation",
+      "tokens",
+    ]);
+  });
+
+  test("drops in-memory tokens once the auth file is deleted", async () => {
+    const home = await tempHome();
+    const provider = await createOAuthProvider({
+      serverName: "linear",
+      serverURL: linear.serverURL,
+      redirectUrl: "http://127.0.0.1:1/callback",
+      onAuthURL: () => undefined,
+      home,
+    });
+    await saveClient(provider, clientInfo(1));
+    await provider.saveTokens({ access_token: "tok", token_type: "bearer" });
+    expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
+
+    await deleteAuthState(linear, home);
+
+    expect(await syncValue(provider.tokens())).toBeUndefined();
+  });
+
+  test("keeps live tokens when the auth file is unreadable but drops them on delete", async () => {
+    const home = await tempHome();
+    const provider = await createOAuthProvider({
+      serverName: "linear",
+      serverURL: linear.serverURL,
+      redirectUrl: "http://127.0.0.1:1/callback",
+      onAuthURL: () => undefined,
+      home,
+    });
+    await saveClient(provider, clientInfo(1));
+    await provider.saveTokens({ access_token: "tok", token_type: "bearer" });
+    expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
+
+    // A transient stat failure (EACCES here, file still present) must not
+    // discard live credentials — only a real deletion (ENOENT) does.
+    const dir = dirname(authFilePath(linear, home));
+    await chmod(dir, 0o000);
+    try {
+      expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
+    } finally {
+      await chmod(dir, 0o700);
+    }
+
+    await deleteAuthState(linear, home);
+
+    expect(await syncValue(provider.tokens())).toBeUndefined();
+  });
+
+  test("two overlapping logins on different ports both complete without clobbering verifiers", async () => {
+    const home = await tempHome();
+    const a = await createOAuthProvider({
+      serverName: "linear",
+      serverURL: linear.serverURL,
+      redirectUrl: "http://127.0.0.1:62000/callback",
+      onAuthURL: () => undefined,
+      home,
+    });
+    const b = await createOAuthProvider({
+      serverName: "linear",
+      serverURL: linear.serverURL,
+      redirectUrl: "http://127.0.0.1:60435/callback",
+      onAuthURL: () => undefined,
+      home,
+    });
+
+    await saveClient(a, clientInfo(62000));
+    await a.saveCodeVerifier("pkce-a");
+    await saveClient(b, clientInfo(60435));
+    await b.saveCodeVerifier("pkce-b");
+
+    await a.saveTokens({
+      access_token: "tok-a",
+      token_type: "bearer",
+      expires_in: 3600,
+      refresh_token: "ref-a",
+    });
+    await b.saveTokens({
+      access_token: "tok-b",
+      token_type: "bearer",
+      expires_in: 3600,
+      refresh_token: "ref-b",
+    });
+
+    // Each episode keeps its own verifier; neither clobbers the other.
+    expect(a.codeVerifier()).toBe("pkce-a");
+    expect(b.codeVerifier()).toBe("pkce-b");
+    // The verifier is transient: the shared file holds the completed auth only.
+    const raw = await readFile(authFilePath(linear, home), "utf8");
+    expect(raw).not.toContain("codeVerifier");
+    expect(raw).not.toContain("pkce-a");
+    expect(raw).not.toContain("pkce-b");
+    // Last completer wins the durable tokens; the sibling picks them up.
+    expect((await loadAuthState(linear, home)).tokens?.access_token).toBe(
+      "tok-b",
+    );
+    expect((await syncValue(a.tokens()))?.access_token).toBe("tok-b");
+    expect((await syncValue(b.tokens()))?.access_token).toBe("tok-b");
+    await expectClientOnPort(b, 60435);
   });
 
   test("resetAuthorization clears client when redirect no longer matches registration", async () => {
@@ -210,7 +345,6 @@ describe("createOAuthProvider", () => {
           expires_in: 1,
           refresh_token: "r",
         },
-        codeVerifier: "v",
       },
       home,
     );
@@ -511,7 +645,7 @@ describe("createOAuthProvider", () => {
     await expectStoredClient(home, "client-on-62000-v2", 62000);
   });
 
-  test("sync getters fall back to the in-memory mirror when the auth file disappears", async () => {
+  test("drops in-memory tokens when the auth file disappears and adopts a later sibling save", async () => {
     const home = await tempHome();
     const provider = await createOAuthProvider({
       serverName: "linear",
@@ -523,10 +657,18 @@ describe("createOAuthProvider", () => {
     await provider.saveTokens({ access_token: "tok", token_type: "bearer" });
     expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
 
+    // Server-side removal must not leave orphaned credentials behind.
     await deleteAuthState(linear, home);
 
-    expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
-    expect(await syncValue(provider.clientInformation())).toBeUndefined();
+    expect(await syncValue(provider.tokens())).toBeUndefined();
+
+    // The provider stays live: a sibling session's fresh auth is adopted.
+    await saveAuthState(
+      linear,
+      { tokens: { access_token: "reauthed", token_type: "bearer" } },
+      home,
+    );
+    expect((await syncValue(provider.tokens()))?.access_token).toBe("reauthed");
   });
 
   test("keeps live tokens when the auth file is corrupt", async () => {

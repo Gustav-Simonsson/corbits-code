@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
+  authFilePath,
   deleteAuthState,
   loadAuthState,
   saveAuthState,
@@ -33,9 +34,10 @@ describe("mcp auth-store", () => {
       home,
     );
 
-    // Reproduce the bug: one writer saves tokens while another overwrites with a
-    // fresh codeVerifier from a concurrent OAuth start. With full-snapshot
-    // persists, the verifier write wiped tokens; with updateAuthState, both land.
+    // Reproduce the bug: one writer saves tokens while another updates the
+    // client registration from a concurrent OAuth start. With full-snapshot
+    // persists, the registration write wiped tokens; with updateAuthState,
+    // both land.
     const writes = await Promise.all([
       updateAuthState(
         linear,
@@ -52,7 +54,12 @@ describe("mcp auth-store", () => {
       updateAuthState(
         linear,
         (state) => {
-          state.codeVerifier = "verifier-from-other-session";
+          state.clientInformation = {
+            client_id: "c1",
+            redirect_uris: ["http://127.0.0.1:1/callback"],
+            client_id_issued_at: 1,
+            client_name: "other-session",
+          };
         },
         home,
       ),
@@ -60,7 +67,7 @@ describe("mcp auth-store", () => {
 
     const final = await loadAuthState(linear, home);
     expect(final.tokens?.access_token).toBe("tok");
-    expect(final.codeVerifier).toBe("verifier-from-other-session");
+    expect(final.clientInformation?.client_name).toBe("other-session");
     expect(final.clientInformation?.client_id).toBe("c1");
     expect(
       writes[0].tokens?.access_token === "tok" ||
@@ -68,7 +75,7 @@ describe("mcp auth-store", () => {
     ).toBe(true);
   });
 
-  test("overlapping updateAuthState from two processes keeps tokens and PKCE", async () => {
+  test("overlapping updateAuthState from two processes keeps tokens and client registration", async () => {
     const home = await tempHome();
     await saveAuthState(
       linear,
@@ -103,7 +110,12 @@ describe("mcp auth-store", () => {
               refresh_token: "ref",
             };
           } else {
-            state.codeVerifier = "verifier-from-other-session";
+            state.clientInformation = {
+              client_id: "c1",
+              redirect_uris: ["http://127.0.0.1:1/callback"],
+              client_id_issued_at: 1,
+              client_name: "other-session",
+            };
           }
         },
         home,
@@ -118,7 +130,7 @@ describe("mcp auth-store", () => {
         },
       ),
       Bun.spawn(
-        [process.execPath, "-e", script, "--", home, "verifier", barrier],
+        [process.execPath, "-e", script, "--", home, "client", barrier],
         {
           stdout: "ignore",
           stderr: "pipe",
@@ -135,7 +147,7 @@ describe("mcp auth-store", () => {
 
     const final = await loadAuthState(linear, home);
     expect(final.tokens?.access_token).toBe("tok");
-    expect(final.codeVerifier).toBe("verifier-from-other-session");
+    expect(final.clientInformation?.client_name).toBe("other-session");
     expect(final.clientInformation?.client_id).toBe("c1");
   });
 
@@ -143,11 +155,17 @@ describe("mcp auth-store", () => {
     const home = await tempHome();
     await Promise.all(
       Array.from({ length: 20 }, (_, i) =>
-        saveAuthState(linear, { codeVerifier: `v${String(i)}` }, home),
+        saveAuthState(
+          linear,
+          {
+            tokens: { access_token: `v${String(i)}`, token_type: "bearer" },
+          },
+          home,
+        ),
       ),
     );
     const final = await loadAuthState(linear, home);
-    expect(final.codeVerifier?.startsWith("v")).toBe(true);
+    expect(final.tokens?.access_token?.startsWith("v")).toBe(true);
     // No leftover temp files from failed renames.
     const dir = join(home, ".corbits", "mcp-auth");
     const files = await Array.fromAsync(
@@ -155,7 +173,7 @@ describe("mcp auth-store", () => {
     );
     expect(files).toHaveLength(1);
     const raw = await readFile(join(dir, files[0] ?? "missing"), "utf8");
-    expect(JSON.parse(raw).codeVerifier).toBe(final.codeVerifier);
+    expect(JSON.parse(raw).tokens).toEqual(final.tokens);
   });
 
   test("scopes credentials to normalized endpoint identity", async () => {
@@ -175,13 +193,21 @@ describe("mcp auth-store", () => {
       serverURL: "https://ONE.example:443/mcp#ignored",
     };
 
-    await saveAuthState(originA, { codeVerifier: "only-a" }, home);
+    await saveAuthState(
+      originA,
+      { tokens: { access_token: "only-a", token_type: "bearer" } },
+      home,
+    );
 
-    expect((await loadAuthState(originA, home)).codeVerifier).toBe("only-a");
+    expect((await loadAuthState(originA, home)).tokens?.access_token).toBe(
+      "only-a",
+    );
     expect(await loadAuthState(originB, home)).toEqual({});
     expect(await loadAuthState(pathB, home)).toEqual({});
     expect(await loadAuthState(queryB, home)).toEqual({});
-    expect((await loadAuthState(equivalent, home)).codeVerifier).toBe("only-a");
+    expect((await loadAuthState(equivalent, home)).tokens?.access_token).toBe(
+      "only-a",
+    );
   });
 
   test("ignores legacy name-only auth state without modifying it", async () => {
@@ -204,6 +230,34 @@ describe("mcp auth-store", () => {
     });
   });
 
+  test("updateAuthState strips a legacy PKCE verifier instead of persisting it", async () => {
+    const home = await tempHome();
+    const path = authFilePath(linear, home);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({
+        tokens: { access_token: "tok", token_type: "bearer" },
+        codeVerifier: "legacy-secret",
+      }),
+    );
+
+    const written = await updateAuthState(
+      linear,
+      (state) => {
+        state.tokens = { access_token: "tok2", token_type: "bearer" };
+      },
+      home,
+    );
+
+    expect(written.tokens?.access_token).toBe("tok2");
+    expect("codeVerifier" in written).toBe(false);
+    expect(await readFile(path, "utf8")).not.toContain("codeVerifier");
+    expect((await loadAuthState(linear, home)).tokens?.access_token).toBe(
+      "tok2",
+    );
+  });
+
   test("bounds the display slug without weakening scoped identity", async () => {
     const home = await tempHome();
     const dir = join(home, ".corbits", "mcp-auth");
@@ -211,7 +265,7 @@ describe("mcp auth-store", () => {
     const longName = `${prefixName}/long`;
     await saveAuthState(
       { serverName: longName, serverURL: "https://long.example/mcp" },
-      { codeVerifier: "scoped-secret" },
+      { tokens: { access_token: "scoped-secret", token_type: "bearer" } },
       home,
     );
 
@@ -225,8 +279,14 @@ describe("mcp auth-store", () => {
 
   test("deleteAuthState removes an existing file", async () => {
     const home = await tempHome();
-    await saveAuthState(linear, { codeVerifier: "secret" }, home);
-    expect((await loadAuthState(linear, home)).codeVerifier).toBe("secret");
+    await saveAuthState(
+      linear,
+      { tokens: { access_token: "secret", token_type: "bearer" } },
+      home,
+    );
+    expect((await loadAuthState(linear, home)).tokens?.access_token).toBe(
+      "secret",
+    );
 
     await deleteAuthState(linear, home);
     expect(await loadAuthState(linear, home)).toEqual({});
@@ -241,13 +301,17 @@ describe("mcp auth-store", () => {
 
   test("concurrent updateAuthState and deleteAuthState do not throw ENOENT on rename", async () => {
     const home = await tempHome();
-    await saveAuthState(linear, { codeVerifier: "v0" }, home);
+    await saveAuthState(
+      linear,
+      { tokens: { access_token: "v0", token_type: "bearer" } },
+      home,
+    );
 
     await Promise.all([
       updateAuthState(
         linear,
         (state) => {
-          state.codeVerifier = "v1";
+          state.tokens = { access_token: "v1", token_type: "bearer" };
         },
         home,
       ),
@@ -256,7 +320,7 @@ describe("mcp auth-store", () => {
 
     const final = await loadAuthState(linear, home);
     expect(
-      final.codeVerifier === undefined || final.codeVerifier === "v1",
+      final.tokens === undefined || final.tokens.access_token === "v1",
     ).toBe(true);
   });
 });

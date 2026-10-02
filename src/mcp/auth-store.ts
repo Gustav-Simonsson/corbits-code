@@ -18,14 +18,14 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { SETTINGS_DIR_NAME } from "../branding.js";
 
-// Per-server OAuth state persisted between sessions. Holding the PKCE verifier is
-// necessary because authorization spans a process boundary (browser round-trip);
-// tokens and dynamically-registered client info let later sessions reconnect
-// without any user interaction.
+// Per-server OAuth state persisted between sessions. Only the durable pair —
+// dynamically-registered client info and tokens — reaches disk; the PKCE
+// verifier is instance-local transient memory in the OAuth provider, since the
+// browser flow starts and finishes inside one provider episode. Legacy files
+// may still carry a codeVerifier key, which is stripped on write.
 export interface MCPAuthState {
   clientInformation?: OAuthClientInformationFull;
   tokens?: OAuthTokens;
-  codeVerifier?: string;
 }
 
 export interface MCPAuthIdentity {
@@ -67,7 +67,7 @@ export function authFilePath(
   );
 }
 
-function isEnoent(err: unknown): boolean {
+export function isEnoent(err: unknown): boolean {
   return (
     typeof err === "object" &&
     err !== null &&
@@ -150,7 +150,7 @@ let tmpWriteCounter = 0;
 
 // Serialize read-modify-write per auth file so two OAuth provider instances for
 // the same server cannot clobber each other's fields (classic lost-update: one
-// session's saveCodeVerifier wiping another's just-written tokens).
+// session's saveTokens wiping another's just-saved client registration).
 const updateChains = new Map<string, Promise<unknown>>();
 
 const LOCK_STALE_MS = 5_000;
@@ -220,10 +220,22 @@ function enqueueAuthFileOp<T>(path: string, op: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// Legacy auth files may carry a codeVerifier key from when the PKCE verifier
+// flowed through disk. The verifier is instance-local transient memory now —
+// strip the key so it never reaches disk again.
+function withoutLegacyVerifier(state: MCPAuthState): MCPAuthState {
+  if (!("codeVerifier" in state)) return state;
+  const copy: Record<string, unknown> = { ...state };
+  delete copy.codeVerifier;
+  return copy as MCPAuthState;
+}
+
 async function writeAuthFile(path: string, state: MCPAuthState): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.${(tmpWriteCounter += 1)}.tmp`;
-  await writeFile(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
+  await writeFile(tmp, JSON.stringify(withoutLegacyVerifier(state), null, 2), {
+    mode: 0o600,
+  });
   await rename(tmp, path);
 }
 
@@ -250,8 +262,9 @@ export async function updateAuthState(
   return enqueueAuthFileOp(path, async () => {
     const state = await loadAuthState(identity, home);
     mutator(state);
-    await writeAuthFile(path, state);
-    return state;
+    const durable = withoutLegacyVerifier(state);
+    await writeAuthFile(path, durable);
+    return durable;
   });
 }
 
