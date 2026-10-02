@@ -26,6 +26,7 @@ import {
   resolveLocalSettingsPath,
 } from "../../config/settings.js";
 import { resolveLiveSessionSources } from "../../session/assemble-runtime.js";
+import { resolveThemeSetting, type ThemeSetting } from "../theme-detect.js";
 import type { prepareTUISession } from "../session-start.js";
 import type { PersistMCPServerListResult } from "../../mcp/add-server.js";
 import type { ProviderFailureAttempt } from "../provider/failure-attempt.js";
@@ -249,6 +250,10 @@ export interface RunnerState {
   // On during the first-run hold.
   liveTelemetryIntent: boolean;
   liveShowPromptCost: boolean;
+  // The theme pin the settings surface cycles (auto/dark/light). The winning
+  // palette itself stays computed at startup; this only records the pin so the
+  // row reads the choice back before the next launch applies it.
+  liveTheme: ThemeSetting;
   // The permissions surface addresses grants by their position in the last
   // listing, so revoke resolves against the same snapshot the operator saw.
   listedGrants: readonly ScopedApproval[];
@@ -405,6 +410,7 @@ export function createRunnerState(start: TUIStart): RunnerState {
     liveHookConfig: { ...(config.settings?.hooks ?? {}) },
     liveTelemetryIntent: false,
     liveShowPromptCost: config.settings?.showPromptCost ?? false,
+    liveTheme: resolveThemeSetting(config.settings?.theme),
     listedGrants: [],
     host: undefined,
     stampProvider: { fn: undefined },

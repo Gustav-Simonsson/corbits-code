@@ -43,6 +43,7 @@ import {
 import { isOpenCodeGoProvider } from "../../../packages/opencode-go/src/index.js";
 import { isZenProvider } from "../../../packages/zen/src/index.js";
 import { applyLiveModelSwitch } from "../../session/live-model-switch.js";
+import type { ThemeSetting } from "../theme-detect.js";
 import { applyFocus } from "../shell/chrome.js";
 import { setShellInputSuspended } from "../shell/prompt.js";
 import { warningsForPluginEntry } from "../../plugins/diagnostics.js";
@@ -647,6 +648,7 @@ function createSettingsSurface(
       waitForApproval: resolveWaitForApproval(services.liveToolWatchdog),
       telemetryEnabled: state.liveTelemetryIntent,
       showPromptCost: state.liveShowPromptCost,
+      theme: state.liveTheme,
     }),
     setWaitForApproval: (value: boolean) => {
       services.liveToolWatchdog.waitForApproval = value;
@@ -673,6 +675,13 @@ function createSettingsSurface(
       void persistGlobalSettings("show prompt cost", (base) => ({
         ...base,
         showPromptCost: value,
+      }));
+    },
+    setTheme: (value: ThemeSetting) => {
+      state.liveTheme = value;
+      void persistGlobalSettings("theme", (base) => ({
+        ...base,
+        theme: value,
       }));
     },
     hooksSummary: () => {

@@ -100,5 +100,68 @@ export const corbitsDark: Theme = {
   error: ERROR_RED,
 };
 
-/** Semantic roles. Everything outside this file paints through these. */
-export const UI: Theme = corbitsDark;
+/**
+ * Light companion to `corbitsDark`: the same roles on a warm light ground.
+ *
+ * Data-only — no interface change, no new roles, no per-theme branches at
+ * call sites. Every value was picked by relative luminance against the cream
+ * ground, not by eye: body text holds ~14:1 (near the dark theme's ~15:1),
+ * and every essential text role holds >=4.5:1. Orange still appears once per
+ * screen (action/actionDim); it is darkened here because Breakthrough Orange
+ * itself is ~2.3:1 on cream and unreadable as text. The bronze ramp is
+ * darkened for the same reason SAND is ~1.8:1 on cream. Dimmed text is a
+ * dimmed ink, never a neutral gray, so the warm bias survives at every
+ * emphasis level. Standing caution moves to a muted plum: a bronze warning
+ * collapses into the machine ramp on cream, while red or orange would spend
+ * the failure/action hues.
+ */
+export const corbitsLight: Theme = {
+  name: "corbits-light",
+  ground: BRAND.canvasCream,
+  text: "#221d18",
+  textDim: "#6b5f50",
+  textFaint: "#74695b",
+  action: "#8f4f16",
+  actionDim: "#9b4f10",
+  inFlight: "#6f5427",
+  inFlightBright: "#7a5a22",
+  heading: "#7c4f24",
+  done: "#3f6b3a",
+  warning: "#655275",
+  error: "#b03a30",
+};
+
+const THEMES = {
+  "corbits-dark": corbitsDark,
+  "corbits-light": corbitsLight,
+} as const;
+
+export type ThemeName = keyof typeof THEMES;
+
+/** Resolve a theme name to its palette. Unknown names fall back to dark. */
+export function resolveThemeName(name: string): Theme {
+  return (THEMES as Record<string, Theme>)[name] ?? corbitsDark;
+}
+
+let activeTheme: Theme = corbitsDark;
+
+/**
+ * Switch the live `UI` binding to the named theme, keeping the reference.
+ * Everything outside this file paints through `UI`, so existing readers pick
+ * the change up without re-importing. Never reassign or destructure this
+ * binding — `const { text } = UI` snapshots the old palette forever.
+ */
+export function setTheme(name: ThemeName | string): Theme {
+  activeTheme = resolveThemeName(name);
+  Object.assign(UI, activeTheme);
+  return activeTheme;
+}
+
+/**
+ * Semantic roles. Everything outside this file paints through these.
+ *
+ * A settable live binding, not a frozen value: `setTheme` copies the next
+ * palette onto this same object. The default is dark; startup detection
+ * selects the final theme before renderables are constructed.
+ */
+export const UI: Theme = { ...corbitsDark };

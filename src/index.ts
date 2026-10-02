@@ -22,6 +22,7 @@ import {
 import { runExec } from "./exec/runner.js";
 import { runOnboarding } from "./tui/onboarding.js";
 import { runTUI } from "./tui/runner/index.js";
+import { applyStartupTheme } from "./tui/theme-startup.js";
 
 export interface Runners {
   runTUI: (config: import("./config/index.js").Config) => Promise<number>;
@@ -91,6 +92,12 @@ export async function mainWithRunners(
   }
 
   let exitCode: number;
+  // Welcome, setup, and the product host read `UI` at construction time.
+  if (config.command === "tui") {
+    applyStartupTheme(
+      config.configured ? config.settings?.theme : config.theme,
+    );
+  }
   if (!config.configured) {
     if (config.command === "exec") {
       // Exec needs a provider; onboarding is TUI-only. Fail closed with a
