@@ -67,6 +67,7 @@ import {
 } from "./intervention-log.js";
 import { normalizeToolDefinitionsForProvider } from "../agent/tool-schema-normalize.js";
 import { canonicalToolName } from "../agent/canonical-tool-name.js";
+import { createApplyPatchTool } from "../agent/apply-patch-tool.js";
 import {
   checkMountedRequiresTools,
   formatCapabilityUnavailable,
@@ -808,6 +809,16 @@ async function runSubAgentInner(
 
     if (params.capabilities !== undefined) {
       tools = applyCapabilityFilter(tools, params.capabilities);
+    }
+    if (
+      toolProfileForModel(params.provider) === "gpt" &&
+      tools.some((t) =>
+        ["write_file", "edit_file", "delete_file"].includes(
+          canonicalToolName(t.definition.name),
+        ),
+      )
+    ) {
+      tools = [...tools, createApplyPatchTool(params.cwd)];
     }
     backgroundCollectMounted = tools.some(
       (tool) => tool.definition.name === "shell_collect",

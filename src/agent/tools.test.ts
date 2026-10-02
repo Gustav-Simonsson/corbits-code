@@ -248,8 +248,8 @@ test("dynamicRunner contains posix tool names plus ask_operator", async () => {
   expect(names).toContain("write_file");
   expect(names).toContain("edit_file");
   expect(names).toContain("delete_file");
-  // apply_patch is Codex-only and stripped on primary even when mounted.
-  expect(names).not.toContain("apply_patch");
+  // apply_patch is mounted everywhere but only the gpt profile advertises it.
+  expect(names).toContain("apply_patch");
 });
 
 test("dynamicRunner omits ask_operator when onOperatorGate is not provided", async () => {

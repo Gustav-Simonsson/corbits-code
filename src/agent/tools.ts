@@ -106,6 +106,7 @@ import {
   createWebSearchTool,
   disposeWebSearchClients,
 } from "../tools/web-search.js";
+import { createApplyPatchTool } from "./apply-patch-tool.js";
 import { createUseSkillTool } from "./use-skill.js";
 import { createSkillSearchTool } from "./skill-search.js";
 import {
@@ -669,6 +670,7 @@ export async function createAgentToolset(
       rootsProvider: createWorktreeRootsProvider(cwd),
     }),
     createUseSkillTool(cwd, skillDirs, args.telemetry),
+    createApplyPatchTool(cwd),
     createSkillSearchTool({ skills }),
     builtinExaEnabled
       ? createExaMCPWebFetchTool({ connect: waitForBuiltinExaConnection })
