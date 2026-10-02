@@ -1,0 +1,8 @@
+{
+  "id": "dir-tester",
+  "tier": "easy",
+  "title": "Tester reports failing test",
+  "fixture": "fixtures/dir-shop",
+  "prompt": "Run the test suite and report exactly which test fails and the likely cause. Do not fix anything. Save your final report (the same text you return) to REPORT.md.",
+  "verify": "verify.sh"
+}
