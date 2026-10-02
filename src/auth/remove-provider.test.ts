@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import {
   listCodexProfiles,
@@ -13,21 +13,16 @@ import {
   loadXaiProfile,
   saveXaiProfile,
 } from "../config/oauth-stores.js";
-import {
-  clearSourceCredentials,
-  registerSourceCredentialRecord,
-} from "../config/source-credentials.js";
 import { oauthStoreForProvider } from "./remove-provider.js";
 
-function registerOAuthProvider(
+function oauthProvider(
   providerName: string,
   provider: "codex" | "xai",
   profile: string,
-): void {
-  registerSourceCredentialRecord(providerName, {
-    provenance: { kind: "oauth", provider, profile },
-    material: { secret: "token" },
-  });
+): { name: string; codexProfile?: string; xaiProfile?: string } {
+  return provider === "codex"
+    ? { name: providerName, codexProfile: profile }
+    : { name: providerName, xaiProfile: profile };
 }
 
 async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
@@ -40,50 +35,47 @@ async function withHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
 }
 
 describe("oauthStoreForProvider", () => {
-  afterEach(() => {
-    clearSourceCredentials();
+  test("maps marked xai/ and codex/ catalog entries to their stores", () => {
+    expect(
+      oauthStoreForProvider(oauthProvider("xai/work", "xai", "work"))?.profile,
+    ).toBe("work");
+    expect(
+      oauthStoreForProvider(
+        oauthProvider("codex/personal", "codex", "personal"),
+      )?.profile,
+    ).toBe("personal");
   });
 
-  test("maps xai/ and codex/ provider names to their store and profile", () => {
-    clearSourceCredentials();
-    registerOAuthProvider("xai/work", "xai", "work");
-    registerOAuthProvider("codex/personal", "codex", "personal");
-    expect(oauthStoreForProvider("xai/work")?.profile).toBe("work");
-    expect(oauthStoreForProvider("codex/personal")?.profile).toBe("personal");
-  });
-
-  test("rejects namespaced custom providers without OAuth ownership", () => {
-    clearSourceCredentials();
-    registerSourceCredentialRecord("codex/manual", {
-      provenance: { kind: "api-key" },
-      material: { secret: "manual-key" },
-    });
-    registerSourceCredentialRecord("xai/manual", {
-      provenance: { kind: "api-key" },
-      material: { secret: "manual-key" },
-    });
-
-    expect(oauthStoreForProvider("codex/manual")).toBeNull();
-    expect(oauthStoreForProvider("xai/manual")).toBeNull();
+  test("rejects unmarked and mismatched namespaced catalog entries", () => {
+    expect(oauthStoreForProvider({ name: "codex/manual" })).toBeNull();
+    expect(oauthStoreForProvider({ name: "xai/manual" })).toBeNull();
+    expect(
+      oauthStoreForProvider({ name: "xai/work", xaiProfile: "personal" }),
+    ).toBeNull();
+    expect(
+      oauthStoreForProvider({ name: "codex/work", codexProfile: "personal" }),
+    ).toBeNull();
   });
 
   test("returns null for API-key, keyless, and degenerate names", () => {
-    expect(oauthStoreForProvider("openai")).toBeNull();
-    expect(oauthStoreForProvider("ollama")).toBeNull();
-    expect(oauthStoreForProvider("my-custom")).toBeNull();
-    expect(oauthStoreForProvider("xai/")).toBeNull();
-    expect(oauthStoreForProvider("codex/")).toBeNull();
+    expect(oauthStoreForProvider({ name: "openai" })).toBeNull();
+    expect(oauthStoreForProvider({ name: "ollama" })).toBeNull();
+    expect(oauthStoreForProvider({ name: "my-custom" })).toBeNull();
+    expect(oauthStoreForProvider({ name: "xai/", xaiProfile: "" })).toBeNull();
+    expect(
+      oauthStoreForProvider({ name: "codex/", codexProfile: "" }),
+    ).toBeNull();
   });
 
   test("removing an xai profile leaves sibling profiles untouched", async () => {
     await withHome(async (home) => {
-      clearSourceCredentials();
-      registerOAuthProvider("xai/work", "xai", "work");
       const tokens = { access: "a", refresh: "r", expiresAt: 10_000_000 };
       await saveXaiProfile({ name: "work", createdAt: 0, tokens }, home);
       await saveXaiProfile({ name: "personal", createdAt: 0, tokens }, home);
 
-      const target = oauthStoreForProvider("xai/work");
+      const target = oauthStoreForProvider(
+        oauthProvider("xai/work", "xai", "work"),
+      );
       expect(target?.profile).toBe("work");
       expect(await target?.removeProfile(target.profile, home)).toEqual([
         "work",
@@ -97,13 +89,13 @@ describe("oauthStoreForProvider", () => {
 
   test("removing a codex profile leaves sibling profiles untouched", async () => {
     await withHome(async (home) => {
-      clearSourceCredentials();
-      registerOAuthProvider("codex/night", "codex", "night");
       const tokens = { access: "a", refresh: "r", expiresAt: 10_000_000 };
       await saveCodexProfile({ name: "day", createdAt: 0, tokens }, home);
       await saveCodexProfile({ name: "night", createdAt: 0, tokens }, home);
 
-      const target = oauthStoreForProvider("codex/night");
+      const target = oauthStoreForProvider(
+        oauthProvider("codex/night", "codex", "night"),
+      );
       expect(await target?.removeProfile(target.profile, home)).toEqual([
         "night",
       ]);
@@ -116,22 +108,23 @@ describe("oauthStoreForProvider", () => {
 
   test("removing an already-absent profile is a no-op", async () => {
     await withHome(async (home) => {
-      clearSourceCredentials();
-      registerOAuthProvider("xai/ghost", "xai", "ghost");
-      const target = oauthStoreForProvider("xai/ghost");
+      const target = oauthStoreForProvider(
+        oauthProvider("xai/ghost", "xai", "ghost"),
+      );
       expect(await target?.removeProfile(target.profile, home)).toEqual([]);
     });
   });
 
   test("missing auth files are tolerated", async () => {
     await withHome(async (home) => {
-      clearSourceCredentials();
-      registerOAuthProvider("xai/work", "xai", "work");
-      registerOAuthProvider("codex/work", "codex", "work");
       // No profiles ever saved: the store treats a missing file as empty.
-      const xai = oauthStoreForProvider("xai/work");
+      const xai = oauthStoreForProvider(
+        oauthProvider("xai/work", "xai", "work"),
+      );
       expect(await xai?.removeProfile(xai.profile, home)).toEqual([]);
-      const codex = oauthStoreForProvider("codex/work");
+      const codex = oauthStoreForProvider(
+        oauthProvider("codex/work", "codex", "work"),
+      );
       expect(await codex?.removeProfile(codex.profile, home)).toEqual([]);
     });
   });
