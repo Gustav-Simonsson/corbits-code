@@ -571,11 +571,16 @@ export async function wireSettings(
 
   // Credential bit shared by the arm line and the post-delete notice: names
   // what will be (or was) forgotten. Names and counts only, never secrets.
+  const oauthStoreTarget = (provider: string) =>
+    oauthStoreForProvider(
+      state.config.providers.find((entry) => entry.name === provider) ?? null,
+    );
+
   const removeCredentialBit = (
     provider: string,
     entry: { keyless?: boolean; apiKey?: string },
   ): string => {
-    const target = oauthStoreForProvider(provider);
+    const target = oauthStoreTarget(provider);
     if (target !== null)
       return `auth profile '${target.profile}' + catalog entry`;
     if (entry.keyless === true) return `catalog entry (no stored secret)`;
@@ -590,7 +595,7 @@ export async function wireSettings(
     const settings = state.config.settings;
     const entry = settings?.providers[ref.provider];
     if (entry === undefined) {
-      const target = oauthStoreForProvider(ref.provider);
+      const target = oauthStoreTarget(ref.provider);
       return target === null
         ? null
         : `Remove ${ref.provider} residual? Forgets auth profile '${target.profile}'. Alt+R again to confirm, Esc cancels.`;
@@ -625,7 +630,7 @@ export async function wireSettings(
         // linger on disk (state after a failed removeProfile). Clear it so
         // the "retry removal" promise stays truthful; "already gone" is only
         // for when nothing remains anywhere.
-        const orphanTarget = oauthStoreForProvider(provider);
+        const orphanTarget = oauthStoreTarget(provider);
         if (orphanTarget !== null) {
           try {
             const removed = await orphanTarget.removeProfile(
@@ -687,7 +692,7 @@ export async function wireSettings(
       }
       // OAuth credential, after the settings row is gone: retry-safe, since
       // an unknown settings name is a notice + no-op on the next attempt.
-      const target = oauthStoreForProvider(provider);
+      const target = oauthStoreTarget(provider);
       let orphanedProfile: string | null = null;
       if (target !== null) {
         try {

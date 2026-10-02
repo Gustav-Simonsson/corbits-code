@@ -17,10 +17,9 @@ import {
   loadXaiProfile,
   saveXaiProfile,
 } from "../config/oauth-stores.js";
-import {
-  clearSourceCredentials,
-  registerSourceCredentialRecord,
-} from "../config/source-credentials.js";
+import { clearSourceCredentials } from "../config/source-credentials.js";
+import { refreshLiveProviderCatalog } from "../config/index.js";
+import { buildMainSessionSources } from "../config/inference-sources.js";
 import { createGlobalSettingsWriter } from "../mcp/add-server.js";
 import { withMockedHomedir } from "../../testkit/mock-module.js";
 import { modelOptionId } from "./model-catalog.js";
@@ -149,6 +148,22 @@ async function executeRemove(
   });
 }
 
+async function refreshCatalog(harness: RemoveHarness): Promise<void> {
+  await withMockedHomedir(harness.home, async () => {
+    const config = harness.state.config;
+    config.providers = await refreshLiveProviderCatalog(
+      config.settings ?? null,
+      {
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+        model: config.model,
+        providerName: config.providerName,
+        ...(config.keyless !== undefined ? { keyless: config.keyless } : {}),
+      },
+    );
+  });
+}
+
 const PROFILE_TOKENS = {
   access: "a",
   refresh: "r",
@@ -247,7 +262,7 @@ describe("provider removal execute path", () => {
     }
   });
 
-  test("removes an OAuth provider's auth profile and leaves siblings intact", async () => {
+  test("removes an inactive OAuth provider without source registration", async () => {
     const seed: Settings = {
       ...SEED_WATERMARKS,
       defaultProvider: "keeper",
@@ -271,10 +286,6 @@ describe("provider removal execute path", () => {
     });
     try {
       clearSourceCredentials();
-      registerSourceCredentialRecord("xai/work", {
-        provenance: { kind: "oauth", provider: "xai", profile: "work" },
-        material: { secret: "token" },
-      });
       await saveXaiProfile(
         { name: "work", createdAt: 0, tokens: PROFILE_TOKENS },
         harness.home,
@@ -283,6 +294,7 @@ describe("provider removal execute path", () => {
         { name: "personal", createdAt: 0, tokens: PROFILE_TOKENS },
         harness.home,
       );
+      await refreshCatalog(harness);
       await executeRemove(harness, modelOptionId("xai/work", "grok-4"));
       const onDisk = await loadSettings(harness.settingsPath);
       expect(onDisk?.providers["xai/work"]).toBeUndefined();
@@ -334,10 +346,6 @@ describe("provider removal execute path", () => {
     });
     try {
       clearSourceCredentials();
-      registerSourceCredentialRecord("xai/work", {
-        provenance: { kind: "oauth", provider: "xai", profile: "work" },
-        material: { secret: "token" },
-      });
       await saveXaiProfile(
         { name: "work", createdAt: 0, tokens: PROFILE_TOKENS },
         harness.home,
@@ -346,6 +354,7 @@ describe("provider removal execute path", () => {
         { name: "personal", createdAt: 0, tokens: PROFILE_TOKENS },
         harness.home,
       );
+      await refreshCatalog(harness);
       expect(
         harness.wiring.describeRemoveProvider(
           modelOptionId("xai/work", "grok-4"),
@@ -370,31 +379,26 @@ describe("provider removal execute path", () => {
     }
   });
 
-  test("custom namespaced providers leave unrelated OAuth profiles intact", async () => {
+  test("custom namespaced providers ignore stale OAuth source provenance", async () => {
     for (const provider of ["xai/manual", "codex/manual"] as const) {
-      const seed: Settings = {
+      const oauthSeed: Settings = {
         ...SEED_WATERMARKS,
         providers: {
           keeper: keeperEntry(),
           [provider]: {
-            baseURL: "https://manual.example/v1",
-            apiKey: "manual-key",
+            baseURL: "https://oauth-placeholder.invalid/v1",
             models: ["manual-model"],
             defaultModel: "manual-model",
           },
         },
       };
       const harness = await wireRemoveHarness({
-        seed,
+        seed: oauthSeed,
         local: null,
         liveProvider: "keeper",
       });
       try {
         clearSourceCredentials();
-        registerSourceCredentialRecord(provider, {
-          provenance: { kind: "api-key" },
-          material: { secret: "manual-key" },
-        });
         if (provider.startsWith("xai/")) {
           await saveXaiProfile(
             { name: "manual", createdAt: 0, tokens: PROFILE_TOKENS },
@@ -406,6 +410,30 @@ describe("provider removal execute path", () => {
             harness.home,
           );
         }
+        await refreshCatalog(harness);
+        buildMainSessionSources({
+          settings: harness.state.config.settings,
+          catalog: harness.state.config.providers,
+          activeProvider: provider,
+          activeModel: "manual-model",
+          sessionId: "stale-provenance",
+        });
+
+        const customSettings: Settings = {
+          ...SEED_WATERMARKS,
+          providers: {
+            keeper: keeperEntry(),
+            [provider]: {
+              baseURL: "https://manual.example/v1",
+              apiKey: "manual-key",
+              models: ["manual-model"],
+              defaultModel: "manual-model",
+            },
+          },
+        };
+        await saveGlobalSettings(harness.settingsPath, customSettings);
+        harness.state.config.settings = customSettings;
+        await refreshCatalog(harness);
         await executeRemove(harness, modelOptionId(provider, "manual-model"));
         const profile = provider.startsWith("xai/")
           ? await loadXaiProfile("manual", harness.home)
@@ -546,10 +574,11 @@ describe("describeRemoveProvider", () => {
     const harness = await wireLines(seed);
     try {
       clearSourceCredentials();
-      registerSourceCredentialRecord("xai/work", {
-        provenance: { kind: "oauth", provider: "xai", profile: "work" },
-        material: { secret: "token" },
-      });
+      await saveXaiProfile(
+        { name: "work", createdAt: 0, tokens: PROFILE_TOKENS },
+        harness.home,
+      );
+      await refreshCatalog(harness);
       const keyLine = harness.wiring.describeRemoveProvider(
         modelOptionId("openai/work", "m1"),
       );

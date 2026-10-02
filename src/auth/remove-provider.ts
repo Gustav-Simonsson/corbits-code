@@ -3,7 +3,7 @@ import {
   removeCodexProfile,
   removeXaiProfile,
 } from "../config/oauth-stores.js";
-import { findSourceCredentialRecord } from "../config/source-credentials.js";
+import type { ProviderCatalogEntry } from "../config/index.js";
 import { xaiProfileFromProviderName } from "../config/xai-providers.js";
 
 /**
@@ -21,26 +21,29 @@ export interface OAuthStoreTarget {
   ) => Promise<string[]>;
 }
 
-// Maps a catalog provider to its OAuth auth store only when the live source
-// credential record proves ownership of the same provider family and profile.
-// Names alone are user-controlled and cannot authorize credential deletion.
+// Maps a catalog provider to its OAuth auth store only when the current catalog
+// entry carries the matching auth-store profile marker. Names alone are
+// user-controlled and cannot authorize credential deletion.
 export function oauthStoreForProvider(
-  providerName: string,
+  provider: Pick<
+    ProviderCatalogEntry,
+    "name" | "codexProfile" | "xaiProfile"
+  > | null,
 ): OAuthStoreTarget | null {
-  const provenance = findSourceCredentialRecord(providerName)?.provenance;
-  if (provenance?.kind !== "oauth") return null;
+  if (provider === null) return null;
+  const providerName = provider.name;
   const codexProfile = codexProfileFromProviderName(providerName);
   if (
-    provenance.provider === "codex" &&
-    codexProfile === provenance.profile &&
+    codexProfile !== undefined &&
+    codexProfile === provider.codexProfile &&
     codexProfile.length > 0
   ) {
     return { profile: codexProfile, removeProfile: removeCodexProfile };
   }
   const xaiProfile = xaiProfileFromProviderName(providerName);
   if (
-    provenance.provider === "xai" &&
-    xaiProfile === provenance.profile &&
+    xaiProfile !== undefined &&
+    xaiProfile === provider.xaiProfile &&
     xaiProfile.length > 0
   ) {
     return { profile: xaiProfile, removeProfile: removeXaiProfile };
