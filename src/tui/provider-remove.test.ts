@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import {
   saveGlobalSettings,
@@ -11,10 +11,16 @@ import {
   type Settings,
 } from "../config/settings.js";
 import {
+  loadCodexProfile,
+  saveCodexProfile,
   listXaiProfiles,
   loadXaiProfile,
   saveXaiProfile,
 } from "../config/oauth-stores.js";
+import {
+  clearSourceCredentials,
+  registerSourceCredentialRecord,
+} from "../config/source-credentials.js";
 import { createGlobalSettingsWriter } from "../mcp/add-server.js";
 import { withMockedHomedir } from "../../testkit/mock-module.js";
 import { modelOptionId } from "./model-catalog.js";
@@ -30,6 +36,10 @@ const SEED_WATERMARKS = {
   telemetry: { ...SEED_TELEMETRY },
   lastChangelogVersion: typeof pkg.version === "string" ? pkg.version : "0.0.0",
 } as const;
+
+afterEach(() => {
+  clearSourceCredentials();
+});
 
 function keeperEntry() {
   return {
@@ -48,6 +58,7 @@ interface RemoveHarness {
   readonly refreshed: unknown[][];
   readonly opened: (string | undefined)[];
   readonly wiring: Awaited<ReturnType<typeof wireSettings>>;
+  readonly state: RunnerState;
   readonly cleanup: () => Promise<void>;
 }
 
@@ -96,6 +107,11 @@ async function wireRemoveHarness(opts: {
   const services = {
     hookManager: { getStatuses: () => [] },
     globalSettingsWriter: createGlobalSettingsWriter(settingsPath),
+    permissionGate: { setProviderIdentity: () => undefined },
+    buildSessionSources: () => ({ sources: [], defaultSource: "" }),
+    directorHolder: {},
+    computeAdvertised: () => [],
+    toolset: { dynamicRunner: { currentDefinitions: () => [] } },
   } as unknown as RunnerServices;
   const wiring = await wireSettings(state, services);
   return {
@@ -106,6 +122,7 @@ async function wireRemoveHarness(opts: {
     refreshed,
     opened,
     wiring,
+    state,
     cleanup: () => rm(dir, { recursive: true, force: true }),
   };
 }
@@ -253,6 +270,11 @@ describe("provider removal execute path", () => {
       liveProvider: "keeper",
     });
     try {
+      clearSourceCredentials();
+      registerSourceCredentialRecord("xai/work", {
+        provenance: { kind: "oauth", provider: "xai", profile: "work" },
+        material: { secret: "token" },
+      });
       await saveXaiProfile(
         { name: "work", createdAt: 0, tokens: PROFILE_TOKENS },
         harness.home,
@@ -311,6 +333,11 @@ describe("provider removal execute path", () => {
       liveProvider: "keeper",
     });
     try {
+      clearSourceCredentials();
+      registerSourceCredentialRecord("xai/work", {
+        provenance: { kind: "oauth", provider: "xai", profile: "work" },
+        material: { secret: "token" },
+      });
       await saveXaiProfile(
         { name: "work", createdAt: 0, tokens: PROFILE_TOKENS },
         harness.home,
@@ -319,6 +346,11 @@ describe("provider removal execute path", () => {
         { name: "personal", createdAt: 0, tokens: PROFILE_TOKENS },
         harness.home,
       );
+      expect(
+        harness.wiring.describeRemoveProvider(
+          modelOptionId("xai/work", "grok-4"),
+        ),
+      ).toContain("auth profile 'work'");
       const before = await readFile(harness.settingsPath, "utf8");
       await executeRemove(harness, modelOptionId("xai/work", "grok-4"));
       // The orphaned credential is gone; siblings are untouched.
@@ -333,6 +365,81 @@ describe("provider removal execute path", () => {
       ]);
       expect(harness.refreshed).toEqual([]);
       expect(harness.opened).toEqual([]);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("custom namespaced providers leave unrelated OAuth profiles intact", async () => {
+    for (const provider of ["xai/manual", "codex/manual"] as const) {
+      const seed: Settings = {
+        ...SEED_WATERMARKS,
+        providers: {
+          keeper: keeperEntry(),
+          [provider]: {
+            baseURL: "https://manual.example/v1",
+            apiKey: "manual-key",
+            models: ["manual-model"],
+            defaultModel: "manual-model",
+          },
+        },
+      };
+      const harness = await wireRemoveHarness({
+        seed,
+        local: null,
+        liveProvider: "keeper",
+      });
+      try {
+        clearSourceCredentials();
+        registerSourceCredentialRecord(provider, {
+          provenance: { kind: "api-key" },
+          material: { secret: "manual-key" },
+        });
+        if (provider.startsWith("xai/")) {
+          await saveXaiProfile(
+            { name: "manual", createdAt: 0, tokens: PROFILE_TOKENS },
+            harness.home,
+          );
+        } else {
+          await saveCodexProfile(
+            { name: "manual", createdAt: 0, tokens: PROFILE_TOKENS },
+            harness.home,
+          );
+        }
+        await executeRemove(harness, modelOptionId(provider, "manual-model"));
+        const profile = provider.startsWith("xai/")
+          ? await loadXaiProfile("manual", harness.home)
+          : await loadCodexProfile("manual", harness.home);
+        expect(profile).toBeDefined();
+      } finally {
+        await harness.cleanup();
+      }
+    }
+  });
+
+  test("cannot switch to a provider while its removal is pending", async () => {
+    const seed: Settings = {
+      ...SEED_WATERMARKS,
+      providers: {
+        keeper: keeperEntry(),
+        victim: {
+          baseURL: "https://victim/v1",
+          apiKey: "victim-key",
+          models: ["v1"],
+          defaultModel: "v1",
+        },
+      },
+    };
+    const harness = await wireRemoveHarness({
+      seed,
+      local: null,
+      liveProvider: "keeper",
+    });
+    try {
+      const victim = modelOptionId("victim", "v1");
+      harness.wiring.onRemoveProvider(victim);
+      harness.wiring.onModelSelect(victim);
+      expect(harness.state.config.providerName).toBe("keeper");
     } finally {
       await harness.cleanup();
     }
@@ -438,6 +545,11 @@ describe("describeRemoveProvider", () => {
     };
     const harness = await wireLines(seed);
     try {
+      clearSourceCredentials();
+      registerSourceCredentialRecord("xai/work", {
+        provenance: { kind: "oauth", provider: "xai", profile: "work" },
+        material: { secret: "token" },
+      });
       const keyLine = harness.wiring.describeRemoveProvider(
         modelOptionId("openai/work", "m1"),
       );

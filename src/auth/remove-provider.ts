@@ -3,6 +3,7 @@ import {
   removeCodexProfile,
   removeXaiProfile,
 } from "../config/oauth-stores.js";
+import { findSourceCredentialRecord } from "../config/source-credentials.js";
 import { xaiProfileFromProviderName } from "../config/xai-providers.js";
 
 /**
@@ -20,19 +21,28 @@ export interface OAuthStoreTarget {
   ) => Promise<string[]>;
 }
 
-// Maps a catalog provider name to its OAuth auth store + profile using the
-// projection helpers (never string-splitting at the call site). Returns null
-// for API-key, Custom, Ollama/keyless, and degenerate empty-profile names —
-// those delete settings-side only.
+// Maps a catalog provider to its OAuth auth store only when the live source
+// credential record proves ownership of the same provider family and profile.
+// Names alone are user-controlled and cannot authorize credential deletion.
 export function oauthStoreForProvider(
   providerName: string,
 ): OAuthStoreTarget | null {
+  const provenance = findSourceCredentialRecord(providerName)?.provenance;
+  if (provenance?.kind !== "oauth") return null;
   const codexProfile = codexProfileFromProviderName(providerName);
-  if (codexProfile !== undefined && codexProfile.length > 0) {
+  if (
+    provenance.provider === "codex" &&
+    codexProfile === provenance.profile &&
+    codexProfile.length > 0
+  ) {
     return { profile: codexProfile, removeProfile: removeCodexProfile };
   }
   const xaiProfile = xaiProfileFromProviderName(providerName);
-  if (xaiProfile !== undefined && xaiProfile.length > 0) {
+  if (
+    provenance.provider === "xai" &&
+    xaiProfile === provenance.profile &&
+    xaiProfile.length > 0
+  ) {
     return { profile: xaiProfile, removeProfile: removeXaiProfile };
   }
   return null;

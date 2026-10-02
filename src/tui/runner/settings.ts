@@ -420,10 +420,13 @@ export async function wireSettings(
     });
   };
 
+  const pendingProviderRemovals = new Set<string>();
+
   const onModelSelect = (id: string): void => {
     const identity = modelOptionRef(id);
     if (identity === null) return;
     const { provider, model } = identity;
+    if (pendingProviderRemovals.has(provider)) return;
     applyLiveModelSwitch(
       { providerName: provider, model },
       {
@@ -562,7 +565,12 @@ export async function wireSettings(
     if (ref === null) return null;
     const settings = state.config.settings;
     const entry = settings?.providers[ref.provider];
-    if (entry === undefined) return null;
+    if (entry === undefined) {
+      const target = oauthStoreForProvider(ref.provider);
+      return target === null
+        ? null
+        : `Remove ${ref.provider} residual? Forgets auth profile '${target.profile}'. Alt+R again to confirm, Esc cancels.`;
+    }
     const modelCount = entry.models.length;
     const modelsBit = modelCount === 1 ? "1 model" : `${modelCount} models`;
     let repairPreview = "";
@@ -583,8 +591,10 @@ export async function wireSettings(
   const onRemoveProvider = (id: string): void => {
     const ref = modelOptionRef(id);
     if (ref === null) return;
+    const provider = ref.provider;
+    if (pendingProviderRemovals.has(provider)) return;
+    pendingProviderRemovals.add(provider);
     void (async () => {
-      const provider = ref.provider;
       const entry = state.config.settings?.providers[provider];
       if (entry === undefined) {
         // Orphan retry: the catalog row is gone but an OAuth profile may
@@ -738,11 +748,15 @@ export async function wireSettings(
           Object.keys(survivors).length,
         ),
       );
-    })().catch((err: unknown) => {
-      tuiLogger.debug("provider removal failed: {error}", {
-        error: err instanceof Error ? err.message : String(err),
+    })()
+      .catch((err: unknown) => {
+        tuiLogger.debug("provider removal failed: {error}", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+      .finally(() => {
+        pendingProviderRemovals.delete(provider);
       });
-    });
   };
 
   return {
