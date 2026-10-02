@@ -1,6 +1,6 @@
 /**
  * Drive the parent back into a turn when uncollected mailbox terminals exist
- * while Skywalker is idle. Pure: occupancy decides when to call; this module
+ * while dispatch is idle. Pure: occupancy decides when to call; this module
  * decides whether to drive and what to send. Sibling of fleet-dry-drive —
  * per-item, not last-lane + open-tasks.
  */

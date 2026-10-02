@@ -8,7 +8,6 @@ import {
   REVIEW_TOOLS,
   SKILL_TOOLS,
   DISPATCH_TOOLS,
-  SKYWALKER_TOOLS,
 } from "./tool-sets.js";
 
 describe("PRODUCT_WRITE_TOOLS", () => {
@@ -66,23 +65,19 @@ describe("DOCS_TOOLS", () => {
   });
 });
 
-describe("DISPATCH_TOOLS / SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
+describe("DISPATCH_TOOLS / ORCHESTRATOR_TOOLS", () => {
   test("both mount product writes and split fleet tools", () => {
     for (const name of PRODUCT_WRITE_TOOLS) {
       expect(DISPATCH_TOOLS as readonly string[]).toContain(name);
-      expect(SKYWALKER_TOOLS as readonly string[]).toContain(name);
+      expect(DISPATCH_TOOLS as readonly string[]).toContain(name);
       expect(ORCHESTRATOR_TOOLS as readonly string[]).toContain(name);
     }
     for (const name of ["spawn_agent"] as const) {
       expect(DISPATCH_TOOLS as readonly string[]).toContain(name);
-      expect(SKYWALKER_TOOLS as readonly string[]).toContain(name);
+      expect(DISPATCH_TOOLS as readonly string[]).toContain(name);
       expect(ORCHESTRATOR_TOOLS as readonly string[]).toContain(name);
     }
-    for (const surface of [
-      DISPATCH_TOOLS,
-      SKYWALKER_TOOLS,
-      ORCHESTRATOR_TOOLS,
-    ] as const) {
+    for (const surface of [DISPATCH_TOOLS, ORCHESTRATOR_TOOLS] as const) {
       expect(surface as readonly string[]).not.toContain("wait_agents");
       expect(surface as readonly string[]).not.toContain("task");
     }
@@ -91,7 +86,7 @@ describe("DISPATCH_TOOLS / SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
   // CL-7051: fleet discovery is Tier-1 only.
   test("search_agents is on Dispatch only, not the nested orchestrator surface", () => {
     expect(DISPATCH_TOOLS as readonly string[]).toContain("search_agents");
-    expect(SKYWALKER_TOOLS as readonly string[]).toContain("search_agents");
+    expect(DISPATCH_TOOLS as readonly string[]).toContain("search_agents");
     expect(ORCHESTRATOR_TOOLS as readonly string[]).not.toContain(
       "search_agents",
     );
@@ -106,7 +101,6 @@ describe("DISPATCH_TOOLS / SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
       REVIEW_TOOLS,
       ORCHESTRATOR_TOOLS,
       DISPATCH_TOOLS,
-      SKYWALKER_TOOLS,
     ] as const) {
       expect(surface as readonly string[]).toContain("skill_search");
       expect(surface as readonly string[]).toContain("use_skill");
@@ -122,7 +116,6 @@ describe("DISPATCH_TOOLS / SKYWALKER_TOOLS / ORCHESTRATOR_TOOLS", () => {
       REVIEW_TOOLS,
       ORCHESTRATOR_TOOLS,
       DISPATCH_TOOLS,
-      SKYWALKER_TOOLS,
     ] as const) {
       const names = surface as readonly string[];
       expect(new Set(names).size).toBe(names.length);

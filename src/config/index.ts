@@ -607,7 +607,7 @@ export interface Config {
   skipPermissionsFromSettings: boolean;
   auto: boolean;
   /**
-   * Exec-only chosen primary director. Omitted = Skywalker (product default).
+   * Exec-only chosen primary director. Omitted = dispatch (product default).
    * `--director` is rejected in TUI mode.
    */
   director?: DirectorId;

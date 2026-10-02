@@ -30,7 +30,7 @@ import { canonicalToolName } from "./canonical-tool-name.js";
 // actually needs it.
 //
 // Product mutation tools (write / edit / delete) sit in CORE so
-// the primary Skywalker session can DIY tiny/bounded edits without a
+// the primary dispatch session can DIY tiny/bounded edits without a
 // tool_search round-trip. Substantial work still spawns build / docs
 // directors — that is a prompt judgment call, not a toolset strip.
 // Codex natives (apply_patch / shell / update_plan) are not advertised.
@@ -51,7 +51,7 @@ export const CORE_TOOL_NAMES: readonly string[] = [
   // tool_search round-trip.
   // Fleet verbs (non-blocking spawn + lifecycle). Mounted on primary when
   // subAgent is wired; advertised here so the model does not tool_search for
-  // them. Package allowlists (ORCHESTRATOR_TOOLS / SKYWALKER_TOOLS) are a
+  // them. Package allowlists (ORCHESTRATOR_TOOLS / DISPATCH_TOOLS) are a
   // separate, deferred change.
   "spawn_agent",
   "wait_agents",

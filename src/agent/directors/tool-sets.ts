@@ -76,6 +76,3 @@ export const ORCHESTRATOR_TOOLS = [
 
 /** Dispatch primary: orchestrator surface plus fleet discovery (Tier-1 only). */
 export const DISPATCH_TOOLS = [...ORCHESTRATOR_TOOLS, "search_agents"] as const;
-
-/** Legacy alias for backwards compatibility during migration. */
-export const SKYWALKER_TOOLS = DISPATCH_TOOLS;

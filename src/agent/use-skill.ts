@@ -11,7 +11,7 @@ import { captureSkillUsed } from "../telemetry/product-events.js";
 // skill_search; this tool pulls the full instructions into context when the
 // model decides one applies. There is no operator invocation — discovery and
 // loading are entirely model-driven. Primary copy is on-demand catalog
-// (Skywalker has no attached skills). Workers mount workerUseSkillDefinition
+// (dispatch has no attached skills). Workers mount workerUseSkillDefinition
 // so they do not reload bodies already injected as attached. The handler
 // refuses attached names and names already loaded this session so the body
 // is never dumped twice.
