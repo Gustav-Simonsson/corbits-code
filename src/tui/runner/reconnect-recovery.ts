@@ -194,29 +194,36 @@ export function applyReconnectRecoverySelection(args: {
   state: ReturnType<typeof createReconnectRecoveryState>;
   generation: number;
   selectedId: string;
-  reconnect: (scope: ReconnectScope) => void;
+  reconnect: (
+    scope: ReconnectScope,
+    onComplete: (connected: boolean) => void,
+  ) => void;
   armContinuation: (generation: number) => void;
   cancelContinuation: (generation: number) => void;
   deliverContinuation: (message: InboundMessage) => void;
-}): "stale" | "invalid" | "reconnect-failed" | "reconnected" | "continued" {
+}): "stale" | "invalid" | "reconnect-failed" | "reconnected" {
   const acceptance = args.state.accept(args.generation, args.selectedId);
   if (acceptance.kind !== "accepted") return acceptance.kind;
+  let completed = false;
+  const onComplete = (connected: boolean): void => {
+    if (completed) return;
+    completed = true;
+    if (!connected || !acceptance.replay) return;
+    args.armContinuation(acceptance.generation);
+    try {
+      args.deliverContinuation(
+        buildCredentialRecoveryContinuationMessage(acceptance.generation),
+      );
+    } catch {
+      args.cancelContinuation(acceptance.generation);
+    }
+  };
   try {
-    args.reconnect(acceptance.scope);
+    args.reconnect(acceptance.scope, onComplete);
   } catch {
     return "reconnect-failed";
   }
-  if (!acceptance.replay) return "reconnected";
-  args.armContinuation(acceptance.generation);
-  try {
-    args.deliverContinuation(
-      buildCredentialRecoveryContinuationMessage(acceptance.generation),
-    );
-  } catch {
-    args.cancelContinuation(acceptance.generation);
-    return "reconnected";
-  }
-  return "continued";
+  return "reconnected";
 }
 
 /**
@@ -236,7 +243,10 @@ export function createReconnectRecoveryPresenter(args: {
     onAccept: (id: string) => void;
     onCancel: () => void;
   }) => boolean;
-  openReconnect: (scope: ReconnectScope) => boolean;
+  openReconnect: (
+    scope: ReconnectScope,
+    onComplete: (connected: boolean) => void,
+  ) => boolean;
   readDirector: () =>
     | {
         armCredentialRecoveryContinuation: (generation: number) => void;
@@ -261,8 +271,8 @@ export function createReconnectRecoveryPresenter(args: {
           state: args.recovery,
           generation: pending.generation,
           selectedId: id,
-          reconnect: (scope) => {
-            if (!args.openReconnect(scope)) {
+          reconnect: (scope, onComplete) => {
+            if (!args.openReconnect(scope, onComplete)) {
               throw new Error(
                 `reconnect surface unavailable for ${scope.kind}/${scope.profile}`,
               );

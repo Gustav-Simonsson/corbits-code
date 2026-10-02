@@ -157,7 +157,7 @@ describe("reconnect recovery accept gate", () => {
 });
 
 describe("reconnect recovery selection", () => {
-  test("reconnects the failed scope and replays the turn once", () => {
+  test("reconnects the failed scope and replays only after success", () => {
     const state = createReconnectRecoveryState();
     const attempt = state.begin(operatorMessage(), "xai");
     state.observe(attempt, credentialRetry());
@@ -167,12 +167,14 @@ describe("reconnect recovery selection", () => {
     const seen: string[] = [];
     let armed: number | null = null;
     const delivered: InboundMessage[] = [];
+    let completeReconnect: ((connected: boolean) => void) | undefined;
     const outcome = applyReconnectRecoverySelection({
       state,
       generation: pending.generation,
       selectedId: reconnectRecoveryItemId(pending.scope),
-      reconnect: (scope) => {
+      reconnect: (scope, onComplete) => {
         seen.push(`${scope.kind}/${scope.profile}`);
+        completeReconnect = onComplete;
       },
       armContinuation: (generation) => {
         armed = generation;
@@ -184,10 +186,45 @@ describe("reconnect recovery selection", () => {
         delivered.push(message);
       },
     });
-    expect(outcome).toBe("continued");
+    expect(outcome).toBe("reconnected");
     expect(seen).toEqual(["xai/default-2"]);
+    expect(armed).toBeNull();
+    expect(delivered).toEqual([]);
+    completeReconnect?.(true);
     expect(armed ?? -1).toBe(pending.generation);
     expect(delivered).toHaveLength(1);
+    completeReconnect?.(true);
+    expect(delivered).toHaveLength(1);
+  });
+
+  test("cancel, failure, and committed attempts never replay", () => {
+    for (const connected of [false, true]) {
+      const state = createReconnectRecoveryState();
+      const attempt = state.begin(operatorMessage(), "xai");
+      state.observe(attempt, credentialRetry());
+      if (connected) {
+        state.observe(attempt, { type: "inference.tool-call", data: {} });
+      }
+      state.observe(attempt, credentialFailure("xai/default-2"));
+      const pending = required(state.settle(attempt), "pending recovery");
+      let completeReconnect: ((result: boolean) => void) | undefined;
+      applyReconnectRecoverySelection({
+        state,
+        generation: pending.generation,
+        selectedId: reconnectRecoveryItemId(pending.scope),
+        reconnect: (_scope, onComplete) => {
+          completeReconnect = onComplete;
+        },
+        armContinuation: () => {
+          throw new Error("should not arm");
+        },
+        cancelContinuation: () => undefined,
+        deliverContinuation: () => {
+          throw new Error("should not deliver");
+        },
+      });
+      completeReconnect?.(connected);
+    }
   });
 
   test("reconnect failure and stale generations never arm a continuation", () => {
@@ -254,6 +291,7 @@ describe("reconnect recovery presenter (runTUI wiring)", () => {
     };
     const dialogs: ReconnectDialog[] = [];
     const reconnected: ReconnectScope[] = [];
+    let completeReconnect: ((connected: boolean) => void) | undefined;
     const armed: number[] = [];
     const cancelled: number[] = [];
     const delivered: InboundMessage[] = [];
@@ -263,8 +301,9 @@ describe("reconnect recovery presenter (runTUI wiring)", () => {
         dialogs.push(next);
         return dialogOpens;
       },
-      openReconnect: (scope) => {
+      openReconnect: (scope, onComplete?: (connected: boolean) => void) => {
         reconnected.push(scope);
+        completeReconnect = onComplete;
         return options?.reconnectOpens ?? true;
       },
       readDirector: () =>
@@ -290,17 +329,22 @@ describe("reconnect recovery presenter (runTUI wiring)", () => {
       pending,
       dialog,
       reconnected,
+      completeReconnect: (connected: boolean) => completeReconnect?.(connected),
       armed,
       cancelled,
       delivered,
     };
   }
 
-  test("accept re-keys the failed scope and replays the turn once", () => {
+  test("accept waits for a successful re-key before replaying the turn once", () => {
     const wired = wirePresenter();
     expect(wired.dialog.scope).toEqual(wired.pending.scope);
     wired.dialog.onAccept(reconnectRecoveryItemId(wired.pending.scope));
     expect(wired.reconnected).toEqual([wired.pending.scope]);
+    expect(wired.armed).toEqual([]);
+    expect(wired.delivered).toEqual([]);
+
+    wired.completeReconnect(true);
     expect(wired.armed).toEqual([wired.pending.generation]);
     expect(wired.cancelled).toEqual([]);
     // The continuation message carries a build-time timestamp, so pin the
@@ -314,6 +358,9 @@ describe("reconnect recovery presenter (runTUI wiring)", () => {
     expect(continuation.headers.interchangeCorrelationId).toBe(
       String(wired.pending.generation),
     );
+    wired.completeReconnect(true);
+    expect(wired.armed).toEqual([wired.pending.generation]);
+    expect(wired.delivered).toHaveLength(1);
     // The generation is consumed: a late cancel is a no-op.
     expect(wired.recovery.cancel(wired.pending.generation)).toBe(false);
   });

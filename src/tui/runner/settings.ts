@@ -250,6 +250,12 @@ export async function wireSettings(
     req?: ProductHostConnectRequest,
   ): void => {
     void (async () => {
+      let completionReported = false;
+      const reportCompletion = (connected: boolean): void => {
+        if (completionReported) return;
+        completionReported = true;
+        req?.onComplete?.(connected);
+      };
       let result: Awaited<ReturnType<typeof connectProviderInline>>;
       // The setup surface shares the live session's renderer — a second
       // CliRenderer cannot exist on the same stdin. Shell input stays
@@ -281,6 +287,7 @@ export async function wireSettings(
           createRenderer: () => Promise.resolve(hostOf(state).renderer),
         });
       } catch (err) {
+        reportCompletion(false);
         state.systemNotice?.(
           `Connecting ${providerName} failed: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -291,7 +298,11 @@ export async function wireSettings(
         // whatever shell zone owned it before the surface mounted.
         applyFocus(hostOf(state).shell);
       }
-      if (!result.connected) return;
+      if (!result.connected) {
+        reportCompletion(false);
+        return;
+      }
+      reportCompletion(true);
 
       const onDisk = await loadSettings(trueGlobalSettingsPath);
       const resolvedForCatalog: ResolvedProvider = {

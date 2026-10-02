@@ -238,12 +238,14 @@ export interface CommandSurfaceDeps {
   /**
    * Opens the host's add-provider selector (owned by the product host).
    * `/connect` omits returnToModels. `/connect <kind> [profile]` pre-scopes
-   * via initialKind/initialProfile (kind row focused, profile to the flow).
+   * via initialKind/initialProfile (kind row focused, profile to the flow),
+   * with completion reported after that interactive flow settles.
    */
   readonly openAddProvider?: (opts?: {
     returnToModels?: boolean;
     initialKind?: string;
     initialProfile?: string;
+    onComplete?: (connected: boolean) => void;
   }) => void;
   /** Fallback channel for surfaces with no live data source. */
   readonly notify: (text: string) => void;
@@ -1666,6 +1668,7 @@ export function openCommandSurface(
   kind: CommandSurfaceKind,
   deps: CommandSurfaceDeps,
   connectScope?: ReconnectScope,
+  onConnectComplete?: (connected: boolean) => void,
 ): boolean {
   switch (kind) {
     case "help":
@@ -1697,6 +1700,9 @@ export function openCommandSurface(
           ? {
               initialKind: connectScope.kind,
               initialProfile: connectScope.profile,
+              ...(onConnectComplete !== undefined
+                ? { onComplete: onConnectComplete }
+                : {}),
             }
           : undefined,
       );

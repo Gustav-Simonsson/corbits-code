@@ -130,6 +130,8 @@ export interface ProductHostAddProviderChoice {
 export interface ProductHostConnectRequest {
   readonly kind?: string;
   readonly profile?: string;
+  /** Reports whether the interactive connect flow completed successfully. */
+  readonly onComplete?: (connected: boolean) => void;
 }
 
 export interface ProductHostConfig {
@@ -268,6 +270,7 @@ export interface ProductHost {
     returnToModels?: boolean;
     initialKind?: string;
     initialProfile?: string;
+    onComplete?: (connected: boolean) => void;
   }) => void;
   /** Swap the picker's rows/descriptions in place (e.g. after a provider connects). */
   readonly setModels?: (
@@ -598,6 +601,7 @@ export async function mountProductHost(
         returnToModels?: boolean;
         initialKind?: string;
         initialProfile?: string;
+        onComplete?: (connected: boolean) => void;
       }) => void)
     | undefined;
   if (config.onModelSelect) {
@@ -620,6 +624,7 @@ export async function mountProductHost(
             returnToModels?: boolean;
             initialKind?: string;
             initialProfile?: string;
+            onComplete?: (connected: boolean) => void;
           }): void => {
             const rows = addProviderChoices();
             const scopedIndex =
@@ -644,7 +649,13 @@ export async function mountProductHost(
                   opts?.initialProfile !== undefined &&
                   (opts.initialKind === undefined || opts.initialKind === id)
                 ) {
-                  onConnect(id, { kind: id, profile: opts.initialProfile });
+                  onConnect(id, {
+                    kind: id,
+                    profile: opts.initialProfile,
+                    ...(opts.onComplete !== undefined
+                      ? { onComplete: opts.onComplete }
+                      : {}),
+                  });
                   return;
                 }
                 onConnect(id);

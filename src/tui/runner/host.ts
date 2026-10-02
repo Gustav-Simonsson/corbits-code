@@ -180,6 +180,7 @@ export type RunnerHost = ProductHost & {
   readonly openSurface: (
     kind: CommandSurfaceKind,
     connectScope?: ReconnectScope,
+    onConnectComplete?: (connected: boolean) => void,
   ) => boolean;
   /**
    * Recompute the models-first catalog from fresh recent/favorite refs and
@@ -511,8 +512,14 @@ export async function mountRunnerHost(
   return {
     ...host,
     dispose,
-    openSurface: (kind, connectScope) =>
-      openCommandSurface(host.shell, kind, surfaceDeps, connectScope),
+    openSurface: (kind, connectScope, onConnectComplete) =>
+      openCommandSurface(
+        host.shell,
+        kind,
+        surfaceDeps,
+        connectScope,
+        onConnectComplete,
+      ),
     refreshModels,
     refreshCostContext: pushCostContext,
     openCredentialRecovery,

@@ -257,7 +257,8 @@ export async function runTUI(initialConfig: Config): Promise<number> {
     state.presentReconnectRecovery = createReconnectRecoveryPresenter({
       recovery: state.reconnectRecovery,
       openDialog: (dialog) => host.openReconnectRecovery(dialog),
-      openReconnect: (scope) => host.openSurface("add-provider", scope),
+      openReconnect: (scope, onComplete) =>
+        host.openSurface("add-provider", scope, onComplete),
       readDirector: () => services.directorHolder.instance,
       deliverContinuation: (message) => liveAgent(state).deliver(message),
     });
