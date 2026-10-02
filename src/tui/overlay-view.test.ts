@@ -207,6 +207,37 @@ describe("overlay view", () => {
     });
   });
 
+  test("title hints advertise Alt+R only when removal is wired", async () => {
+    await withTestRenderer(async (h) => {
+      const view = createOverlayView(h.renderer);
+      h.renderer.root.add(view.host);
+      const title: OverlayTitlePresentation = {
+        title: "model",
+        kind: "model_picker",
+        hasChoices: true,
+        answer: null,
+        addProviderHint: true,
+        setDefaultHint: true,
+        removeProviderHint: false,
+        mcpManageHint: false,
+        mcpAddHint: false,
+      };
+      const titleText = () =>
+        view.title.content.chunks.map((chunk) => chunk.text).join("");
+      view.paintTitle(title, 120);
+      expect(titleText()).not.toContain("Alt+R");
+      view.paintTitle({ ...title, removeProviderHint: true }, 120);
+      expect(titleText()).toContain("Alt+R");
+      view.paintTitle(
+        { ...title, removeProviderHint: true, addProviderHint: false },
+        120,
+      );
+      expect(titleText()).toContain("Alt+D");
+      expect(titleText()).toContain("Alt+R");
+      expect(titleText()).not.toContain("Alt+A");
+    });
+  });
+
   test("intrinsic chrome charges answer and description once and palette omits title", () => {
     const full = overlayChromeRows("model_picker", 2, true, true);
     const bare = overlayChromeRows("model_picker", 2, false, false);

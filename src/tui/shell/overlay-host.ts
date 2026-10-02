@@ -63,6 +63,7 @@ function refreshOverlayTitle(shell: AppShell): void {
       answer: overlayAnswerState(shell),
       addProviderHint: bag.primaryBindings.addProviderHint,
       setDefaultHint: bag.primaryBindings.setDefaultHint,
+      removeProviderHint: bag.primaryBindings.removeProviderHint,
       mcpManageHint: bag.primaryBindings.mcpManageHint,
       mcpAddHint: bag.primaryBindings.mcpAddHint,
     },
@@ -305,6 +306,7 @@ export function openListOverlay(
         isGate: opts?.isGate === true,
         addProviderHint: opts?.addProviderHint ?? false,
         setDefaultHint: opts?.setDefaultHint ?? false,
+        removeProviderHint: opts?.removeProviderHint ?? false,
         mcpManageHint: opts?.mcpManageHint ?? false,
         mcpAddHint: opts?.mcpAddHint ?? false,
       };

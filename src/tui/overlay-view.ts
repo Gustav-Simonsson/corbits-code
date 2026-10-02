@@ -25,7 +25,11 @@ import { UI } from "./theme.js";
 
 export interface OverlayTitlePresentation extends Pick<
   OpenListOverlayOpts,
-  "addProviderHint" | "setDefaultHint" | "mcpManageHint" | "mcpAddHint"
+  | "addProviderHint"
+  | "setDefaultHint"
+  | "removeProviderHint"
+  | "mcpManageHint"
+  | "mcpAddHint"
 > {
   readonly title: string;
   readonly kind: PrimaryOverlayKind | null;
@@ -172,6 +176,37 @@ const MODEL_PICKER_HINTS = [
   "Esc · Enter",
 ] as const;
 
+/** Model picker with Alt+R remove wired: longest-first, same fallback shape. */
+const MODEL_PICKER_HINTS_WITH_REMOVE = [
+  "Esc cancel · Enter choose · Alt+A /connect add provider · Alt+R remove",
+  "Esc · Enter · Alt+A /connect · Alt+R remove",
+  "Esc · Enter · Alt+A · Alt+R",
+  "Esc · Enter",
+] as const;
+
+/** Model picker with Alt+D + Alt+R wired: longest-first, same fallback shape. */
+const MODEL_PICKER_HINTS_DEFAULT_WITH_REMOVE = [
+  "Esc cancel · Enter choose · Alt+D set default · Alt+R remove",
+  "Esc · Enter · Alt+D default · Alt+R remove",
+  "Esc · Enter · Alt+D · Alt+R",
+  "Esc · Enter",
+] as const;
+
+/** Model picker with Alt+A + Alt+D + Alt+R wired: longest-first. */
+const MODEL_PICKER_HINTS_FULL_WITH_REMOVE = [
+  "Esc cancel · Enter choose · Alt+A /connect add provider · Alt+D set default · Alt+R remove",
+  "Esc · Enter · Alt+A /connect · Alt+D default · Alt+R remove",
+  "Esc · Enter · Alt+A · Alt+D · Alt+R",
+  "Esc · Enter",
+] as const;
+
+/** Model picker with only Alt+R wired: longest-first, same fallback shape. */
+const MODEL_PICKER_HINTS_REMOVE_ONLY = [
+  "Esc cancel · Enter choose · Alt+R remove",
+  "Esc · Enter · Alt+R remove",
+  "Esc · Enter",
+] as const;
+
 /** Permissions only: name `/yolo` so skip-prompts is discoverable at the ask. */
 const PERMISSIONS_HINTS = [
   "Esc cancel · Enter choose · /yolo skip prompts",
@@ -216,7 +251,9 @@ function overlayHints(
     if (kind === "model_picker") {
       const addProvider = presentation.addProviderHint;
       const setDefault = presentation.setDefaultHint;
+      const remove = presentation.removeProviderHint;
       if (addProvider && setDefault) {
+        if (remove) return MODEL_PICKER_HINTS_FULL_WITH_REMOVE;
         return [
           "Esc cancel · Enter choose · Alt+A /connect add provider · Alt+D set default",
           "Esc · Enter · Alt+A /connect · Alt+D default",
@@ -224,14 +261,18 @@ function overlayHints(
           "Esc · Enter",
         ];
       }
-      if (addProvider) return MODEL_PICKER_HINTS;
+      if (addProvider) {
+        return remove ? MODEL_PICKER_HINTS_WITH_REMOVE : MODEL_PICKER_HINTS;
+      }
       if (setDefault) {
+        if (remove) return MODEL_PICKER_HINTS_DEFAULT_WITH_REMOVE;
         return [
           "Esc cancel · Enter choose · Alt+D set default",
           "Esc · Enter · Alt+D default",
           "Esc · Enter",
         ];
       }
+      if (remove) return MODEL_PICKER_HINTS_REMOVE_ONLY;
     }
     if (kind === "permissions") return PERMISSIONS_HINTS;
     if (kind === "plugins") return PLUGINS_HINTS;

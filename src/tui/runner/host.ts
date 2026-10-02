@@ -102,6 +102,10 @@ export interface RunnerHostDeps {
   readonly onFavoriteToggle?: (id: string) => void;
   /** Alt+D on a focused model row; runner owns the default persist. */
   readonly onSetDefault?: (id: string) => void;
+  /** Alt+R on a focused model row; runner owns the armed-confirm execution. */
+  readonly onRemoveProvider?: (id: string) => void;
+  /** Blast-radius line for the Alt+R arm step; null marks a non-removable row. */
+  readonly describeRemoveProvider?: (id: string) => string | null;
   /**
    * Alt+A from the model picker: every first-class provider kind, read fresh
    * on each open so a just-connected account's count is current.
@@ -311,6 +315,12 @@ export async function mountRunnerHost(
       : {}),
     ...(deps.onSetDefault !== undefined
       ? { onSetDefault: deps.onSetDefault }
+      : {}),
+    ...(deps.onRemoveProvider !== undefined
+      ? { onRemoveProvider: deps.onRemoveProvider }
+      : {}),
+    ...(deps.describeRemoveProvider !== undefined
+      ? { describeRemoveProvider: deps.describeRemoveProvider }
       : {}),
     ...(deps.addProviderChoices !== undefined
       ? { addProviderChoices: deps.addProviderChoices }
