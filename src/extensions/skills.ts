@@ -205,3 +205,41 @@ export async function discoverSkills(
   }
   return skills;
 }
+
+// CL-9010: process-lifetime skill catalog cache keyed by resolved cwd +
+// plugin dirs. Spawned workers share the dispatcher's catalog: the first
+// same-cwd spawn pays discovery and later spawns reuse the snapshot, so
+// spawn_agent dispatch stays non-blocking on repeated waves. The fallback
+// base dirs are cwd-relative, so the key must include the cwd — different
+// dirs (or a different cwd) always rediscover. Callers get a copy; the
+// cached canonical is never handed out, so one worker cannot mutate
+// another's catalog. Unbounded in practice the same way the inference
+// singleton is: one entry per distinct (cwd, dirs) pair per process.
+const skillSnapshotCache = new Map<string, readonly SkillSummary[]>();
+
+function skillSnapshotCacheKey(
+  cwd: string,
+  pluginDirs: readonly string[],
+): string {
+  return `${resolve(cwd)}\0${pluginDirs.join("\0")}`;
+}
+
+export async function discoverSkillsCached(
+  cwd: string,
+  pluginDirs: readonly string[] = [],
+): Promise<SkillSummary[]> {
+  const key = skillSnapshotCacheKey(cwd, pluginDirs);
+  const cached = skillSnapshotCache.get(key);
+  if (cached !== undefined) return cached.map((skill) => ({ ...skill }));
+  const fresh = await discoverSkills(cwd, [...pluginDirs]);
+  skillSnapshotCache.set(
+    key,
+    fresh.map((skill) => ({ ...skill })),
+  );
+  return fresh;
+}
+
+/** Test hook: drop every cached skill snapshot so suites start unpolluted. */
+export function resetSkillDiscoveryCacheForTests(): void {
+  skillSnapshotCache.clear();
+}

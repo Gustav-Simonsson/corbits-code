@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import { arch, release, type as osType } from "node:os";
+import { resolve } from "node:path";
 
 export interface EnvironmentInfo {
   cwd: string;
@@ -105,6 +106,57 @@ async function gatherTopLevel(cwd: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/** CL-9010: how long a cached environment snapshot stays fresh. */
+export const ENVIRONMENT_CACHE_TTL_MS = 5_000;
+
+type EnvironmentCacheEntry = {
+  at: number;
+  value: EnvironmentInfo;
+};
+
+// CL-9010: short-TTL environment cache keyed by resolved cwd. Spawned
+// workers share the dispatcher's git/top-level snapshot: the first spawn
+// pays the git calls and same-cwd spawns within the TTL reuse it, so
+// spawn_agent waves do not re-run `git status` per lane. Concurrent spawns
+// share one in-flight gather instead of stampeding git. Hits return a fresh
+// top-level copy with a current date so one worker cannot mutate another's
+// snapshot and the prompt never shows a stale clock.
+const environmentCache = new Map<string, EnvironmentCacheEntry>();
+const environmentInflight = new Map<string, Promise<EnvironmentInfo>>();
+
+export async function gatherEnvironmentCached(
+  cwd: string,
+  date = new Date(),
+  ttlMs = ENVIRONMENT_CACHE_TTL_MS,
+): Promise<EnvironmentInfo> {
+  const key = resolve(cwd);
+  const entry = environmentCache.get(key);
+  if (entry !== undefined && Date.now() - entry.at < ttlMs) {
+    return { ...entry.value, date };
+  }
+  const inflight = environmentInflight.get(key);
+  if (inflight !== undefined) {
+    return { ...(await inflight), date };
+  }
+  const gather = gatherEnvironment(cwd, date);
+  environmentInflight.set(key, gather);
+  try {
+    const settled = await gather;
+    environmentCache.set(key, { at: Date.now(), value: settled });
+    return { ...settled, date };
+  } finally {
+    // A gather failure caches nothing — the next spawn retries.
+    if (environmentInflight.get(key) === gather)
+      environmentInflight.delete(key);
+  }
+}
+
+/** Test hook: drop every cached environment snapshot. */
+export function resetEnvironmentCacheForTests(): void {
+  environmentCache.clear();
+  environmentInflight.clear();
 }
 
 export async function gatherEnvironment(

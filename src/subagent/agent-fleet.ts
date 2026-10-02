@@ -1532,6 +1532,16 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
             ...(deps.skillDirs !== undefined
               ? { skillDirs: deps.skillDirs }
               : {}),
+            // CL-9010: shared-cwd lanes reuse the dispatcher's skill catalog
+            // instead of rescanning — the snapshot was discovered for this
+            // exact cwd. Worktree lanes run elsewhere, so they rediscover
+            // (through the cached discovery) for their own directory.
+            // Every fleet-spawned worker skips the pricing-cache seed read:
+            // the parent runtime already applied the process seed at boot.
+            ...(deps.skillSnapshot !== undefined && worktreeCwd === undefined
+              ? { skills: deps.skillSnapshot }
+              : {}),
+            skipPricingSeed: true,
             ...(resolved.systemPromptRole !== undefined
               ? { systemPromptRole: resolved.systemPromptRole }
               : {}),

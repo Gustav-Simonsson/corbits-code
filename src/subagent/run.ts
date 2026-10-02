@@ -89,7 +89,7 @@ import {
 import { createShellCollectTool } from "../agent/background-shell-tool.js";
 import { createAttachmentRehydrateTransform } from "../session/attachment-store.js";
 import { tryReadPriorHandoffFile } from "../session/compaction-handoff.js";
-import { gatherEnvironment } from "../agent/environment.js";
+import { gatherEnvironmentCached } from "../agent/environment.js";
 import { generateSessionId } from "../session/index.js";
 import { consumeStream } from "../session/stream-consumer.js";
 import { createCycleTextRecorder } from "../session/stream-journal.js";
@@ -118,7 +118,7 @@ import {
   createUseSkillTool,
   workerUseSkillDefinition,
 } from "../agent/use-skill.js";
-import { discoverSkills } from "../extensions/skills.js";
+import { discoverSkillsCached } from "../extensions/skills.js";
 import { formatAttachedSkillConstraints } from "../agent/directors/attached-skills.js";
 import {
   createManageTasksRunner,
@@ -612,7 +612,11 @@ async function runSubAgentInner(
   telemetryRollup: SubAgentTelemetryRollup,
   settlementState: { latestModel: string },
 ): Promise<RunSubAgentResult> {
-  const inferenceDeps = await assembleInferenceBase();
+  // CL-9010: fleet-spawned workers skip the pricing-cache seed re-read —
+  // the parent runtime already applied the process seed at boot.
+  const inferenceDeps = await assembleInferenceBase(undefined, {
+    ...(params.skipPricingSeed === true ? { skipPricingSeed: true } : {}),
+  });
 
   // CL-9475: the fleet session id the parent observes (params.id); falls
   // back to the local session id below when run without a fleet caller.
@@ -774,7 +778,13 @@ async function runSubAgentInner(
       orchestrator: params.orchestrator === true,
     });
     const skillDirs = [...(params.skillDirs ?? [])];
-    const skillSnapshot = await discoverSkills(params.cwd, skillDirs);
+    // CL-9010: reuse the dispatcher's catalog when the lane shares its cwd;
+    // otherwise fall back to the cached discovery (same-cwd repeat spawns
+    // skip the rescan). Copies keep one worker from mutating another's list.
+    const skillSnapshot =
+      params.skills !== undefined
+        ? [...params.skills]
+        : await discoverSkillsCached(params.cwd, skillDirs);
     tools = [
       ...tools,
       createSkillSearchTool({
@@ -975,6 +985,9 @@ async function runSubAgentInner(
           ? { secretGuardExtraDeniedPaths: nd.secretGuardExtraDeniedPaths }
           : {}),
         ...(nd.skillDirs !== undefined ? { skillDirs: nd.skillDirs } : {}),
+        // CL-9010: nested shared-cwd lanes reuse this worker's catalog, which
+        // was discovered (or inherited) for exactly this cwd.
+        skillSnapshot,
         ...(nd.extraToolPlugins !== undefined
           ? { extraToolPlugins: nd.extraToolPlugins }
           : {}),
@@ -1059,7 +1072,9 @@ async function runSubAgentInner(
       getContextDir: () => childContextDir,
     });
 
-    const environment = await gatherEnvironment(params.cwd);
+    // CL-9010: same-cwd spawns within the TTL share the git/top-level
+    // snapshot instead of re-running git per lane.
+    const environment = await gatherEnvironmentCached(params.cwd);
     const attachedSection =
       params.attachedSkills !== undefined && params.attachedSkills.length > 0
         ? await formatAttachedSkillConstraints({

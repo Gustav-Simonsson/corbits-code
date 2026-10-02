@@ -20,6 +20,7 @@ import type { TaskIntent } from "./report.js";
 import type { SubagentTier } from "../agent/directors/types.js";
 import type { ForcedStopReason } from "./stop-policy.js";
 import type { AdmissionQueue } from "./admission.js";
+import type { SkillSummary } from "../extensions/skills.js";
 
 export interface SubAgentProvider {
   providerName: string;
@@ -60,6 +61,13 @@ export interface SubAgentSandboxDeps {
    * Workers resolve attached/optional skill bodies through these dirs.
    */
   skillDirs?: readonly string[];
+  /**
+   * CL-9010: the dispatcher's already-discovered skill catalog. A worker
+   * whose lane cwd matches the discovery cwd reuses it instead of
+   * rescanning; run.ts falls back to the cached discovery when unset (or
+   * when the lane runs in an isolated worktree with a different cwd).
+   */
+  skillSnapshot?: readonly SkillSummary[];
 }
 
 export type NestedDispatchDeps = SubAgentSandboxDeps & {
@@ -167,6 +175,19 @@ export type RunSubAgentParams = {
    * resolve the same way they do on the primary.
    */
   skillDirs?: readonly string[];
+  /**
+   * CL-9010: pre-discovered skill catalog for this lane's cwd (the
+   * dispatcher's snapshot when the lane shares its cwd). Skips the worker's
+   * own discovery scan. Unset (or a worktree lane with a different cwd)
+   * falls back to the cached discovery.
+   */
+  skills?: readonly SkillSummary[];
+  /**
+   * CL-9010: skip the worker's pricing-cache seed read. Fleet-spawned
+   * workers reuse the process seed the parent runtime already applied at
+   * boot; the singleton no-op keeps this a pure file-read saving.
+   */
+  skipPricingSeed?: boolean;
   systemPromptRole?: string;
   /** Resolved closed-director id (e.g. "critic") when the worker is one. Structured gate key — prefer over persona-string matching in systemPromptRole. */
   directorId?: string;

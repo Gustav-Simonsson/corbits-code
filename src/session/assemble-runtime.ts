@@ -138,11 +138,17 @@ import {
  * best-effort in long-lived entry points; a one-shot runner passes onError to
  * log and continue instead. Without onError a seed failure rejects, matching
  * the previous TUI boot behavior.
+ *
+ * CL-9010: fleet-spawned workers pass skipPricingSeed — the parent runtime
+ * already applied the process seed at boot (and the inference singleton is
+ * a no-op on repeat resolves), so the worker skips the cache re-read.
  */
 export async function assembleInferenceBase(
   onPricingError?: (err: unknown) => void,
+  opts?: { skipPricingSeed?: boolean },
 ): Promise<Awaited<ReturnType<typeof createInferenceDependencies>>> {
   const inferenceDeps = await createInferenceDependencies();
+  if (opts?.skipPricingSeed === true) return inferenceDeps;
   const seed = seedPricingMetadataFromCache({
     cachePath: defaultPricingCachePath(),
   });

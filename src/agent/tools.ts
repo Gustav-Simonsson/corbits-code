@@ -597,6 +597,10 @@ export async function createAgentToolset(
           ? { secretGuardExtraDeniedPaths }
           : {}),
         ...(skillDirs.length > 0 ? { skillDirs } : {}),
+        // CL-9010: the parent's already-discovered catalog. Shared-cwd lanes
+        // reuse it instead of rescanning; worktree lanes (different cwd)
+        // ignore it and rediscover for their own directory.
+        skillSnapshot: skills,
         ...(extraToolPlugins.length > 0 ? { extraToolPlugins } : {}),
         cwd,
         getWorkdirBase: sa.getWorkdirBase,
