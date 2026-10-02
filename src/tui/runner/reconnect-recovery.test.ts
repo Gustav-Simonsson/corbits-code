@@ -197,6 +197,34 @@ describe("reconnect recovery selection", () => {
     expect(delivered).toHaveLength(1);
   });
 
+  test("does not replay when the accepted generation becomes stale", () => {
+    const state = createReconnectRecoveryState();
+    const attempt = state.begin(operatorMessage(), "xai");
+    state.observe(attempt, credentialRetry());
+    state.observe(attempt, credentialFailure("xai/default-2"));
+    const pending = required(state.settle(attempt), "pending recovery");
+
+    let completeReconnect: ((connected: boolean) => void) | undefined;
+    applyReconnectRecoverySelection({
+      state,
+      generation: pending.generation,
+      selectedId: reconnectRecoveryItemId(pending.scope),
+      reconnect: (_scope, onComplete) => {
+        completeReconnect = onComplete;
+      },
+      armContinuation: () => {
+        throw new Error("should not arm");
+      },
+      cancelContinuation: () => undefined,
+      deliverContinuation: () => {
+        throw new Error("should not deliver");
+      },
+    });
+
+    state.begin(operatorMessage(), "anthropic");
+    completeReconnect?.(true);
+  });
+
   test("cancel, failure, and committed attempts never replay", () => {
     for (const connected of [false, true]) {
       const state = createReconnectRecoveryState();

@@ -183,6 +183,9 @@ export function createReconnectRecoveryState() {
         replay: !claimed.committed,
       };
     },
+    isCurrent(generation: number): boolean {
+      return generation === nextGeneration;
+    },
     clear(): void {
       pending = null;
       nextGeneration++;
@@ -208,7 +211,13 @@ export function applyReconnectRecoverySelection(args: {
   const onComplete = (connected: boolean): void => {
     if (completed) return;
     completed = true;
-    if (!connected || !acceptance.replay) return;
+    if (
+      !connected ||
+      !acceptance.replay ||
+      !args.state.isCurrent(acceptance.generation)
+    ) {
+      return;
+    }
     args.armContinuation(acceptance.generation);
     try {
       args.deliverContinuation(
