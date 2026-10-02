@@ -253,6 +253,34 @@ describe("createOAuthProvider", () => {
     expect(await syncValue(provider.tokens())).toBeUndefined();
   });
 
+  test("keeps live tokens when the auth file is unreadable but drops them on delete", async () => {
+    const home = await tempHome();
+    const provider = await createOAuthProvider({
+      serverName: "linear",
+      serverURL: linear.serverURL,
+      redirectUrl: "http://127.0.0.1:1/callback",
+      onAuthURL: () => undefined,
+      home,
+    });
+    await saveClient(provider, clientInfo(1));
+    await provider.saveTokens({ access_token: "tok", token_type: "bearer" });
+    expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
+
+    // A transient stat failure (EACCES here, file still present) must not
+    // discard live credentials — only a real deletion (ENOENT) does.
+    const dir = dirname(authFilePath(linear, home));
+    await chmod(dir, 0o000);
+    try {
+      expect((await syncValue(provider.tokens()))?.access_token).toBe("tok");
+    } finally {
+      await chmod(dir, 0o700);
+    }
+
+    await deleteAuthState(linear, home);
+
+    expect(await syncValue(provider.tokens())).toBeUndefined();
+  });
+
   test("two overlapping logins on different ports both complete without clobbering verifiers", async () => {
     const home = await tempHome();
     const a = await createOAuthProvider({

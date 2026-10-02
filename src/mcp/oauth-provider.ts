@@ -20,6 +20,7 @@ import type {
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   authFilePath,
+  isEnoent,
   tryLoadAuthStateSync,
   updateAuthState,
   type MCPAuthIdentity,
@@ -161,17 +162,24 @@ export async function createOAuthProvider(
   // failed/unreadable file is retried on the next getter call.
   const authPath = authFilePath(identity, home);
   let seenStamp: string | undefined;
+  // True once this provider has committed a disk observation. A transient stat
+  // failure resets the stamp so the next getter retries, but must not erase
+  // the fact that durable state was seen — otherwise a later real deletion
+  // (ENOENT) would look like "never saw the file" and orphan live tokens.
+  let observedDurable = false;
   const refreshDurableFromDisk = (): void => {
     let stamp: string | undefined;
     try {
       const stat = statSync(authPath);
       stamp = `${String(stat.mtimeMs)}:${String(stat.size)}`;
-    } catch {
-      if (seenStamp === undefined) return;
+    } catch (err) {
+      if (!observedDurable) return;
+      seenStamp = undefined;
+      if (!isEnoent(err)) return;
       // The auth file is gone (server removed, logged out elsewhere). Hold no
       // orphaned credentials: drop the in-memory tokens too. A later sibling
       // save is adopted on the next read via the stamp check above.
-      seenStamp = undefined;
+      observedDurable = false;
       delete stored.tokens;
       return;
     }
@@ -179,6 +187,7 @@ export async function createOAuthProvider(
     const next = tryLoadAuthStateSync(identity, home);
     if (next === undefined) return;
     seenStamp = stamp;
+    observedDurable = true;
     const adoptClient = shouldAdoptClient(stored, next, opts.redirectUrl);
     assignTokens(stored, next);
     if (adoptClient) assignClient(stored, next);
