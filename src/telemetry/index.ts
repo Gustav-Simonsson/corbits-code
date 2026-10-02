@@ -63,6 +63,9 @@ export type TelemetryEvent =
   | "summarizer_failure"
   | "crash"
   | "auth_failure"
+  | "auth_success"
+  | "mcp_connect"
+  | "mcp_oauth"
   // PostHog Surveys event name (space included). Intentional operator feedback
   // from /feedback — can ship when ambient product telemetry is off; still
   // blocked by env kill switches. See captureIntentional.
@@ -199,6 +202,18 @@ const EVENT_PROPERTY_ALLOWLIST: Record<TelemetryEvent, readonly string[]> = {
   // Which provider rejected the credentials, not why — the rejection detail is
   // provider-authored text and error_class means a JS constructor name.
   auth_failure: ["auth_provider"],
+  // Which provider accepted the credentials during provider setup (OAuth login
+  // or validated API key), as the same first-party enum auth_failure reports —
+  // never the settings catalog name, which is operator-authored free text.
+  auth_success: ["auth_provider"],
+  // The outcome of one MCP server connection attempt: transport is the
+  // connect-path predicate (http vs stdio), never the server name or URL, and
+  // result is the settled outcome, never the error text.
+  mcp_connect: ["transport", "result"],
+  // The outcome of one MCP browser-OAuth callback wait: completed when the
+  // authorization code arrived, cancelled when the operator abandoned or
+  // denied it, timed out when the wait expired. Carries no server identity.
+  mcp_oauth: ["result"],
   // Intentional /feedback survey response (PostHog custom survey capture shape).
   // Free text is only sent because the operator typed it for that purpose.
   // turn_trace_id links to the last $ai_generation in this session when known.

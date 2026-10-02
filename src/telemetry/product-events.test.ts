@@ -26,6 +26,7 @@ import { unlimitedAdmissionQueue } from "../subagent/admission.js";
 import { createSubAgentSessionStore } from "../subagent/session-store.js";
 import {
   classifyAgentName,
+  classifyAuthProvider,
   classifyErrorClass,
   classifyPermissionKind,
   classifySkillName,
@@ -34,6 +35,7 @@ import {
 import { createTelemetry, NOOP_TELEMETRY, type Telemetry } from "./index.js";
 import {
   buildSubagentEndProperties,
+  captureAuthSuccess,
   captureSkillUsed,
   captureSlashCommand,
   createPluginLoadReporter,
@@ -658,6 +660,48 @@ test("auth_failure names the provider and never ships the rejection message", as
   const body = await wire();
   expect(body).not.toContain("acmecorp");
   expect(body).not.toContain("error_class");
+});
+
+// ---------------------------------------------------------------------------
+// auth_success — the settings catalog name is operator free text, so only the
+// classified enum leaves the process
+// ---------------------------------------------------------------------------
+
+test("auth_success reports the classified provider and never the settings name", async () => {
+  const { telemetry, wire, events } = harness();
+
+  captureAuthSuccess(telemetry, classifyAuthProvider("codex"));
+  captureAuthSuccess(telemetry, classifyAuthProvider("xai"));
+  captureAuthSuccess(telemetry, classifyAuthProvider("anthropic"));
+  // An employer-named settings entry funnels to "other" instead of shipping
+  // the name: the input type is the closed enum, so reaching this branch
+  // means a value nobody classified crossed the boundary.
+  captureAuthSuccess(
+    telemetry,
+    classifyAuthProvider("acmecorp-eng" as "other"),
+  );
+
+  const captured = await events();
+  expect(captured.map((e) => e.event)).toEqual([
+    "auth_success",
+    "auth_success",
+    "auth_success",
+    "auth_success",
+  ]);
+  expect(captured.map((e) => e.properties.auth_provider)).toEqual([
+    "codex",
+    "xai",
+    "anthropic",
+    "other",
+  ]);
+  expect(await wire()).not.toContain("acmecorp");
+});
+
+test("classifyAuthProvider passes the closed enum through", () => {
+  expect(classifyAuthProvider("codex")).toBe("codex");
+  expect(classifyAuthProvider("xai")).toBe("xai");
+  expect(classifyAuthProvider("anthropic")).toBe("anthropic");
+  expect(classifyAuthProvider("other")).toBe("other");
 });
 
 // ---------------------------------------------------------------------------
