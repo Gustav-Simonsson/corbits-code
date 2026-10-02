@@ -319,11 +319,26 @@ export interface SessionChatPromptArgs {
   // Session-start snapshot from createAgentToolset. When provided, skip
   // rediscovery so the prompt listing and skill_search share one catalog.
   skills?: readonly SkillSummary[];
+  // Configured MCP server names to list in the env block so the model
+  // knows to tool_search for them. Omitted or empty = no MCP line.
+  mcpServerNames?: readonly string[];
 }
 
 export interface SessionChatPrompt {
   systemPrompt: string;
   skills: SkillSummary[];
+}
+
+function uniqueMcpServerNames(names: readonly string[] | undefined): string[] {
+  if (names === undefined || names.length === 0) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of names) {
+    if (name.length === 0 || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
 }
 
 /** Load AGENTS.md / SYSTEM.md / env / skills and build the main chat system prompt. */
@@ -343,6 +358,11 @@ export async function loadSessionChatPrompt(
     ...(args.systemPromptExtensions ?? []),
     ...overrides.append,
   ];
+  const mcpServerNames = uniqueMcpServerNames(args.mcpServerNames);
+  const env =
+    mcpServerNames.length > 0
+      ? { ...environment, mcpServers: mcpServerNames }
+      : environment;
   // Family residual on the primary prompt (CL-8310): resolved from the model
   // family policy as an orchestrator — primaries dispatch rather than doing
   // the work directly, so grok/claude primaries stay untouched (their rows
@@ -359,7 +379,7 @@ export async function loadSessionChatPrompt(
   return {
     systemPrompt: buildChatSystemPrompt(
       extensions.length > 0 ? extensions : undefined,
-      environment,
+      env,
       overrides.base,
       skills,
       args.sessionMode,

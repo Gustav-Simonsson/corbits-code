@@ -55,8 +55,8 @@ export function buildChatRole(
 // blocks, what loads on demand, and the harness-specific tools. Everything a
 // frontier model already knows about being a coding agent is deliberately omitted.
 // `dynamicTools` controls the tool-loading fact: the main chat agent starts with
-// core tools plus the advertised catalog (including skill_search) and loads MCP
-// and other unadvertised tools via tool_search, whereas a sub-agent is
+// core tools plus the advertised catalog and finds MCP and other unadvertised
+// tools via tool_search, whereas a sub-agent is
 // handed its full toolset upfront and has no tool_search — telling it otherwise
 // wastes turns on a tool that does not exist.
 export function buildHarnessFacts(
@@ -95,7 +95,7 @@ export function buildHarnessFacts(
     "- Attached images are native multimodal input; inspect them directly unless file-level forensics are requested.",
     ...(dynamicTools
       ? [
-          "- Core tools plus the advertised catalog (including skill_search) are resident. Use tool_search to load extra capabilities from plugins or integrations when needed.",
+          "- Core tools plus the advertised catalog are resident. Use tool_search to find MCP/plugin tools; the top two cards include the input schema. Call a listed name and it joins the tool list — unused matches stay off it.",
           "- Use search_agents before dispatching named specialists or teams (ids and descriptions by default; include_body=true for the loaded system prompt).",
           "- The user may send follow-up messages while workers run; they are queued. Enter delivers at the next parent tool.boundary; Alt+Enter on session-idle. A long parent tool holds that boundary. Update your plan, spawn or adjust workers, and keep the operator informed.",
         ]
@@ -163,7 +163,7 @@ const GUIDELINE_SUB_BLOCKS: Record<
     ...(ctx.subAgent
       ? []
       : [
-          "- tool_search before assuming a plugin or MCP tool exists; skill_search when choosing among listed skills, use_skill to load a body.",
+          "- tool_search before assuming a plugin or MCP tool exists (top cards include the schema; call a listed name). use_skill to load a skill body.",
         ]),
   ],
   askVsProceed: (ctx) => [
@@ -327,6 +327,11 @@ export function buildEnvironmentContext(env: EnvironmentInfo): string {
     if (env.gitStatusSummary) lines.push(env.gitStatusSummary);
   }
   if (env.topLevel) lines.push(`Top level: ${env.topLevel}`);
+  if (env.mcpServers !== undefined && env.mcpServers.length > 0) {
+    lines.push(
+      `MCP: ${env.mcpServers.join(", ")} — tool_search finds their tools (top hits include schema); call a listed name to use it.`,
+    );
+  }
   lines.push(`Memory file: ${env.cwd}/${SETTINGS_DIR_NAME}/MEMORY.md`);
   lines.push("</env>");
   return lines.join("\n");

@@ -846,6 +846,11 @@ export async function runExec(config: Config): Promise<ExecResult> {
           skills: agentToolset.skills,
           providerName: config.providerName,
           model: config.model,
+          ...(config.mcpServers !== undefined
+            ? {
+                mcpServerNames: config.mcpServers.map((server) => server.name),
+              }
+            : {}),
         })
       ).systemPrompt;
 

@@ -16,6 +16,8 @@ export interface EnvironmentInfo {
   gitDirtyCount?: number;
   gitStatusSummary?: string;
   topLevel?: string;
+  /** Configured MCP server names for this session, when any are present. */
+  mcpServers?: readonly string[];
 }
 
 const GIT_STATUS_LINES = 12;
