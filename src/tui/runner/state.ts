@@ -250,9 +250,9 @@ export interface RunnerState {
   // On during the first-run hold.
   liveTelemetryIntent: boolean;
   liveShowPromptCost: boolean;
-  // The theme pin the settings surface cycles (auto/dark/light). The winning
-  // palette itself stays computed at startup; this only records the pin so the
-  // row reads the choice back before the next launch applies it.
+  // The theme pin the settings surface cycles (auto/dark/light). Cycling it
+  // live-applies the winning palette the same way startup does; this only
+  // records the pin so the row reads the choice back.
   liveTheme: ThemeSetting;
   // The permissions surface addresses grants by their position in the last
   // listing, so revoke resolves against the same snapshot the operator saw.

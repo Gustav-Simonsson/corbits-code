@@ -44,6 +44,8 @@ import { isOpenCodeGoProvider } from "../../../packages/opencode-go/src/index.js
 import { isZenProvider } from "../../../packages/zen/src/index.js";
 import { applyLiveModelSwitch } from "../../session/live-model-switch.js";
 import type { ThemeSetting } from "../theme-detect.js";
+import { applyStartupTheme } from "../theme-startup.js";
+import type { ThemeName } from "../theme.js";
 import { applyFocus } from "../shell/chrome.js";
 import { setShellInputSuspended } from "../shell/prompt.js";
 import { warningsForPluginEntry } from "../../plugins/diagnostics.js";
@@ -634,6 +636,23 @@ function createHooksSurface(
   };
 }
 
+/**
+ * Live-apply a theme pin: resolve it exactly as startup does (explicit pins
+ * win, `auto` re-detects) and swap the shared `UI` binding, then repaint.
+ * The swap is synchronous — an instant rebinding, never an animated
+ * transition. Returns the resolved palette name so callers can report the
+ * outcome the pin settled on. Exported for tests; the settings surface is
+ * the only caller.
+ */
+export function applyThemePinLive(
+  value: ThemeSetting,
+  repaint: () => void,
+): ThemeName {
+  const applied = applyStartupTheme(value);
+  repaint();
+  return applied;
+}
+
 function createSettingsSurface(
   state: RunnerState,
   services: RunnerServices,
@@ -679,6 +698,11 @@ function createSettingsSurface(
     },
     setTheme: (value: ThemeSetting) => {
       state.liveTheme = value;
+      // The pin used to record-and-persist only, leaving the old palette on
+      // screen until relaunch. Resolve it the same way startup does and paint
+      // now: the swap is an instant rebinding of the shared UI object, never
+      // an animated transition.
+      applyThemePinLive(value, () => hostOf(state).refreshCostContext());
       void persistGlobalSettings("theme", (base) => ({
         ...base,
         theme: value,

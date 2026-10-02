@@ -509,7 +509,7 @@ function settingsCycleRows(
       describe: {
         what: "which terminal palette the shell paints with.",
         impact:
-          "applies on the next launch — auto follows the terminal and OS appearance; dark or light pins the palette instead.",
+          "applies immediately — auto follows the terminal and OS appearance; dark or light pins the palette instead.",
       },
       cycle: (direction) =>
         settings.setTheme(stepTheme(snapshot.theme, direction)),

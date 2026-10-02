@@ -114,18 +114,27 @@ export const corbitsDark: Theme = {
  * emphasis level. Standing caution moves to a muted plum: a bronze warning
  * collapses into the machine ramp on cream, while red or orange would spend
  * the failure/action hues.
+ *
+ * The warm roles separate by lightness first, hue second. Action is the
+ * darkest warm (~10.5:1) and the most saturated, so the decision marker never
+ * shares a step with chrome. The dim tier (actionDim, inFlight) sits near
+ * ~6.4-7:1 and the bright tier (inFlightBright, heading) at ~4.5:1; each
+ * intra-ramp step spans >=1.5:1 so each ramp still reads as a ramp.
+ * Same-tier collisions across ramps are carried by hue and saturation:
+ * actionDim stays orange against the olive machine, and the gold heading
+ * out-saturates the tan machine-bright.
  */
 export const corbitsLight: Theme = {
   name: "corbits-light",
   ground: BRAND.canvasCream,
   text: "#221d18",
-  textDim: "#6b5f50",
-  textFaint: "#74695b",
-  action: "#8f4f16",
-  actionDim: "#9b4f10",
-  inFlight: "#6f5427",
-  inFlightBright: "#7a5a22",
-  heading: "#7c4f24",
+  textDim: "#57493d",
+  textFaint: "#746658",
+  action: "#55270c",
+  actionDim: "#7a4824",
+  inFlight: "#564e38",
+  inFlightBright: "#7d6836",
+  heading: "#856619",
   done: "#3f6b3a",
   warning: "#655275",
   error: "#b03a30",

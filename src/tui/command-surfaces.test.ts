@@ -239,9 +239,25 @@ describe("settings surface", () => {
       expect(snapshot().theme).toBe("dark");
       expect(shell.overlayItems.some((l) => l.includes("‹ dark ›"))).toBe(true);
 
+      cycleOverlaySelection(shell, 1);
+      await flushSurface();
+      expect(calls.theme).toEqual(["dark", "light"]);
+      expect(snapshot().theme).toBe("light");
+      expect(shell.overlayItems.some((l) => l.includes("‹ light ›"))).toBe(
+        true,
+      );
+
+      // Wraps around: past light comes auto again.
+      cycleOverlaySelection(shell, 1);
+      await flushSurface();
+      expect(calls.theme).toEqual(["dark", "light", "auto"]);
+      expect(snapshot().theme).toBe("auto");
+
+      // And stepping back from auto wraps the other way, to light.
       cycleOverlaySelection(shell, -1);
       await flushSurface();
-      expect(calls.theme).toEqual(["dark", "auto"]);
+      expect(calls.theme).toEqual(["dark", "light", "auto", "light"]);
+      expect(snapshot().theme).toBe("light");
     });
   });
 
