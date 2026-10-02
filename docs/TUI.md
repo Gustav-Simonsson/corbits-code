@@ -725,8 +725,9 @@ follow-ups wait one more turn. Occupancy wakes consume mailbox reports only
 after send settles as accepted; a failed or uncertain send idles the parent
 so a later flush can retry. Mailbox mail is a Summary + Blockers digest
 (Findings when Summary is empty) with a blob pointer named for `read_file`.
-A failed blob write inlines a truncated report. Fleet-dry continuation lists
-already-collected IDs as id/status/description only. The mail and that fleet-dry continuation
+A failed blob write inlines a truncated report. Fleet-dry continuation uses
+the same digest for newly collected terminals and lists already-collected IDs
+as id/status/description only. The mail and that fleet-dry continuation
 are runtime-to-agent traffic — the fleet board owns worker status — so
 neither paints a transcript row, and neither rehydrates as one.
 
