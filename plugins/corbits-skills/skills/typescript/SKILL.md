@@ -581,17 +581,15 @@ Do not write tests that merely verify functionality provided by external librari
 ### Test Structure
 
 ```typescript
-import t from "tap";
+import { expect, test } from "bun:test";
 
-await t.test("descriptiveTestName", async (t) => {
+test("descriptiveTestName", () => {
   // Setup
   const cache = new Cache({ capacity: 3 });
 
   // Assertions
-  t.equal(cache.size, 0);
-  t.matchOnly(cache.get("key"), undefined);
-
-  t.end();
+  expect(cache.size).toBe(0);
+  expect(cache.get("key")).toBeUndefined();
 });
 ```
 
@@ -609,10 +607,10 @@ const cache = new Cache({
 });
 
 theTime += 500;
-t.matchOnly(cache.get("key"), 42); // Still valid
+expect(cache.get("key")).toBe(42); // Still valid
 
 theTime += 1000;
-t.matchOnly(cache.get("key"), undefined); // Expired
+expect(cache.get("key")).toBeUndefined(); // Expired
 ```
 
 ## Documentation
