@@ -20,6 +20,17 @@ export function canonicalToolName(requested: string): string {
   return engineToolName(baseToolName(requested));
 }
 
+// Canonical comparison for tool names arriving on the wire. Either side may
+// be an engine id, a profile wire name (read/bash/…), a hidden alias
+// (shell/update_plan/wait), or a default./doubled prefixed form — both sides
+// resolve through canonicalToolName first, so a rename or per-family
+// projection only touches the alias tables, never the callsites. Case
+// handling matches engineToolName (alias lookup falls back to lowercase;
+// unknown names compare verbatim).
+export function isSameTool(a: string, b: string): boolean {
+  return canonicalToolName(a) === canonicalToolName(b);
+}
+
 // Grant coverage across the alias→engine collapse. Comparisons run in native
 // key space (both sides resolve onto the engine id first); a raw alias name is
 // never compared against a native id. Pure renames

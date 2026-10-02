@@ -1,4 +1,4 @@
-import { canonicalToolName } from "./canonical-tool-name.js";
+import { isSameTool } from "./canonical-tool-name.js";
 import {
   DefaultDirector,
   type ExtendedInferenceOptions,
@@ -447,7 +447,7 @@ function applyManageTasksToolCall(
   tasks: Task[],
   block: { name: string; arguments: unknown },
 ): Task[] | null {
-  if (canonicalToolName(block.name) !== "manage_tasks") return null;
+  if (!isSameTool(block.name, "manage_tasks")) return null;
   const taskArgs = parseManageTasksArgs(block.arguments);
   return taskArgs !== null ? applyManageTasks(tasks, taskArgs) : null;
 }
@@ -1174,8 +1174,7 @@ class ChatDirectorImpl extends DefaultDirector {
       }
       for (const block of event.turn.content) {
         if (block.type !== "tool_call") continue;
-        const engineName = canonicalToolName(block.name);
-        if (engineName === "manage_tasks") {
+        if (isSameTool(block.name, "manage_tasks")) {
           const next = applyManageTasksToolCall(this.tasks, block);
           if (next !== null) {
             this.tasks = next;
@@ -1185,18 +1184,21 @@ class ChatDirectorImpl extends DefaultDirector {
               }),
             );
           }
-        } else if (engineName === "read_file" || engineName === "edit_file") {
+        } else if (
+          isSameTool(block.name, "read_file") ||
+          isSameTool(block.name, "edit_file")
+        ) {
           const pathResult = PathArgSchema(block.arguments);
           const path = pathResult instanceof type.errors ? "" : pathResult.path;
           if (isCodeFile(path)) this.lspTriggerCalls.add(block.id);
         }
-        if (block.name === "submit_output") {
+        if (isSameTool(block.name, "submit_output")) {
           this.workflowCalls.set(block.id, {
             name: block.name,
             args: block.arguments,
           });
         }
-        if (engineName === "ask_operator") {
+        if (isSameTool(block.name, "ask_operator")) {
           this.askOperatorCalls.add(block.id);
         }
       }

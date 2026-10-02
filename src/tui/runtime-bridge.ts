@@ -6,7 +6,7 @@
  * later waves can bind real agent APIs). Not the production CLI entry.
  */
 
-import { canonicalToolName } from "../agent/canonical-tool-name.js";
+import { canonicalToolName, isSameTool } from "../agent/canonical-tool-name.js";
 import {
   cancelItem,
   createSessionQueue,
@@ -1009,7 +1009,7 @@ function applyToolCall(
   raw: Extract<BridgeInboundEvent, { type: "tool_call" }>,
 ): void {
   const event = { ...raw, name: canonicalToolName(raw.name) };
-  if (event.name === MANAGE_TASKS_TOOL_NAME) {
+  if (isSameTool(raw.name, MANAGE_TASKS_TOOL_NAME)) {
     // Remembered so the matching result is dropped too — suppressing only the
     // call would leave its result to land as an unpaired row. Checklist lives
     // on the task panel; spawn_agent dispatches paint live transcript rows instead.
@@ -1043,7 +1043,10 @@ function applyToolCall(
       if (bag.turn.blockedGateCount > 0) bag.gatedToolCalls.add(event.callId);
     }
   }
-  if (event.callId !== undefined && event.name === SPAWN_AGENT_TOOL_NAME) {
+  if (
+    event.callId !== undefined &&
+    isSameTool(raw.name, SPAWN_AGENT_TOOL_NAME)
+  ) {
     bag.taskCallIds.add(event.callId);
     bag.spawnProgressRows.set(event.callId, index);
   }
@@ -1084,7 +1087,7 @@ function applyToolResult(
     // spawn_agent's immediate running JSON is not the end of the worker —
     // keep the row in taskCallIds / spawnProgressRows until the session
     // leaves the running set (see syncAgentProgress).
-    if (event.name !== SPAWN_AGENT_TOOL_NAME) {
+    if (!isSameTool(raw.name, SPAWN_AGENT_TOOL_NAME)) {
       bag.taskCallIds.delete(event.callId);
       bag.spawnProgressRows.delete(event.callId);
     }
