@@ -8,7 +8,7 @@
         "@corbits/codex-provider": "0.1.1",
         "@corbits/oauth-core": "0.2.0",
         "@corbits/openai-responses": "0.2.1",
-        "@corbits/xai-provider": "0.1.1",
+        "@corbits/xai-provider": "0.1.2",
         "@intx/agent": "workspace:*",
         "@intx/authz": "workspace:*",
         "@intx/crypto": "0.3.0",
@@ -257,7 +257,7 @@
 
     "@corbits/workflows-stub": ["@corbits/workflows-stub@workspace:workflows/_stub"],
 
-    "@corbits/xai-provider": ["@corbits/xai-provider@0.1.1", "", { "dependencies": { "arktype": "^2.2.3" }, "peerDependencies": { "@corbits/oauth-core": "^0.2.0", "@corbits/openai-responses": "^0.2.0", "@intx/inference": "^0.4.0", "@intx/types": "^0.4.0" } }, "sha512-VbXdu5M300oQYQnP4Q8F0z6/Rm9kYTnIkBfo9svGlSus4rFRqEOArNhncKgFvu3Nwf9Qgooov3i8OU8gQCo/TQ=="],
+    "@corbits/xai-provider": ["@corbits/xai-provider@0.1.2", "", { "dependencies": { "arktype": "^2.2.3" }, "peerDependencies": { "@corbits/oauth-core": "^0.2.0", "@corbits/openai-responses": "^0.2.0", "@intx/inference": "^0.4.0", "@intx/types": "^0.4.0" } }, "sha512-4gCSLehuE922UG5DeAQLMA3iaq5MzSEgKNuq2Lb4aJqEYsQ85t8rTmu0DXs+T6mHNq2cbCI9eCF4aXuyv420iA=="],
 
     "@gar/promise-retry": ["@gar/promise-retry@1.0.3", "", {}, "sha512-GmzA9ckNokPypTg10pgpeHNQe7ph+iIKKmhKu3Ob9ANkswreCx7R3cKmY781K8QK3AqVL3xVh9A42JvIAbkkSA=="],
 

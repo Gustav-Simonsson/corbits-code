@@ -1,10 +1,9 @@
-import { xaiUserIdFromAccessToken } from "@corbits/xai-provider";
-
 import {
   XAI_CLIENT_IDENTIFIER,
   XAI_CLIENT_VERSION,
   XAI_USER_AGENT,
-} from "./constants.js";
+  xaiUserIdFromAccessToken,
+} from "@corbits/xai-provider";
 
 export function xaiAuthHeadersForToken(token: {
   readonly access: string;
