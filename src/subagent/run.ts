@@ -67,6 +67,7 @@ import {
 } from "./intervention-log.js";
 import { normalizeToolDefinitionsForProvider } from "../agent/tool-schema-normalize.js";
 import { canonicalToolName } from "../agent/canonical-tool-name.js";
+import { isMcpToolName } from "../mcp/tool-name.js";
 import { createApplyPatchTool } from "../agent/apply-patch-tool.js";
 import { createWorktreeRootsProvider } from "../permission/worktree-roots.js";
 import {
@@ -378,19 +379,65 @@ export function coreSubAgentWebTools(
   );
 }
 
-function applyCapabilityFilter(
+/**
+ * Capability allowlist/exclude over the assembled worker tool set, with
+ * on-demand inherited-MCP mounting (CL-9476 follow-up).
+ *
+ * Inherited MCP tools (`mcp__<server>__<tool>`) mount only when the dispatch
+ * requested them. An explicit stamp always counts: a `requiresTools` entry
+ * (the requires_tools gate, validated pre-spawn against the live inherited
+ * set) or an allowlist naming in `capabilities.tools`. Inheritance itself
+ * also counts: names in `inheritedMcpTools` — the live set returned by
+ * `inheritMcpTools` for this worker — mount without an extra stamp when no
+ * narrower constraint applies (no `capabilities`, no `requiresTools`), so
+ * the inherit-by-default contract holds and the worker gate (parent grant)
+ * governs execution. An explicit stamp narrows: with `requiresTools`
+ * present only stamped MCP names mount, even inherited siblings. An
+ * `mcp__*` name outside both sets never mounts. An explicit exclude still
+ * withholds a requested live MCP tool (surfacing downstream as a stale
+ * snapshot, normally pre-empted by the dispatch preflight).
+ */
+export function applyCapabilityFilter(
   tools: AgentTool[],
-  capabilities: CapabilityFilter,
+  capabilities: CapabilityFilter | undefined,
+  requiresTools?: readonly string[] | undefined,
+  inheritedMcpTools?: readonly string[] | undefined,
 ): AgentTool[] {
+  const required = new Set(
+    (requiresTools ?? []).map((name) => canonicalToolName(name)),
+  );
+  const inherited = new Set(
+    (inheritedMcpTools ?? []).map((name) => canonicalToolName(name)),
+  );
+  if (capabilities === undefined) {
+    if (required.size === 0) {
+      return tools.filter((t) => {
+        const name = canonicalToolName(t.definition.name);
+        if (!isMcpToolName(name)) return true;
+        return inherited.has(name);
+      });
+    }
+    return tools.filter((t) => {
+      const name = canonicalToolName(t.definition.name);
+      if (isMcpToolName(name)) return required.has(name);
+      return true;
+    });
+  }
   const engines = new Set(
     capabilities.tools.map((name) => canonicalToolName(name)),
   );
   if (capabilities.mode === "exclude") {
-    return tools.filter(
-      (t) => !engines.has(canonicalToolName(t.definition.name)),
-    );
+    return tools.filter((t) => {
+      const name = canonicalToolName(t.definition.name);
+      if (isMcpToolName(name)) return required.has(name) && !engines.has(name);
+      return !engines.has(name);
+    });
   }
-  return tools.filter((t) => engines.has(canonicalToolName(t.definition.name)));
+  return tools.filter((t) => {
+    const name = canonicalToolName(t.definition.name);
+    if (isMcpToolName(name)) return required.has(name) || engines.has(name);
+    return engines.has(name);
+  });
 }
 
 export interface SubAgentRunController {
@@ -801,9 +848,14 @@ async function runSubAgentInner(
       ),
     ];
 
-    if (params.capabilities !== undefined) {
-      tools = applyCapabilityFilter(tools, params.capabilities);
-    }
+    tools = applyCapabilityFilter(
+      tools,
+      params.capabilities,
+      params.requiresTools,
+      inherited
+        .map((tool) => canonicalToolName(tool.definition.name))
+        .filter((name) => isMcpToolName(name)),
+    );
     if (
       toolProfileForModel(params.provider) === "gpt" &&
       tools.some((t) =>
