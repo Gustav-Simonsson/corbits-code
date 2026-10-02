@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPosixTools } from "@intx/tools-posix";
@@ -10,6 +10,7 @@ import { loadProjectApprovals } from "../permission/store.js";
 import {
   secretGuardPlugin,
   isSensitivePath,
+  isSensitiveShellToken,
   commandReferencesSensitivePath,
 } from "./secret-guard-plugin.js";
 
@@ -287,6 +288,14 @@ describe("commandReferencesSensitivePath", () => {
     "cat release.keystore",
     "cat server.ppk",
     "cat service-account.json",
+    // Dollar-prefixed home tokens resolve before matching (CL-8999): the
+    // shell expands these to the operator's home at runtime, so they must
+    // ask exactly like their literal forms.
+    "cat $HOME/.ssh/id_rsa",
+    "cat $HOME/.env",
+    "cat ${HOME}/.aws/credentials",
+    // Literal tilde keeps asking (unchanged behavior, pinned here).
+    "cat ~/.ssh/id_rsa",
   ];
   test("flags every command touching a credential path", () => {
     expect(
@@ -308,11 +317,48 @@ describe("commandReferencesSensitivePath", () => {
     "sed --f=.envrc input.txt",
     "grep --fil=.envrc needle",
     "bun test",
+    // A bare variable with no path shape never names a file (CL-8999).
+    "echo $HOME",
+    "cat $HOMEPATH",
   ];
   test("allows every benign command", () => {
     expect(
       allowed.filter((c) => commandReferencesSensitivePath(c) !== undefined),
     ).toEqual([]);
+  });
+});
+
+describe("dollar-prefixed secret paths", () => {
+  test("$HOME-prefixed symlink into a secret file asks like the literal form", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cl8999-dollar-"));
+    try {
+      await writeFile(join(dir, ".env"), "SECRET=x\n");
+      await symlink(join(dir, ".env"), join(dir, "mylink"));
+      const savedHome = process.env.HOME;
+      process.env.HOME = dir;
+      try {
+        expect(isSensitiveShellToken("mylink", dir)).toBe(true);
+        expect(isSensitiveShellToken("$HOME/mylink", dir)).toBe(true);
+        expect(isSensitiveShellToken("${HOME}/mylink", dir)).toBe(true);
+        expect(
+          commandReferencesSensitivePath("cat $HOME/mylink", dir),
+        ).not.toBeUndefined();
+      } finally {
+        if (savedHome === undefined) delete process.env.HOME;
+        else process.env.HOME = savedHome;
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("path-shaped tokens under unknown variables fail closed to ask", () => {
+    expect(isSensitiveShellToken("$BASE/mylink")).toBe(true);
+    expect(
+      commandReferencesSensitivePath("cat $BASE/mylink"),
+    ).not.toBeUndefined();
+    expect(isSensitiveShellToken("$HOME")).toBe(false);
+    expect(commandReferencesSensitivePath("echo $HOME")).toBeUndefined();
   });
 });
 

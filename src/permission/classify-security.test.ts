@@ -43,6 +43,9 @@ describe("isAutoAllowedShellCall — sensitive-path arguments", () => {
     ["cat .ssh/known_hosts", false],
     ["cat .netrc", false],
     ["cat .git-credentials", false],
+    ["cat $HOME/.ssh/id_rsa", false],
+    ["cat $HOME/.env", false],
+    ["cat ${HOME}/.aws/credentials", false],
     ["env FILE=.envrc sh -c 'cat \"$FILE\"'", false],
     ["sed -Enf.flaskenv input", false],
     ["sed --fil=.envrc input.txt", false],
@@ -288,6 +291,28 @@ describe("sensitive-path shell commands require approval, not a hard deny", () =
     const rule = autoShellRuleForCall(shellCall("cat .envrc"));
     expect(rule?.name).toBe("sensitive-path");
     expect(rule?.effect).toBe("ask");
+  });
+
+  test("auto mode forces ask for dollar-prefixed home secret paths", () => {
+    for (const command of [
+      "cat $HOME/.ssh/id_rsa",
+      "cat $HOME/.env",
+      "cat ${HOME}/.aws/credentials",
+    ]) {
+      expect(autoShellRuleForCall(shellCall(command))).toMatchObject({
+        name: "sensitive-path",
+        effect: "ask",
+      });
+      expect(isAutoAllowedShellCall(shellCall(command))).toBe(false);
+    }
+  });
+
+  test("auto mode fails closed on path-shaped unknown-variable tokens", () => {
+    expect(autoShellRuleForCall(shellCall("cat $BASE/mylink"))).toMatchObject({
+      name: "sensitive-path",
+      effect: "ask",
+    });
+    expect(isAutoAllowedShellCall(shellCall("cat $BASE/mylink"))).toBe(false);
   });
 
   test("auto mode asks for clustered bash secret reads", () => {

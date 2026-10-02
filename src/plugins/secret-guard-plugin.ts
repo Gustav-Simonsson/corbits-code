@@ -211,6 +211,12 @@ export function createExtraDeniedPathMatcher(
 // symlink the matcher only ever saw as `*`. Perfect shell sandboxing is out
 // of scope; the goal is to force a prompt for the trivial, single-token
 // references that make exfiltration easy. Tool-result secret scrub still redacts credential-shaped output.
+// A leading $HOME/${HOME} or $USER/${USER} expands from the environment
+// before matching, so `$HOME/.ssh/id_rsa` meets the same legs as the literal
+// path; any other path-shaped $-token (`$BASE/mylink`) fails closed to ask
+// because the matcher cannot know what it expands to. A bare `$VAR` with no
+// path shape stays invisible — when the value is a secret path the matcher
+// never sees one token that names it.
 // Programs that only print directory names / metadata — listing a name never
 // dumps file contents. Single owner for this set: the resolve-leg skip below
 // and classify.ts's pure-listing exemption both read it, so a new names-only
@@ -225,6 +231,30 @@ export const PURE_DIRECTORY_LISTING_PROGRAMS = new Set(["ls", "tree"]);
 // pattern, so `cat *.txt` cannot resolve without running the shell — but a
 // glob CAN expand into a symlink at runtime, which stays a stated residual
 // (see the threat model below), not something this filter disproves.
+
+// CL-8999: the shell expands a leading $HOME (or ${HOME}) before opening the
+// path, so expand it here (string-only, from the environment — never shell
+// eval) and let the normal legs judge the result. $USER (or ${USER}) gets the
+// same treatment. Only these two prefixes expand: arbitrary variables stay
+// unexpanded and fail closed to ask as path-shaped tokens below.
+function expandLeadingDollarToken(token: string): string {
+  const home = process.env.HOME;
+  if (home !== undefined && home.length > 0) {
+    if (token === "$HOME" || token === "${HOME}") return home;
+    if (token.startsWith("$HOME/")) return home + token.slice("$HOME".length);
+    if (token.startsWith("${HOME}/"))
+      return home + token.slice("${HOME}".length);
+  }
+  const user = process.env.USER ?? process.env.USERNAME;
+  if (user !== undefined && user.length > 0) {
+    if (token === "$USER" || token === "${USER}") return user;
+    if (token.startsWith("$USER/")) return user + token.slice("$USER".length);
+    if (token.startsWith("${USER}/"))
+      return user + token.slice("${USER}".length);
+  }
+  return token;
+}
+
 function isPathLikeShellToken(token: string): boolean {
   if (
     token.startsWith("-") ||
@@ -303,9 +333,25 @@ export function isSensitiveShellToken(
   isExtraDenied: (value: string) => boolean = () => false,
   dialect: ShellDialect = nativeShellDialect(process.platform),
 ): boolean {
-  const expanded = expandHome(token);
+  const expanded = expandHome(expandLeadingDollarToken(token));
   if (isSensitivePath(expanded, dialect)) return true;
   if (isExtraDenied(expanded)) return true;
+  // CL-8999: a token the shell could still expand at runtime into a path
+  // ($BASE/mylink, or $HOME/mylink with HOME unset) never reaches either leg
+  // below — `$` tokens skip both the path-like and bare filters — so fail
+  // closed to ask when the `$` starts a live variable expansion ($VAR or
+  // ${VAR}) joined to a path separator. Quoted dollars (`'$'.envrc`), command
+  // substitutions (`$(...)`), ANSI-C quotes (`$'...'`), and special parameters
+  // ($?, $$, $1) never match, and neither do ADS streams (`.env.sample::$DATA`,
+  // no separator) or bare `$VAR` tokens with no path shape: a bare variable
+  // can never name a file the shell opens without expanding into something
+  // the matcher sees.
+  if (
+    expanded.includes("$") &&
+    /\$[{]?[A-Za-z_]/.test(expanded) &&
+    (expanded.includes("/") || expanded.includes("\\"))
+  )
+    return true;
   if (!resolveSymlinks) {
     if (!isBareProbeCandidate(expanded)) return false;
     return isExtraDenied(
