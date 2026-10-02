@@ -17,6 +17,9 @@ import {
   isBlockingOAuthScopeCheckResult,
 } from "../../auth/oauth-scope-check.js";
 import type { ProviderSetupSubmit } from "./types.js";
+import { NOOP_TELEMETRY, type Telemetry } from "../../telemetry/index.js";
+import { classifyAuthProvider } from "../../telemetry/classify.js";
+import { captureAuthSuccess } from "../../telemetry/product-events.js";
 
 /**
  * Persist the project-local provider/model selection after a successful
@@ -59,6 +62,7 @@ export function buildProviderSubmitHandler(
     await saveGlobalSettings(settingsPath, next);
     return next;
   },
+  telemetry: Telemetry = NOOP_TELEMETRY,
 ): ProviderSetupSubmit {
   return async (values, setPhase, { skipValidation, preset, oauth }) => {
     const { name, baseURL, apiKey, model } = values;
@@ -108,6 +112,7 @@ export function buildProviderSubmitHandler(
         oauth.providerName,
         selectedModel,
       );
+      captureAuthSuccess(telemetry, classifyAuthProvider(oauth.kind));
       return;
     }
 
@@ -174,6 +179,10 @@ export function buildProviderSubmitHandler(
       localSettingsFile,
       providerName,
       selectedModel,
+    );
+    captureAuthSuccess(
+      telemetry,
+      classifyAuthProvider(preset?.anthropic === true ? "anthropic" : "other"),
     );
   };
 }

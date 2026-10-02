@@ -6,6 +6,7 @@
  */
 
 import type { Settings } from "../../config/settings.js";
+import { getTelemetry } from "../../telemetry/singleton.js";
 import { runProviderSetup } from "./setup.js";
 import type { ProviderSetupConfig } from "./types.js";
 import {
@@ -47,6 +48,7 @@ export async function connectProviderInline(
     input.existing,
     input.localSettingsPath,
     input.persistSettings,
+    getTelemetry(),
   );
 
   const submitted = await runProviderSetup({

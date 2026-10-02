@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import type { OAuthScopeCheckResult } from "../auth/oauth-scope-check.js";
 import { COMMAND_NAME } from "../branding.js";
+import type { Telemetry, TelemetryEvent } from "../telemetry/index.js";
 import { withMockedModule } from "../../testkit/mock-module.js";
 
 // The oauth branch probes real provider scope over the network; stub the
@@ -640,6 +641,132 @@ describe("buildProviderSubmitHandler", () => {
           provider: "codex/work",
           model: "gpt-5",
         });
+      });
+    });
+  });
+
+  describe("auth_success telemetry", () => {
+    function recordingTelemetry(): {
+      telemetry: Telemetry;
+      events: {
+        event: TelemetryEvent;
+        properties: Record<string, unknown> | undefined;
+      }[];
+    } {
+      const events: {
+        event: TelemetryEvent;
+        properties: Record<string, unknown> | undefined;
+      }[] = [];
+      const telemetry: Telemetry = {
+        enabled: true,
+        installationId: "test-installation",
+        capture: (event, properties) => {
+          events.push({ event, properties });
+        },
+        captureIntentional: () => false,
+        flush: async () => undefined,
+        discard: () => undefined,
+      };
+      return { telemetry, events };
+    }
+
+    test("OAuth success reports the OAuth kind, not the settings name", async () => {
+      await withTempDir(async (dir) => {
+        const { telemetry, events } = recordingTelemetry();
+        const submit = buildProviderSubmitHandler(
+          join(dir, "settings.json"),
+          null,
+          localSettingsPath(dir),
+          undefined,
+          telemetry,
+        );
+
+        await submit(
+          {
+            name: "",
+            baseURL: "https://chatgpt.com/backend-api",
+            apiKey: "",
+            model: "gpt-5",
+            oauthProfile: "work",
+          },
+          noopSetPhase,
+          { skipValidation: true, oauth: stagedCodexOAuth() },
+        );
+
+        expect(events).toEqual([
+          { event: "auth_success", properties: { auth_provider: "codex" } },
+        ]);
+      });
+    });
+
+    test("API-key success reports anthropic only for the Anthropic preset", async () => {
+      await withTempDir(async (dir) => {
+        const { telemetry, events } = recordingTelemetry();
+        const submit = buildProviderSubmitHandler(
+          join(dir, "settings.json"),
+          null,
+          localSettingsPath(dir),
+          undefined,
+          telemetry,
+        );
+        const values: ProviderFormValues = {
+          name: "acmecorp-proxy",
+          baseURL: "https://api.acmecorp.example/v1",
+          apiKey: "sk-test-fake",
+          model: "gpt-5",
+          oauthProfile: "",
+        };
+
+        await submit(values, noopSetPhase, {
+          skipValidation: true,
+          preset: {
+            id: "openai",
+            models: ["gpt-5"],
+            anthropic: false,
+            opencodeGo: false,
+          },
+        });
+
+        expect(events).toEqual([
+          { event: "auth_success", properties: { auth_provider: "other" } },
+        ]);
+      });
+    });
+
+    test("failed validation emits no auth_success", async () => {
+      await withTempDir(async (dir) => {
+        const { telemetry, events } = recordingTelemetry();
+        const submit = buildProviderSubmitHandler(
+          join(dir, "settings.json"),
+          null,
+          localSettingsPath(dir),
+          undefined,
+          telemetry,
+        );
+
+        await expect(
+          submit(
+            {
+              name: "openai",
+              baseURL: "https://api.openai.com/v1",
+              apiKey: "",
+              model: "gpt-5",
+              oauthProfile: "",
+            },
+            noopSetPhase,
+            {
+              skipValidation: false,
+              preset: {
+                id: "openai",
+                models: ["gpt-5"],
+                anthropic: false,
+                opencodeGo: false,
+              },
+            },
+          ),
+        ).rejects.toThrow(/api key/i);
+
+        expect(events).toEqual([]);
       });
     });
   });

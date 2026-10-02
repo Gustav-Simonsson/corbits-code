@@ -11,6 +11,7 @@
 // that something unrecognised was used, never what it was called.
 
 import { DIRECTOR_IDS } from "../agent/directors/types.js";
+import { isHttpServer } from "../mcp/is-http-server.js";
 import { isMcpToolName } from "../mcp/tool-name.js";
 
 const CUSTOM = "custom";
@@ -145,4 +146,73 @@ export function classifyErrorClass(error: unknown): string {
   return STANDARD_ERROR_NAMES.has(error.constructor.name)
     ? error.constructor.name
     : CUSTOM;
+}
+
+// First-party provider enum shared by auth_failure and auth_success. The
+// success path classifies structured setup data (the OAuth kind, or the
+// picked preset's protocol flag) — never the settings catalog name, which is
+// operator-authored free text and always buckets to "other".
+export type AuthProvider = "codex" | "xai" | "anthropic" | "other";
+
+export function classifyAuthProvider(value: string): AuthProvider {
+  switch (value) {
+    case "codex":
+      return "codex";
+    case "xai":
+      return "xai";
+    case "anthropic":
+      return "anthropic";
+    default:
+      return "other";
+  }
+}
+
+// MCP connect-path transport. Delegates to the same predicate the trust
+// prompt and connectMCPServer use, so the reported transport is the one that
+// was actually opened — never the server name, URL, or command. Callers pass
+// the full server config; only the routing fields are read.
+export type McpTransport = "http" | "stdio";
+
+export function classifyMcpTransport(config: {
+  type?: "stdio" | "http";
+  url?: string;
+  command?: string;
+}): McpTransport {
+  return isHttpServer(config) ? "http" : "stdio";
+}
+
+// Settled outcome of one MCP server connection attempt. The error text is
+// provider- or OS-authored (paths, URLs, profiles), so only its shape is
+// reported: offered-but-unfinished browser auth, an aborted/timed-out dial,
+// or a plain failure.
+export type McpConnectResult = "ok" | "auth" | "timeout" | "fail";
+
+const CONNECT_TIMEOUT_MESSAGE = /\btimeout\b|\btimed out\b|\babort/i;
+
+export function classifyMcpConnectResult(outcome: {
+  ok: boolean;
+  authPending?: boolean;
+  error?: string;
+}): McpConnectResult {
+  if (outcome.ok) return "ok";
+  if (outcome.authPending === true) return "auth";
+  if (
+    outcome.error !== undefined &&
+    CONNECT_TIMEOUT_MESSAGE.test(outcome.error)
+  )
+    return "timeout";
+  return "fail";
+}
+
+// Outcome of one MCP browser-OAuth callback wait, for the case where no code
+// arrived. A wait that expired is a timeout; an abandoned wait or a provider
+// denial (access_denied and friends) is the operator not completing the flow.
+export type McpOAuthResult = "completed" | "cancelled" | "timeout";
+
+const OAUTH_TIMEOUT_MESSAGE = /\btimed out\b/i;
+
+export function classifyMcpOAuthResult(err: unknown): "cancelled" | "timeout" {
+  if (err instanceof Error && OAUTH_TIMEOUT_MESSAGE.test(err.message))
+    return "timeout";
+  return "cancelled";
 }

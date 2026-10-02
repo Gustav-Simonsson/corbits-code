@@ -6,7 +6,14 @@ import type {
   SubAgentTerminalReason,
 } from "../subagent/types.js";
 import type { Telemetry } from "./index.js";
-import { classifyCommandName, classifySkillName } from "./classify.js";
+import {
+  type AuthProvider,
+  type McpConnectResult,
+  type McpOAuthResult,
+  type McpTransport,
+  classifyCommandName,
+  classifySkillName,
+} from "./classify.js";
 
 /** Emit slash_command with a classified first-party (or `custom`) name. */
 export function captureSlashCommand(
@@ -100,4 +107,39 @@ export function createPluginLoadReporter(): PluginLoadReporter {
     telemetry.capture("plugin_loaded", { origin });
     loadedPluginIdentities.add(identity);
   };
+}
+
+/** Emit auth_success with the classified first-party provider. */
+export function captureAuthSuccess(
+  telemetry: Telemetry,
+  provider: AuthProvider,
+): void {
+  if (!telemetry.enabled) return;
+  telemetry.capture("auth_success", { auth_provider: provider });
+}
+
+export interface CaptureMcpConnectArgs {
+  transport: McpTransport;
+  result: McpConnectResult;
+}
+
+/** Emit mcp_connect with the classified transport and settled outcome. */
+export function captureMcpConnect(
+  telemetry: Telemetry,
+  args: CaptureMcpConnectArgs,
+): void {
+  if (!telemetry.enabled) return;
+  telemetry.capture("mcp_connect", {
+    transport: args.transport,
+    result: args.result,
+  });
+}
+
+/** Emit mcp_oauth with the classified browser-callback outcome. */
+export function captureMcpOAuth(
+  telemetry: Telemetry,
+  args: { result: McpOAuthResult },
+): void {
+  if (!telemetry.enabled) return;
+  telemetry.capture("mcp_oauth", { result: args.result });
 }

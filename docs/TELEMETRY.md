@@ -27,6 +27,9 @@ Each event carries a small set of properties:
 | `summarizer_failure` | The compaction summary call fails after its retry budget is spent                   | `provider`, `model`, `error_kind`, `duration_ms`                                                                                                                                                                                                                                         |
 | `crash`              | A fatal error reaches the process-level handler                                     | `kind`, `error_class`                                                                                                                                                                                                                                                                    |
 | `auth_failure`       | A provider rejects the stored credentials                                           | `auth_provider`                                                                                                                                                                                                                                                                          |
+| `auth_success`       | Provider setup completes (OAuth login or validated API key)                         | `auth_provider`                                                                                                                                                                                                                                                                          |
+| `mcp_connect`        | An MCP server connection attempt settles                                            | `transport`, `result`                                                                                                                                                                                                                                                                    |
+| `mcp_oauth`          | An MCP browser-OAuth callback wait settles                                          | `result`                                                                                                                                                                                                                                                                                 |
 | `survey sent`        | User submits intentional feedback via `/feedback`                                   | `$survey_id`, `$survey_response`, `$survey_questions`, `turn_trace_id`                                                                                                                                                                                                                   |
 
 `compaction` is deliberately silent on the runs where the compactor decides
@@ -106,13 +109,21 @@ on `crash` and nowhere else, so the column means one thing everywhere it is
 recorded.
 
 `auth_provider` is a separate property for that reason: it names which
-provider's sign-in was rejected (`codex`, `xai`, `anthropic`, `other`),
-chosen from a fixed first-party set in `src/tui/chrome-state.ts`. No
-part of the provider's rejection message is sent.
+provider's sign-in was rejected or completed (`codex`, `xai`, `anthropic`,
+`other`), chosen from a fixed first-party set (`auth_failure` classifies in
+`src/tui/chrome-state.ts`, `auth_success` in `src/telemetry/classify.ts`).
+No part of the provider's message is sent. The MCP events follow the same
+shape: `mcp_connect` carries `transport` (the connect path that actually ran,
+`http` or `stdio`) and `result` (the settled outcome, `ok`, `auth`, `timeout`,
+or `fail`), while `mcp_oauth` carries only `result` (`completed`,
+`cancelled`, or `timeout`). Server names, URLs, commands, and error text never
+leave the process.
 
 The mapping is `src/telemetry/classify.ts`, and the tests that feed each
 emission site a deliberately identifying name and assert it reaches no part of
-the payload are in `src/telemetry/product-events.test.ts`.
+the payload are in `src/telemetry/product-events.test.ts` for the TUI-side
+events and `src/mcp/client-telemetry.test.ts` for the MCP connect and OAuth
+events.
 
 ## AI observability events
 

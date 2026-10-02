@@ -14,6 +14,16 @@ import type { ResolvedMCPServerConfig } from "./exa.js";
 import type { McpToolAnnotations } from "./tool-permissions.js";
 import { buildStdioMcpProcessEnv } from "./stdio-env.js";
 import { isHttpServer } from "./is-http-server.js";
+import {
+  classifyMcpConnectResult,
+  classifyMcpOAuthResult,
+  classifyMcpTransport,
+} from "../telemetry/classify.js";
+import {
+  captureMcpConnect,
+  captureMcpOAuth,
+} from "../telemetry/product-events.js";
+import { liveTelemetry } from "../telemetry/singleton.js";
 import { MCP_CLIENT_NAME } from "../branding.js";
 
 export interface MCPTool {
@@ -230,8 +240,22 @@ async function waitForBrowserAuthCode(
     AbortSignal.timeout(browserAuthWaitMs),
   ]);
   try {
-    return await context.callback.waitForCode(deadline);
+    const code = await context.callback.waitForCode(deadline);
+    captureMcpOAuth(liveTelemetry, { result: "completed" });
+    return code;
   } catch (err) {
+    // waitForCode only rejects with "aborted" for both expiries, so the error
+    // text cannot tell a lapsed wait from an abandoned one — the signals can:
+    // a deadline abort with the lifecycle still alive means the wait expired.
+    // Anything else (lifecycle abort, close(), provider denial) is the
+    // operator not completing the flow. The denial text itself is
+    // provider-authored and never leaves the process.
+    captureMcpOAuth(liveTelemetry, {
+      result:
+        !lifecycle.aborted && deadline.aborted
+          ? "timeout"
+          : classifyMcpOAuthResult(err),
+    });
     if (lifecycle.aborted) throw err;
     if (deadline.aborted) throw browserAuthWaitError(context.serverName);
     throw err;
@@ -825,9 +849,18 @@ export async function connectMCPServer(
   config: ResolvedMCPServerConfig,
   options: MCPConnectOptions = {},
 ): Promise<MCPConnectResult> {
-  return isHttpServer(config)
+  const result = await (isHttpServer(config)
     ? connectHttp(config, options)
-    : connectStdio(config, options);
+    : connectStdio(config, options));
+  // The single funnel for every connect path (startup, late add, retry,
+  // backoff redial, web-search): one settled attempt reports one enum-only
+  // outcome. Transport is the connect-path predicate that actually ran, never
+  // the server name, URL, or command; the error text is never attached.
+  captureMcpConnect(liveTelemetry, {
+    transport: classifyMcpTransport(config),
+    result: classifyMcpConnectResult(result),
+  });
+  return result;
 }
 
 export async function connectMCPServers(

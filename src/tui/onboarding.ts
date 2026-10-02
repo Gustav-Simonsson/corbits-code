@@ -11,6 +11,7 @@ import {
   activateHeldTelemetry,
   telemetryFirstRunPending,
 } from "../telemetry/first-run.js";
+import { getTelemetry } from "../telemetry/singleton.js";
 import { runProviderSetup } from "./provider/setup.js";
 import { runWelcome } from "./welcome.js";
 
@@ -52,6 +53,8 @@ export async function runOnboarding(
       settingsPath,
       existing,
       resolveLocalSettingsPath(config.cwd, settingsPath),
+      undefined,
+      getTelemetry(),
     ),
   });
 
