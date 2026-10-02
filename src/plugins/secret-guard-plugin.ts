@@ -7,6 +7,7 @@ import {
 } from "node:path";
 import type { ToolPlugin } from "@intx/tools-posix";
 import {
+  realpathFollowingDangling,
   realpathNearestOr,
   UNRESOLVABLE,
 } from "../permission/path-restriction.js";
@@ -144,7 +145,7 @@ export function isSensitivePathResolved(
 ): boolean {
   if (isSensitivePath(value, dialect)) return true;
   if (!isAbsolute(value)) return false;
-  const real = realpathNearestOr(value);
+  const real = realpathFollowingDangling(value);
   return real !== UNRESOLVABLE && isSensitivePath(real, dialect);
 }
 
@@ -185,7 +186,7 @@ export function createExtraDeniedPathMatcher(
   return (value: string) => {
     if (lexical.has(value.replace(/\\/g, "/"))) return true;
     if (!isAbsolute(value)) return false;
-    const real = realpathNearestOr(value);
+    const real = realpathFollowingDangling(value);
     return real !== UNRESOLVABLE && resolved.has(real.replace(/\\/g, "/"));
   };
 }
