@@ -70,7 +70,6 @@ function dropStaleClientRegistration(
   if (state.tokens !== undefined) return;
   if (redirectUrisInclude(state.clientInformation, redirectUrl)) return;
   delete state.clientInformation;
-  delete state.codeVerifier;
 }
 
 function shouldAdoptClient(
@@ -169,7 +168,11 @@ export async function createOAuthProvider(
       stamp = `${String(stat.mtimeMs)}:${String(stat.size)}`;
     } catch {
       if (seenStamp === undefined) return;
+      // The auth file is gone (server removed, logged out elsewhere). Hold no
+      // orphaned credentials: drop the in-memory tokens too. A later sibling
+      // save is adopted on the next read via the stamp check above.
       seenStamp = undefined;
+      delete stored.tokens;
       return;
     }
     if (stamp === seenStamp) return;
@@ -182,6 +185,11 @@ export async function createOAuthProvider(
   };
 
   let oauthState: string | undefined;
+  // PKCE verifier: instance-local transient memory only, never persisted. The
+  // browser flow starts and finishes inside this provider episode, so the
+  // secret binding them must not be shared through the auth file — a
+  // different-port sibling must neither see nor clobber it.
+  let pkceVerifier: string | undefined;
   let authorizationServerMetadata: AuthorizationServerMetadata | undefined;
   let authorizationServerUrl: string | undefined;
   let resource: URL | undefined;
@@ -228,18 +236,17 @@ export async function createOAuthProvider(
       opts.onAuthURL(opts.serverName, authorizationUrl.toString());
     },
     saveCodeVerifier(codeVerifier: string): Promise<void> {
-      stored.codeVerifier = codeVerifier;
-      return apply((state) => {
-        state.codeVerifier = codeVerifier;
-      });
+      pkceVerifier = codeVerifier;
+      return Promise.resolve();
     },
     codeVerifier(): string {
-      if (stored.codeVerifier === undefined)
+      if (pkceVerifier === undefined)
         throw new Error("No PKCE code verifier saved for this authorization.");
-      return stored.codeVerifier;
+      return pkceVerifier;
     },
     async resetAuthorization(): Promise<void> {
       oauthState = undefined;
+      pkceVerifier = undefined;
       // Snapshot before the disk refresh so a session that never held tokens
       // cannot adopt a sibling's credentials and then delete them.
       const previous = stored.tokens?.access_token;
@@ -248,13 +255,11 @@ export async function createOAuthProvider(
         if (state.tokens?.access_token === previous) {
           delete state.tokens;
         }
-        delete state.codeVerifier;
         // Next browser flow needs a client registered for *this* loopback port.
         if (!redirectUrisInclude(state.clientInformation, opts.redirectUrl)) {
           delete state.clientInformation;
         }
       });
-      delete stored.codeVerifier;
     },
     refreshToken: async (refreshToken: string): Promise<OAuthTokens> => {
       try {
