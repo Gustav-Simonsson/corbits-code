@@ -17,6 +17,12 @@ import { DEFAULT_CLOSE_DEADLINE_MS } from "./dispose.js";
 import { errorMessage } from "../agent/error-message.js";
 import type { FleetMailboxHandle } from "./agent-fleet.js";
 import {
+  fleetDrySpillKey,
+  MAILBOX_DIGEST_SECTION_CHARS,
+  UNSTRUCTURED_DIGEST_CHARS,
+} from "./fleet-dry-drive.js";
+import { parseSubAgentReport } from "./report.js";
+import {
   DEFAULT_MAX_ENTRY_CHARS,
   type AgentLifecycleStatus,
   type SubAgentSessionStore,
@@ -135,6 +141,73 @@ export type InterruptAgentToolDeps = LifecycleToolDeps & {
 export type ResumeAgentToolDeps = LifecycleToolDeps & {
   fleetRecords: FleetMailboxHandle;
 };
+
+/**
+ * Clip a late-send summary the same way digestCollectedReport clips its inline
+ * digest section: structured reports keep up to MAILBOX_DIGEST_SECTION_CHARS,
+ * unstructured (no envelope sections) keep a short teaser — the blob holds
+ * the rest.
+ */
+function clipLateSendSummary(text: string, unstructured: boolean): string {
+  const max = unstructured
+    ? UNSTRUCTURED_DIGEST_CHARS
+    : MAILBOX_DIGEST_SECTION_CHARS;
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Late-send_input redirect per terminal status. Only `completed` delivered a
+ * report (via mailbox mail); `interrupted` never did, and `shutdown` sessions
+ * are gone for good (resumeOne after closeOne fails), so only `completed`
+ * names resume_agent. Shutdown/evicted point at read_agent_trace / a fresh
+ * spawn instead.
+ */
+function lateSendRedirect(
+  target: string,
+  status: AgentLifecycleStatus,
+  gone: boolean,
+  report: string | undefined,
+): string {
+  if (status === "completed" && !gone) {
+    let digest = "";
+    if (report !== undefined && report.length > 0) {
+      const parsed = parseSubAgentReport(report);
+      const unstructured =
+        parsed.findings.length === 0 &&
+        parsed.blockers.length === 0 &&
+        parsed.paths.length === 0;
+      const summary =
+        parsed.summary.length > 0
+          ? clipLateSendSummary(parsed.summary, unstructured)
+          : "";
+      const reportUri = `tool-output:///${fleetDrySpillKey(target, "report")}`;
+      digest =
+        summary.length > 0
+          ? ` Summary: ${summary} report_uri: ${reportUri} — use read_file with that URI (offset/limit supported) to see the rest.`
+          : ` report_uri: ${reportUri} — use read_file with that URI (offset/limit supported) to see the rest.`;
+    }
+    return (
+      " Worker already finished (completed) — summary below; full report via " +
+      "report_uri / mailbox mail; use resume_agent for another turn, do not retry send_input." +
+      digest
+    );
+  }
+  if (status === "interrupted" && !gone) {
+    return (
+      " Worker is interrupted (no report delivered) — " +
+      "use resume_agent for another turn, do not retry send_input."
+    );
+  }
+  if (status === "shutdown" || gone) {
+    return (
+      " Worker is shut down — the session is gone and cannot be resumed; " +
+      "inspect via read_agent_trace or spawn a new worker, " +
+      "do not use resume_agent or retry send_input."
+    );
+  }
+  return "";
+}
 
 function gateTarget(
   deps: LifecycleToolDeps,
@@ -366,7 +439,7 @@ const SendInputArgs = type({
 export const sendInputToolDefinition: ToolDefinition = {
   name: "send_input",
   description:
-    "Message a running worker, or answer its pending ask_director. interrupt:true stops the current turn first and queues message as the next turn.",
+    "Message a running worker only (check list_agents for status) — completed or interrupted workers need resume_agent instead; shutdown workers are gone (see read_agent_trace or spawn anew). Answers a pending ask_director; interrupt:true stops the current turn first and queues message as the next turn.",
   inputSchema: {
     type: "object",
     properties: {
@@ -435,10 +508,21 @@ export function createSendInputTool(deps: LifecycleToolDeps): AgentTool {
       if (!outcome.ok) {
         // CL-8016: name the teardown when one is recorded — after a stop the
         // session is gone, and a bare status would read as "never existed".
+        // Late-send redirect is scoped per terminal status: only `completed`
+        // delivered a report (summary + report_uri below, resume for more);
+        // `interrupted` never delivered one; `shutdown`/evicted sessions are
+        // gone for good, so they point at read_agent_trace / a fresh spawn.
+        const session = deps.sessions.get(target);
+        const redirect = lateSendRedirect(
+          target,
+          outcome.status,
+          session === undefined && outcome.status !== "not_found",
+          session?.report,
+        );
         const hint = outcome.hint !== undefined ? ` ${outcome.hint}` : "";
         return lifecycleResult(
           call.id,
-          `Error: cannot send_input to "${target}" (status: ${outcome.status}).${hint}`,
+          `Error: cannot send_input to "${target}" (status: ${outcome.status}).${hint}${redirect}`,
         );
       }
       // CL-7331: an interrupt-with-followup is transitional, not terminal.
