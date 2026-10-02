@@ -16,8 +16,10 @@ import { armLinkLine, buildLinkLine, paintLinkLine } from "../url-links.js";
 import { findLinks, splitLinkSpans } from "../link-spans.js";
 import { splitWrappedLinkSpans } from "../link-wrap.js";
 import {
-  splitAtSettledHeading,
+  nextStreamMarkdownState,
+  splitAtSettledBlock,
   withholdIncompleteHeading,
+  type StreamMarkdownSnapshot,
 } from "../markdown-parser.js";
 import { diffLineChunks, retextStyledKindRow } from "./row-retext.js";
 import {
@@ -187,6 +189,11 @@ export function retextStreamRow(
   return retextStreamRowBody(node, row, layout);
 }
 
+/** Last painted state per split markdown body, keyed by its column node. A
+ * rebuilt row gets a fresh node, so stale entries collect with the old row;
+ * a retext that finds no entry treats the paint as first and repaints. */
+const splitBodyMemory = new WeakMap<BaseRenderable, StreamMarkdownSnapshot>();
+
 /** The shape-matching rewrite shared by labelled and unlabelled rows. */
 function retextStreamRowBody(
   node: BaseRenderable,
@@ -219,10 +226,10 @@ function retextStreamRowBody(
   gutterNode.width = stringWidth(gutter.content);
   const width = markdownBodyColumns(gutter, layout);
   const content = markdownContent(row);
-  const split = splitAtSettledHeading(content);
+  const split = splitAtSettledBlock(content);
 
-  // No settled heading behind the tail: a lone renderer, same as an unsplit
-  // body. A shape change (a heading just closed, or one just left the window
+  // No settled block behind the tail: a lone renderer, same as an unsplit
+  // body. A shape change (a block just settled, or one just left the window
   // a full rebuild trimmed) falls through to the caller's rebuild.
   if (split === null) {
     if (!(bodyNode instanceof MarkdownRenderable)) return false;
@@ -240,13 +247,26 @@ function retextStreamRowBody(
   ) {
     return false;
   }
+  // Tail-only growth repaints just the live renderer: the frozen text is
+  // already on screen at this width, still settled, behind a pure append.
+  const streaming = row.streaming === true;
+  const transition = nextStreamMarkdownState(
+    splitBodyMemory.get(bodyNode) ?? null,
+    content,
+    split.frozen,
+    width,
+    streaming,
+  );
+  splitBodyMemory.set(bodyNode, transition.state);
   bodyNode.width = width;
   frozenNode.width = width;
-  frozenNode.content = split.frozen;
+  if (transition.paintFrozen) {
+    frozenNode.content = split.frozen;
+    liveNode.marginTop = split.gapRows;
+  }
   liveNode.width = width;
   liveNode.content = split.live;
-  liveNode.streaming = row.streaming === true;
-  liveNode.marginTop = split.gapRows;
+  liveNode.streaming = streaming;
   return true;
 }
 
@@ -444,15 +464,16 @@ function paintPlainRowNode(
 }
 
 /**
- * A markdown row's body. Most rows have no settled heading yet (no heading at
- * all, or the only one is still the open tail), and paint through a single
- * renderer, same as before this fix existed. Once a heading closes, the body
- * becomes a settled `frozen` renderer — everything through that heading,
- * never streaming, never handed new content while the tail keeps growing, so
- * it is never asked to re-highlight once written — stacked above the still
- * `live` one, which carries the row's own streaming flag. Both halves use the
- * library's default block mode, so paragraphs, lists and tables inside either
- * one lay out exactly as a single unsplit body would.
+ * A markdown row's body. Most rows have no settled block yet (no heading at
+ * all, or the only boundary is still the open tail), and paint through a
+ * single renderer, same as before this fix existed. Once a block settles —
+ * a heading with content behind it, a closed fence, a complete table — the
+ * body becomes a settled `frozen` renderer — everything through that
+ * boundary, never streaming, never handed new content while the tail keeps
+ * growing, so it is never asked to re-highlight once written — stacked above
+ * the still `live` one, which carries the row's own streaming flag. Both
+ * halves use the library's default block mode, so paragraphs, lists and
+ * tables inside either one lay out exactly as a single unsplit body would.
  */
 function createMarkdownBody(
   ctx: CliRenderer,
@@ -462,7 +483,7 @@ function createMarkdownBody(
 ): MarkdownRenderable | BoxRenderable {
   const width = markdownBodyColumns(gutter, layout);
   const content = markdownContent(row);
-  const split = splitAtSettledHeading(content);
+  const split = splitAtSettledBlock(content);
   if (split === null) {
     // Native incremental block stability: only the trailing block is unstable.
     return new MarkdownRenderable(ctx, {
@@ -487,6 +508,12 @@ function createMarkdownBody(
       marginTop: split.gapRows,
     }),
   );
+  splitBodyMemory.set(column, {
+    content,
+    frozen: split.frozen,
+    width,
+    streaming: row.streaming === true,
+  });
   return column;
 }
 

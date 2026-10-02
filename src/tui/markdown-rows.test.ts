@@ -17,7 +17,8 @@ import {
   replaceStreamRowAt,
 } from "./shell/chrome";
 import { createAppShell } from "./shell/index";
-import { splitAtSettledHeading } from "./markdown-parser";
+import { attachSessionBridge, createRecordingPort } from "./runtime-bridge";
+import { splitAtSettledBlock, splitAtSettledHeading } from "./markdown-parser";
 import { isMarkdownRow } from "./stream";
 
 const WIDE = { width: 80, height: 24 } as const;
@@ -578,5 +579,231 @@ describe("markdown transcript rows", () => {
     expect(split).not.toBeNull();
     expect(defined(split).frozen).toBe("  ### Title");
     expect(defined(split).live).toBe("body");
+  });
+});
+
+describe("closed-block frozen/live streaming", () => {
+  const FROZEN_HEAD = [
+    "### Title",
+    "",
+    "```bash",
+    "echo hi",
+    "```",
+    "",
+    "| a | b |",
+    "|---|---|",
+    "| 1 | 2 |",
+  ].join("\n");
+
+  function splitNodes(
+    shell: ReturnType<typeof createAppShell>,
+    index: number,
+  ): { frozenNode: MarkdownRenderable; liveNode: MarkdownRenderable } {
+    const row = defined(shell.transcript.getChildren()[index + 1]);
+    expect(row).toBeInstanceOf(BoxRenderable);
+    const [, bodyNode] = (row as BoxRenderable).getChildren();
+    expect(bodyNode).toBeInstanceOf(BoxRenderable);
+    const [frozenNode, liveNode] = (bodyNode as BoxRenderable).getChildren();
+    expect(frozenNode).toBeInstanceOf(MarkdownRenderable);
+    expect(liveNode).toBeInstanceOf(MarkdownRenderable);
+    return {
+      frozenNode: frozenNode as MarkdownRenderable,
+      liveNode: liveNode as MarkdownRenderable,
+    };
+  }
+
+  function observeFrozenAssignments(frozenNode: MarkdownRenderable): {
+    count: number;
+    chars: number;
+  } {
+    const calls = { count: 0, chars: 0 };
+    const descriptor = Object.getOwnPropertyDescriptor(
+      MarkdownRenderable.prototype,
+      "content",
+    );
+    expect(descriptor?.set).toBeDefined();
+    Object.defineProperty(frozenNode, "content", {
+      configurable: true,
+      get(this: MarkdownRenderable): string {
+        return defined(descriptor?.get).call(this);
+      },
+      set(this: MarkdownRenderable, value: string) {
+        calls.count += 1;
+        calls.chars += value.length;
+        defined(descriptor?.set).call(this, value);
+      },
+    });
+    return calls;
+  }
+
+  function settledFrameReady(): (frame: string) => boolean {
+    return (frame) =>
+      frame.includes("Title") &&
+      frame.includes("echo hi") &&
+      frame.includes("tail words here") &&
+      !frame.includes("```");
+  }
+
+  test("tail-only growth across frames never rewrites the frozen node", async () => {
+    await withTestRenderer(async (h) => {
+      const shell = createAppShell(h.renderer, { ...shellOpts, run: "idle" });
+      const bridge = attachSessionBridge(shell, createRecordingPort());
+      try {
+        for (const chunk of [FROZEN_HEAD, "\n\n", "tail"]) {
+          bridge.handle({ type: "assistant.delta", text: chunk });
+        }
+        await h.renderOnce();
+        const index = shell.streamLog.length - 1;
+        const { frozenNode, liveNode } = splitNodes(shell, index);
+        expect(frozenNode.content).toBe(FROZEN_HEAD);
+        expect(liveNode.content).toBe("tail");
+
+        const calls = observeFrozenAssignments(frozenNode);
+        for (let frame = 0; frame < 5; frame += 1) {
+          bridge.handle({ type: "assistant.delta", text: ` ${frame}` });
+          await h.renderOnce();
+        }
+        expect(calls).toEqual({ count: 0, chars: 0 });
+        expect(liveNode.content).toBe("tail 0 1 2 3 4");
+        expect(splitNodes(shell, index).frozenNode).toBe(frozenNode);
+        expect(liveNode.streaming).toBe(true);
+      } finally {
+        bridge.dispose();
+      }
+    }, WIDE);
+  });
+
+  test("a newly settled block repaints the frozen node exactly once", async () => {
+    await withTestRenderer(async (h) => {
+      const shell = createAppShell(h.renderer, shellOpts);
+      appendStreamRow(shell, {
+        role: "assistant",
+        streaming: true,
+        text: `${FROZEN_HEAD}\n\ntail`,
+      });
+      await h.renderOnce();
+      const index = shell.streamLog.length - 1;
+      const { frozenNode, liveNode } = splitNodes(shell, index);
+      expect(frozenNode.content).toBe(FROZEN_HEAD);
+
+      const calls = observeFrozenAssignments(frozenNode);
+      const settled = `${FROZEN_HEAD}\n\n| h1 | h2 |\n|---|---|\n| r1 | r2 |\n\ntail`;
+      replaceStreamRowAt(shell, index, {
+        role: "assistant",
+        streaming: true,
+        text: settled,
+      });
+      await h.renderOnce();
+      expect(calls.count).toBe(1);
+      expect(frozenNode.content).toBe(
+        `${FROZEN_HEAD}\n\n| h1 | h2 |\n|---|---|\n| r1 | r2 |`,
+      );
+      expect(liveNode.content).toBe("tail");
+
+      replaceStreamRowAt(shell, index, {
+        role: "assistant",
+        streaming: true,
+        text: `${settled} more`,
+      });
+      await h.renderOnce();
+      expect(calls.count).toBe(1);
+      expect(liveNode.content).toBe("tail more");
+    }, WIDE);
+  });
+
+  test("a mid-stream edit that is not an append repaints both nodes", async () => {
+    await withTestRenderer(async (h) => {
+      const shell = createAppShell(h.renderer, shellOpts);
+      appendStreamRow(shell, {
+        role: "assistant",
+        streaming: true,
+        text: `${FROZEN_HEAD}\n\ntail\nmore`,
+      });
+      await h.renderOnce();
+      const index = shell.streamLog.length - 1;
+      const { frozenNode, liveNode } = splitNodes(shell, index);
+      const calls = observeFrozenAssignments(frozenNode);
+
+      replaceStreamRowAt(shell, index, {
+        role: "assistant",
+        streaming: true,
+        text: `${FROZEN_HEAD}\n\nmore`,
+      });
+      await h.renderOnce();
+      expect(calls.count).toBeGreaterThanOrEqual(1);
+      expect(frozenNode.content).toBe(FROZEN_HEAD);
+      expect(liveNode.content).toBe("more");
+    }, WIDE);
+  });
+
+  test("losing the split shape rebuilds the row instead of retexting it", async () => {
+    await withTestRenderer(async (h) => {
+      const shell = createAppShell(h.renderer, shellOpts);
+      appendStreamRow(shell, {
+        role: "assistant",
+        streaming: true,
+        text: `${FROZEN_HEAD}\n\ntail`,
+      });
+      await h.renderOnce();
+      const index = shell.streamLog.length - 1;
+      splitNodes(shell, index);
+
+      replaceStreamRowAt(shell, index, {
+        role: "assistant",
+        streaming: true,
+        text: "just plain prose now",
+      });
+      await h.renderOnce();
+      const row = defined(shell.transcript.getChildren()[index + 1]);
+      expect(row).toBeInstanceOf(BoxRenderable);
+      const [, bodyNode] = (row as BoxRenderable).getChildren();
+      expect(bodyNode).toBeInstanceOf(MarkdownRenderable);
+      expect((bodyNode as MarkdownRenderable).content).toBe(
+        "just plain prose now",
+      );
+    }, WIDE);
+  });
+
+  test("incremental streaming settles into the same frame as a one-shot paint", async () => {
+    const full = `${FROZEN_HEAD}\n\ntail words here`;
+    // The footer ticker cycles live activity words by timing, so two shells
+    // can never agree on that one line. Everything above it must match.
+    const withoutFooter = (frame: string): string =>
+      frame
+        .split("\n")
+        .filter((line) => !line.includes("╯"))
+        .join("\n");
+    let incremental = "";
+    await withTestRenderer(async (h) => {
+      const shell = createAppShell(h.renderer, { ...shellOpts, run: "idle" });
+      const bridge = attachSessionBridge(shell, createRecordingPort());
+      try {
+        for (const chunk of full.match(/[\s\S]{1,7}/g) ?? []) {
+          bridge.handle({ type: "assistant.delta", text: chunk });
+          await h.renderOnce();
+        }
+        bridge.handle({ type: "system", text: "done" });
+        incremental = await settle(h, settledFrameReady());
+      } finally {
+        bridge.dispose();
+      }
+    }, WIDE);
+
+    let oneshot = "";
+    await withTestRenderer(async (h) => {
+      const shell = createAppShell(h.renderer, { ...shellOpts, run: "idle" });
+      appendStreamRow(shell, { role: "assistant", text: full });
+      appendStreamRow(shell, { role: "system", text: "done" });
+      oneshot = await settle(h, settledFrameReady());
+    }, WIDE);
+
+    expect(withoutFooter(incremental)).toBe(withoutFooter(oneshot));
+  });
+
+  test("splitAtSettledBlock freezes through closed blocks at the transcript layer", () => {
+    const split = splitAtSettledBlock(`${FROZEN_HEAD}\n\ntail`);
+    expect(defined(split).frozen).toBe(FROZEN_HEAD);
+    expect(defined(split).live).toBe("tail");
+    expect(defined(split).gapRows).toBe(1);
   });
 });

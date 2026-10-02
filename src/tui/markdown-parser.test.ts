@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { defined } from "../../testkit/defined.js";
 import {
   createMemoizedParseMarkdown,
+  nextStreamMarkdownState,
   parseMarkdown,
+  splitAtSettledBlock,
   splitAtSettledHeading,
   withholdIncompleteHeading,
   type StyledSegment,
@@ -565,5 +567,232 @@ describe("splitAtSettledHeading", () => {
 
   test("does not split when the last heading is still the open tail", () => {
     expect(splitAtSettledHeading("# Title")).toBeNull();
+  });
+});
+
+describe("splitAtSettledBlock", () => {
+  test("freezes through the latest settled block (heading, fence, table)", () => {
+    const lines = [
+      "### Title",
+      "",
+      "```bash",
+      "echo hi",
+      "```",
+      "",
+      "| a | b |",
+      "|---|---|",
+      "| 1 | 2 |",
+      "",
+      "tail",
+    ];
+    expect(splitAtSettledBlock(lines.join("\n"))).toEqual({
+      frozen: lines.slice(0, 9).join("\n"),
+      live: "tail",
+      gapRows: 1,
+    });
+  });
+
+  test("freezes a closed fence with prose after the closer", () => {
+    expect(splitAtSettledBlock("```bash\necho hi\n```\n\ntail")).toEqual({
+      frozen: "```bash\necho hi\n```",
+      live: "tail",
+      gapRows: 1,
+    });
+  });
+
+  test("supports tilde fences and indented openers up to three spaces", () => {
+    expect(splitAtSettledBlock("~~~\ncode\n~~~\n\ntail")).toEqual({
+      frozen: "~~~\ncode\n~~~",
+      live: "tail",
+      gapRows: 1,
+    });
+    expect(splitAtSettledBlock("  ```js\ncode\n  ```\n\ntail")).toEqual({
+      frozen: "  ```js\ncode\n  ```",
+      live: "tail",
+      gapRows: 1,
+    });
+  });
+
+  test("a four-space indented fence is not a fence, so earlier text can settle", () => {
+    expect(splitAtSettledBlock("## T\n\n    ```\nx")).toEqual({
+      frozen: "## T",
+      live: "    ```\nx",
+      gapRows: 1,
+    });
+  });
+
+  test("an unclosed fence after settled text still leaves the settled split in place", () => {
+    expect(splitAtSettledBlock("### T\n\n```bash\necho hi")).toEqual({
+      frozen: "### T",
+      live: "```bash\necho hi",
+      gapRows: 1,
+    });
+    expect(splitAtSettledBlock("```bash\necho hi")).toBeNull();
+  });
+
+  test("a closed block at the last line falls back to the earlier split", () => {
+    expect(splitAtSettledBlock("## T\n\n```\ncode\n```")).toEqual({
+      frozen: "## T",
+      live: "```\ncode\n```",
+      gapRows: 1,
+    });
+    expect(splitAtSettledBlock("## T\n\n| h |\n|---|\n| r |")).toEqual({
+      frozen: "## T",
+      live: "| h |\n|---|\n| r |",
+      gapRows: 1,
+    });
+    expect(splitAtSettledBlock("```\ncode\n```")).toBeNull();
+    expect(splitAtSettledBlock("| h |\n|---|\n| r |")).toBeNull();
+  });
+
+  test("freezes through a completed separator table, not just the heading", () => {
+    const lines = [
+      "## T",
+      "",
+      "Name | Age",
+      "--- | ---",
+      "Ada | 36",
+      "",
+      "tail",
+    ];
+    expect(splitAtSettledBlock(lines.join("\n"))).toEqual({
+      frozen: lines.slice(0, 5).join("\n"),
+      live: "tail",
+      gapRows: 1,
+    });
+  });
+
+  test("freezes through a completed borderless table", () => {
+    const lines = [
+      "## T",
+      "",
+      "| h1 | h2 |",
+      "| r1 | r2 |",
+      "| r3 | r4 |",
+      "",
+      "tail",
+    ];
+    expect(splitAtSettledBlock(lines.join("\n"))).toEqual({
+      frozen: lines.slice(0, 5).join("\n"),
+      live: "tail",
+      gapRows: 1,
+    });
+  });
+
+  test("a table that reaches the last line keeps the row live", () => {
+    expect(splitAtSettledBlock("| h |\n|---|\n| r1 |\n| r2")).toBeNull();
+    expect(splitAtSettledBlock("## T\n\n| h |\n|---|\n| r1 |\n| r2")).toEqual({
+      frozen: "## T",
+      live: "| h |\n|---|\n| r1 |\n| r2",
+      gapRows: 1,
+    });
+  });
+
+  test("a table with no separator is not a table", () => {
+    expect(splitAtSettledBlock("a | b\n\ntail")).toBeNull();
+  });
+
+  test("agrees with splitAtSettledHeading on heading-only content", () => {
+    for (const text of ["# Title\nbody", "# Title", "plain"]) {
+      expect(splitAtSettledBlock(text)).toEqual(splitAtSettledHeading(text));
+    }
+  });
+});
+
+describe("nextStreamMarkdownState", () => {
+  const frozen = "### T";
+  const base = {
+    content: `${frozen}\n\ntail`,
+    frozen,
+    width: 100,
+    streaming: true,
+  };
+
+  test("a first paint always repaints", () => {
+    expect(
+      nextStreamMarkdownState(
+        null,
+        base.content,
+        base.frozen,
+        base.width,
+        true,
+      ),
+    ).toEqual({
+      state: base,
+      paintFrozen: true,
+    });
+  });
+
+  test("tail-only growth skips the frozen repaint", () => {
+    const grown = { ...base, content: `${frozen}\n\ntail grows` };
+    const next = nextStreamMarkdownState(
+      base,
+      grown.content,
+      grown.frozen,
+      grown.width,
+      true,
+    );
+    expect(next.paintFrozen).toBe(false);
+    expect(next.state.content).toBe(grown.content);
+  });
+
+  test("a moved boundary repaints the frozen node", () => {
+    const moved = { ...base, frozen: `${frozen}\n\nsettled` };
+    expect(
+      nextStreamMarkdownState(
+        base,
+        base.content,
+        moved.frozen,
+        base.width,
+        true,
+      ).paintFrozen,
+    ).toBe(true);
+  });
+
+  test("width and streaming flips repaint the frozen node", () => {
+    expect(
+      nextStreamMarkdownState(
+        base,
+        base.content,
+        base.frozen,
+        base.width + 1,
+        true,
+      ).paintFrozen,
+    ).toBe(true);
+    expect(
+      nextStreamMarkdownState(
+        base,
+        base.content,
+        base.frozen,
+        base.width,
+        false,
+      ).paintFrozen,
+    ).toBe(true);
+  });
+
+  test("mid-stream edits repaint the frozen node", () => {
+    const edited = `${frozen}\n\nrewritten`;
+    const prev = { ...base, content: `${frozen}\n\ntail` };
+    const next = nextStreamMarkdownState(
+      prev,
+      edited,
+      frozen,
+      base.width,
+      true,
+    );
+    expect(next.paintFrozen).toBe(true);
+    expect(next.state).toBeDefined();
+  });
+
+  test("identical content still skips the frozen repaint", () => {
+    const next = nextStreamMarkdownState(
+      base,
+      base.content,
+      base.frozen,
+      base.width,
+      true,
+    );
+    expect(next.paintFrozen).toBe(false);
+    expect(next.state).toEqual(base);
   });
 });

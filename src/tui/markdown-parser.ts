@@ -854,3 +854,119 @@ export function splitAtSettledHeading(text: string): MarkdownSplit | null {
     gapRows: firstContent > 0 ? 1 : 0,
   };
 }
+
+/**
+ * A markdown body split at the last settled block boundary: a settled ATX
+ * heading line, the closing fence of a completed fenced block, or the last
+ * row of a table the renderer would consume. Returns null when no boundary
+ * has settled yet (or when the only boundary is the last line, leaving no
+ * live tail).
+ *
+ * The walk below mirrors parseMarkdown's dispatch order line for line —
+ * loose fence pairing (`FENCE_OPEN_RE`/`FENCE_CLOSE_RE`), indented-code runs,
+ * then `parseTableBlock`'s start/consume/shape rules — so every recorded
+ * boundary is a block boundary in the one-shot parse, and the frozen prefix
+ * plus the live suffix render the same apart as they do together. An
+ * unclosed fence consumes to the end of the row, so nothing after its opener
+ * can settle. A single non-blank line between a boundary and the live tail
+ * still yields `gapRows: 0`; blank lines collapse to one gap row, as before.
+ */
+export function splitAtSettledBlock(withheld: string): MarkdownSplit | null {
+  const lines = withheld.split("\n");
+  const boundaries = new Set<number>();
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (FENCE_OPEN_RE.test(line)) {
+      let closer = -1;
+      for (let j = i + 1; j < lines.length; j += 1) {
+        if (FENCE_CLOSE_RE.test(lines[j] ?? "")) {
+          closer = j;
+          break;
+        }
+      }
+      if (closer === -1) break;
+      boundaries.add(closer);
+      i = closer + 1;
+      continue;
+    }
+    if (INDENTED_CODE_RE.test(line)) {
+      i += 1;
+      while (i < lines.length && INDENTED_CODE_RE.test(lines[i] ?? "")) i += 1;
+      continue;
+    }
+    if (looksLikeTableRow(line)) {
+      const next = lines[i + 1];
+      const hasSeparator = next !== undefined && isTableSeparator(next);
+      const rawRows: string[][] = [extractTableCells(line)];
+      let consumed = 1;
+      if (hasSeparator) {
+        rawRows.push(extractTableCells(next ?? ""));
+        consumed = 2;
+      }
+      while (i + consumed < lines.length) {
+        const rowLine = lines[i + consumed] ?? "";
+        if (!looksLikeTableRow(rowLine) || isTableSeparator(rowLine)) break;
+        rawRows.push(extractTableCells(rowLine));
+        consumed += 1;
+      }
+      const firstWidth = rawRows[0]?.length ?? 0;
+      const valid =
+        hasSeparator ||
+        (rawRows.length >= 2 &&
+          firstWidth >= 2 &&
+          rawRows.every((row) => row.length === firstWidth));
+      if (valid) {
+        boundaries.add(i + consumed - 1);
+        i += consumed;
+        continue;
+      }
+    }
+    if (ATX_HEADING_LINE_RE.test(line)) boundaries.add(i);
+    i += 1;
+  }
+  const ordered = [...boundaries].sort((a, b) => b - a);
+  for (const boundary of ordered) {
+    if (boundary >= lines.length - 1) continue;
+    const rest = lines.slice(boundary + 1);
+    const firstContent = rest.findIndex((entry) => entry.trim().length > 0);
+    if (firstContent === -1) continue;
+    return {
+      frozen: lines.slice(0, boundary + 1).join("\n"),
+      live: rest.slice(firstContent).join("\n"),
+      gapRows: firstContent > 0 ? 1 : 0,
+    };
+  }
+  return null;
+}
+
+/** Paint state for one streaming markdown row across repaints. */
+export interface StreamMarkdownSnapshot {
+  readonly content: string;
+  readonly frozen: string | null;
+  readonly width: number;
+  readonly streaming: boolean;
+}
+
+/**
+ * Decide whether a streaming markdown repaint must repaint the frozen node.
+ * The same frozen text at the same width, still streaming a pure append,
+ * needs no frozen repaint; a moved boundary, a resize, a streaming-flag
+ * flip, or a non-append edit (rollback, rewrite) repaints it.
+ */
+export function nextStreamMarkdownState(
+  prev: StreamMarkdownSnapshot | null,
+  content: string,
+  frozen: string | null,
+  width: number,
+  streaming: boolean,
+): { state: StreamMarkdownSnapshot; paintFrozen: boolean } {
+  const state: StreamMarkdownSnapshot = { content, frozen, width, streaming };
+  if (prev === null) return { state, paintFrozen: true };
+  const paintFrozen =
+    prev.frozen !== frozen ||
+    prev.width !== width ||
+    prev.streaming !== streaming ||
+    !content.startsWith(prev.content);
+  return { state, paintFrozen };
+}
