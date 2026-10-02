@@ -1,6 +1,6 @@
 ---
 name: pull-request-review
-description: Review a pull request by branch name or URL, using a git worktree
+description: Review a pull request by branch or URL in a git worktree.
 ---
 
 # Pull Request Review

@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Author an agent-proof eng change plan. Does not implement. Does not file tracker issues.
+description: Author an eng change plan. Does not implement or file issues.
 ---
 
 # Plan

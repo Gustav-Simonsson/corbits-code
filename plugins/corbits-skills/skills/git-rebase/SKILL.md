@@ -1,6 +1,6 @@
 ---
 name: git-rebase
-description: Reshape git history with rebase — edit-in-place to fix an earlier commit, squash/fixup, drop, split, reword, or validate every replayed commit. Load whenever you need to change a commit that is not HEAD, or for any branch-history cleanup before push. Covers driving every editor invocation non-interactively so the rebase runs without a human at the keyboard.
+description: Reshape branch history non-interactively with rebase, fixup, squash, drop, split, or reword.
 user-invocable: false
 ---
 

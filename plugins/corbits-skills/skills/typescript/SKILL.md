@@ -1,6 +1,6 @@
 ---
 name: typescript
-description: TypeScript-specific coding conventions and type system patterns. Always load this skill when writing or reviewing TypeScript code.
+description: TypeScript conventions and type patterns. Load when writing TypeScript.
 user-invocable: false
 ---
 

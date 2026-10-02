@@ -1,6 +1,6 @@
 ---
 name: lexicon
-description: Diff director prompts against the agents repo at a pinned commit, report assembled prompt sizes, and file Linear issues for drift
+description: Diff director prompts against the agents repo at a pinned commit and file drift issues.
 argument-hint: "[--pin <commit>] [--file-issues]"
 ---
 

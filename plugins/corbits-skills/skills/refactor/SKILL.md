@@ -1,7 +1,7 @@
 ---
 name: refactor
 argument-hint: <directory>
-description: Examine code, document its design, and collaboratively plan improvements
+description: Document a directory's design and plan improvements with the operator.
 ---
 
 # Refactor

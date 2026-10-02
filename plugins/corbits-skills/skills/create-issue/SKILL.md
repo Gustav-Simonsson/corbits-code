@@ -1,6 +1,6 @@
 ---
 name: create-issue
-description: Create well-structured issues. Linear MCP if available; otherwise ask for GitHub (or another tracker) and remember the preference.
+description: Create a structured issue in Linear, GitHub, or GitLab.
 argument-hint: "[description] [--from-doc]"
 ---
 

@@ -2,7 +2,7 @@
 name: git-worktrees
 user-invocable: false
 disable-model-invocation: true
-description: Create a git worktree from origin/<default-branch> and tear it down. Background library — load via use_skill("git-worktrees"); absent from slash and use_skill listing.
+description: Create and tear down a worktree from origin/<default-branch>. Load via use_skill.
 ---
 
 # git-worktrees

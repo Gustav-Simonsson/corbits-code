@@ -1,6 +1,6 @@
 ---
 name: style
-description: General coding conventions for clean, maintainable code. Always load this skill when writing or reviewing code in any language.
+description: General coding conventions. Load when writing or reviewing code.
 user-invocable: false
 ---
 

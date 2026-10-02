@@ -1,7 +1,7 @@
 ---
 name: interview
 argument-hint: "<topic>[; <context>]"
-description: Conduct an iterative multiple-choice interview using `ask_operator`. Returns the Q&A inline. Use as a utility when a caller needs structured user input on a topic.
+description: Ask the operator batched multiple-choice questions and return the Q&A.
 ---
 
 # Interview
