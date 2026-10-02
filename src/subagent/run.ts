@@ -68,6 +68,7 @@ import {
 import { normalizeToolDefinitionsForProvider } from "../agent/tool-schema-normalize.js";
 import { canonicalToolName } from "../agent/canonical-tool-name.js";
 import { createApplyPatchTool } from "../agent/apply-patch-tool.js";
+import { createWorktreeRootsProvider } from "../permission/worktree-roots.js";
 import {
   checkMountedRequiresTools,
   formatCapabilityUnavailable,
@@ -811,7 +812,16 @@ async function runSubAgentInner(
         ),
       )
     ) {
-      tools = [...tools, createApplyPatchTool(params.cwd)];
+      tools = [
+        ...tools,
+        createApplyPatchTool(params.cwd, {
+          allowOutside: () => permissionGate.getSkipPermissions(),
+          rootsProvider: createWorktreeRootsProvider(params.cwd),
+          ...(params.secretGuardExtraDeniedPaths !== undefined
+            ? { extraDeniedPaths: params.secretGuardExtraDeniedPaths }
+            : {}),
+        }),
+      ];
     }
     hostCommandsMounted = tools.some(
       (tool) => canonicalToolName(tool.definition.name) === "run_shell",

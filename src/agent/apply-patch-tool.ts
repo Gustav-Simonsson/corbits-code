@@ -1,10 +1,16 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { stringTool } from "@intx/agent";
 import type { AgentTool } from "@intx/agent";
 import type { ToolDefinition } from "@intx/types/runtime";
 import { type } from "arktype";
 
+import { resolveWorkspacePath } from "../permission/path-restriction.js";
+import type { RootsProvider } from "../permission/worktree-roots.js";
+import {
+  createExtraDeniedPathMatcher,
+  isSensitivePathResolved,
+} from "../plugins/secret-guard-plugin.js";
 import {
   applyUpdateHunks,
   CodexApplyPatchError,
@@ -31,28 +37,52 @@ type Planned =
   | { kind: "write"; path: string; content: string; label: string }
   | { kind: "remove"; path: string; label: string };
 
-function contained(cwd: string, path: string): string {
+export interface ApplyPatchGuard {
+  allowOutside: () => boolean;
+  rootsProvider: RootsProvider;
+  extraDeniedPaths?: readonly string[];
+}
+
+// apply_patch is mounted outside the posix plugin stack, so it re-enforces the
+// secret-guard denylist and the realpath workspace bound itself. A lexical
+// check alone would let a symlink inside the workspace lead out of it.
+function guardedPath(
+  cwd: string,
+  path: string,
+  guard: ApplyPatchGuard,
+  isExtraDenied: (value: string) => boolean,
+): string {
   const abs = resolve(cwd, path);
-  const rel = relative(cwd, abs);
-  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+  if (isSensitivePathResolved(abs) || isExtraDenied(abs)) {
+    throw new CodexApplyPatchError(
+      `Access to sensitive file blocked by policy: ${path}`,
+    );
+  }
+  if (
+    !guard.allowOutside() &&
+    resolveWorkspacePath(cwd, abs, guard.rootsProvider) === undefined
+  ) {
     throw new CodexApplyPatchError(`path escapes the workspace: ${path}`);
   }
   return abs;
 }
 
-async function plan(cwd: string, op: PatchOp): Promise<Planned[]> {
+async function plan(
+  op: PatchOp,
+  contained: (path: string) => string,
+): Promise<Planned[]> {
   if (op.type === "add") {
-    const path = contained(cwd, op.path);
+    const path = contained(op.path);
     return [
       { kind: "write", path, content: op.content, label: `A ${op.path}` },
     ];
   }
   if (op.type === "delete") {
     return [
-      { kind: "remove", path: contained(cwd, op.path), label: `D ${op.path}` },
+      { kind: "remove", path: contained(op.path), label: `D ${op.path}` },
     ];
   }
-  const source = contained(cwd, op.path);
+  const source = contained(op.path);
   let original: string;
   try {
     original = await readFile(source, "utf8");
@@ -66,7 +96,7 @@ async function plan(cwd: string, op: PatchOp): Promise<Planned[]> {
   return [
     {
       kind: "write",
-      path: contained(cwd, op.moveTo),
+      path: contained(op.moveTo),
       content,
       label: `M ${op.moveTo}`,
     },
@@ -78,7 +108,15 @@ async function plan(cwd: string, op: PatchOp): Promise<Planned[]> {
  * Plans every op before touching disk so a bad hunk in the last file cannot
  * leave the earlier files half-patched.
  */
-export function createApplyPatchTool(cwd: string): AgentTool {
+export function createApplyPatchTool(
+  cwd: string,
+  guard: ApplyPatchGuard,
+): AgentTool {
+  const isExtraDenied = createExtraDeniedPathMatcher(
+    guard.extraDeniedPaths ?? [],
+  );
+  const contained = (path: string): string =>
+    guardedPath(cwd, path, guard, isExtraDenied);
   return stringTool({
     definition: applyPatchDefinition,
     handler: async (rawArgs: Record<string, unknown>): Promise<string> => {
@@ -89,7 +127,7 @@ export function createApplyPatchTool(cwd: string): AgentTool {
       try {
         const patch = parseCodexApplyPatch(parsedArgs.input);
         const steps: Planned[] = [];
-        for (const op of patch.ops) steps.push(...(await plan(cwd, op)));
+        for (const op of patch.ops) steps.push(...(await plan(op, contained)));
         for (const step of steps) {
           if (step.kind === "write") {
             await mkdir(dirname(step.path), { recursive: true });
