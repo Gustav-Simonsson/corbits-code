@@ -670,7 +670,10 @@ export async function runExec(config: Config): Promise<ExecResult> {
       resolveSessionMode(config.settings, localSettingsForMode) ??
       "orchestrator";
 
-    const interactive = input.isTTY === true && output.isTTY === true;
+    const interactive = resolveExecInteractive({
+      stdinTTY: input.isTTY,
+      stdoutTTY: output.isTTY,
+    });
 
     if (config.skipPermissionsFromSettings) {
       stderr.write(
@@ -1407,6 +1410,21 @@ export async function runExec(config: Config): Promise<ExecResult> {
   }
 }
 
+/**
+ * Whether exec may prompt the operator. Permission and operator prompts read
+ * stdin and write stderr, so a piped stdout must not disable them: stdin TTY
+ * alone means an operator can answer. Fully headless (stdin not a TTY) fails
+ * closed — denials name the action and the remedy on stderr instead of
+ * prompting. stdoutTTY rides along so the call site stays explicit that a
+ * piped stdout is a supported prompting configuration, not an oversight.
+ */
+export function resolveExecInteractive(stdio: {
+  stdinTTY: boolean | undefined;
+  stdoutTTY: boolean | undefined;
+}): boolean {
+  return stdio.stdinTTY === true;
+}
+
 async function promptOperator(
   question: string,
   options: string[],
@@ -1432,11 +1450,22 @@ async function promptOperator(
   }
 }
 
-async function promptPermission(
+export async function promptPermission(
   request: PermissionRequest,
   interactive: boolean,
 ): Promise<ApprovalOutcome> {
-  if (!interactive) return { allow: false };
+  if (!interactive) {
+    // Fail closed and say so on stderr (never stdout: piped stdout may feed
+    // JSON consumers — see printResumeHint). A headless ask has no operator
+    // to answer, so the denial names the action and the bypass instead of
+    // vanishing into a generic block. Same sentence as the gate's
+    // non-interactive deny reasons (src/permission/gate.ts) by intent; the
+    // gate stays canonical for model-facing text, this seam for the operator.
+    stderr.write(
+      `Permission denied: ${request.action} requires operator approval, which is unavailable in a non-interactive run. Re-run with --dangerously-skip-permissions to bypass, or narrow the action.\n`,
+    );
+    return { allow: false };
+  }
   // Same freeze-while-deciding contract as the TUI gate: the tool wall-clock
   // budget must not run down while the operator reads the prompt.
   const budget = getToolApprovalBudget();

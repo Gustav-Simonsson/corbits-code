@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { AgentTool } from "@intx/agent";
 import { submitOutputDefinition } from "../agent/director.js";
 import { DIRECTOR_REGISTRY } from "../agent/directors/registry.js";
@@ -19,6 +19,7 @@ import {
 } from "../auth/codex/session.js";
 import type { Config } from "../config/index.js";
 import { CREDENTIAL_FAILURE_USER_MESSAGE } from "../inference-error-message.js";
+import type { PermissionRequest } from "../permission/types.js";
 import {
   clearActiveRun,
   getActiveRun,
@@ -44,9 +45,11 @@ import {
   createExecToolPromoter,
   execUserFailureMessage,
   isExecOverlayToolAllowed,
+  promptPermission,
   refreshSelectedProviderCredential,
   resolveExecDirectorOverlay,
   resolveExecDirectorOverlayForPackage,
+  resolveExecInteractive,
   runExec,
 } from "./runner.js";
 
@@ -813,5 +816,65 @@ describe("exec tool call gate and promoter", () => {
     expect(
       computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
     ).not.toContain("list_dir");
+  });
+});
+
+describe("exec permission prompt gating (CL-9002)", () => {
+  test("piped stdout with a stdin TTY still prompts", () => {
+    expect(resolveExecInteractive({ stdinTTY: true, stdoutTTY: false })).toBe(
+      true,
+    );
+  });
+
+  test("full TTY prompts", () => {
+    expect(resolveExecInteractive({ stdinTTY: true, stdoutTTY: true })).toBe(
+      true,
+    );
+  });
+
+  test("headless stdin never prompts, whatever stdout is", () => {
+    expect(resolveExecInteractive({ stdinTTY: false, stdoutTTY: false })).toBe(
+      false,
+    );
+    expect(resolveExecInteractive({ stdinTTY: false, stdoutTTY: true })).toBe(
+      false,
+    );
+    expect(
+      resolveExecInteractive({ stdinTTY: undefined, stdoutTTY: true }),
+    ).toBe(false);
+  });
+
+  test("headless permission seam fails closed with an explicit stderr denial", async () => {
+    const request: PermissionRequest = {
+      tool: "run_shell",
+      action: "Run shell",
+      subject: "rm -rf /tmp/work",
+      scopes: [],
+    };
+    const errWrites: string[] = [];
+    const outWrites: string[] = [];
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
+      chunk: unknown,
+    ) => {
+      errWrites.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(((
+      chunk: unknown,
+    ) => {
+      outWrites.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    try {
+      const outcome = await promptPermission(request, false);
+      expect(outcome).toEqual({ allow: false });
+    } finally {
+      stderrSpy.mockRestore();
+      stdoutSpy.mockRestore();
+    }
+    const denial = errWrites.join("");
+    expect(denial).toContain("Run shell");
+    expect(denial).toContain("--dangerously-skip-permissions");
+    expect(outWrites).toEqual([]);
   });
 });
