@@ -155,6 +155,24 @@ export function resolveThemeName(name: string): Theme {
 let activeTheme: Theme = corbitsDark;
 
 /**
+ * Reset hooks for paint state derived from the palette. Modules that snapshot
+ * palette values into renderer-owned registries (a SyntaxStyle) register a
+ * reset here; `setTheme` runs every hook right after swapping `UI`, so no
+ * stale palette survives a pin change. The single choke point stays here —
+ * call sites never reset caches themselves.
+ */
+type ThemeCacheReset = () => void;
+
+const themeCacheResets = new Set<ThemeCacheReset>();
+
+export function onThemeChange(reset: ThemeCacheReset): () => void {
+  themeCacheResets.add(reset);
+  return () => {
+    themeCacheResets.delete(reset);
+  };
+}
+
+/**
  * Switch the live `UI` binding to the named theme, keeping the reference.
  * Everything outside this file paints through `UI`, so existing readers pick
  * the change up without re-importing. Never reassign or destructure this
@@ -163,6 +181,7 @@ let activeTheme: Theme = corbitsDark;
 export function setTheme(name: ThemeName | string): Theme {
   activeTheme = resolveThemeName(name);
   Object.assign(UI, activeTheme);
+  for (const reset of themeCacheResets) reset();
   return activeTheme;
 }
 

@@ -46,7 +46,13 @@ import { applyLiveModelSwitch } from "../../session/live-model-switch.js";
 import type { ThemeSetting } from "../theme-detect.js";
 import { applyStartupTheme } from "../theme-startup.js";
 import type { ThemeName } from "../theme.js";
-import { applyFocus } from "../shell/chrome.js";
+import {
+  applyFocus,
+  paintChrome,
+  paintPromptBorder,
+  repaintTranscriptWindow,
+} from "../shell/chrome.js";
+import type { AppShell } from "../shell/internals.js";
 import { setShellInputSuspended } from "../shell/prompt.js";
 import { warningsForPluginEntry } from "../../plugins/diagnostics.js";
 import { isPluginEnabledForSurface } from "../plugin-surface.js";
@@ -653,6 +659,20 @@ export function applyThemePinLive(
   return applied;
 }
 
+/**
+ * Unconditional post-pin repaint for the settings surface. The cost/context
+ * meter path (`refreshCostContext` → `setPromptCostContext`) skips painting
+ * when the meter did not move — the common pin-cycle case — so cycling pins
+ * with no cost movement repainted nothing behind the overlay. Force the
+ * chrome, repaint the border, and rebuild the transcript rows so markdown
+ * bodies pick up the fresh SyntaxStyle registry. Synchronous, like the swap.
+ */
+export function repaintShellForTheme(shell: AppShell): void {
+  paintChrome(shell, { force: true });
+  paintPromptBorder(shell);
+  repaintTranscriptWindow(shell);
+}
+
 function createSettingsSurface(
   state: RunnerState,
   services: RunnerServices,
@@ -701,8 +721,9 @@ function createSettingsSurface(
       // The pin used to record-and-persist only, leaving the old palette on
       // screen until relaunch. Resolve it the same way startup does and paint
       // now: the swap is an instant rebinding of the shared UI object, never
-      // an animated transition.
-      applyThemePinLive(value, () => hostOf(state).refreshCostContext());
+      // an animated transition. The repaint is unconditional — the meter path
+      // would skip it whenever the cost context did not move.
+      applyThemePinLive(value, () => repaintShellForTheme(hostOf(state).shell));
       void persistGlobalSettings("theme", (base) => ({
         ...base,
         theme: value,
