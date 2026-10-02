@@ -331,8 +331,7 @@ shape.
   `resolveSkillBody`), so the model does not auto-suggest background libraries.
   First-party recipes that are not operator slashes remain listed for
   `skill_search` / `use_skill` when they only set `user-invocable: false`
-  (`linear-issue-workflow`, `style`, `philosophy`, `native-integration`,
-  `typescript`). Background libs such as `git-worktrees` set both flags: not a
+  (`style`, `philosophy`, `typescript`). Background libs such as `git-worktrees` set both flags: not a
   slash and not listed by `skill_search`/`discoverSkills`, but still loadable
   by explicit `use_skill`/`resolveSkillBody` name. The slash
   command is a direct user entry point on top.
