@@ -1,3 +1,4 @@
+import { canonicalToolName } from "../agent/canonical-tool-name.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   formatMcpToolTimeoutMessage,
@@ -112,10 +113,12 @@ export function resolveToolExecutionTimeoutMs(
   config?: ToolWatchdogConfig,
   call?: ToolCall,
 ): number | undefined {
+  const engineName =
+    call !== undefined ? canonicalToolName(call.name) : undefined;
   if (
-    call?.name === "spawn_agent" ||
-    call?.name === "wait_agents" ||
-    call?.name === "ask_director"
+    engineName === "spawn_agent" ||
+    engineName === "wait_agents" ||
+    engineName === "ask_director"
   ) {
     return undefined;
   }

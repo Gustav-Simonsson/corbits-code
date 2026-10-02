@@ -1,3 +1,4 @@
+import { canonicalToolName } from "../agent/canonical-tool-name.js";
 import { type } from "arktype";
 import type { ToolCall, ToolResult } from "@intx/types/runtime";
 import { isLiveWaitStatus, type WaitJSONStatus } from "./lifecycle.js";
@@ -40,7 +41,7 @@ export function isPollOnlyPendingBatch(
   return calls.every((call, index) => {
     const result = results[index];
     if (result === undefined) return false;
-    if (call.name !== "wait_agents") return false;
+    if (canonicalToolName(call.name) !== "wait_agents") return false;
     const payload = resultPayload(result);
     if (payload === undefined) return false;
     return isWaitAgentsPending(payload);
