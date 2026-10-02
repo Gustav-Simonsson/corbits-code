@@ -156,7 +156,7 @@ describe("turnStateFromEvent", () => {
   });
 
   test("concurrent same-name collects stay tracked when the mapping owner finishes first", () => {
-    // Regression for CL-8059: two concurrent shell_collect calls share one
+    // Regression for CL-8059: two concurrent wait_agents calls share one
     // callIdByName slot, so the second registration overwrites the first.
     // When the mapping-owning sibling resolves first and clears that slot,
     // the leftover earlier collect must keep its own name record.
@@ -164,11 +164,11 @@ describe("turnStateFromEvent", () => {
       { type: "inference.start" },
       {
         type: "tool.start",
-        data: { call: { id: "collect-1", name: "shell_collect" } },
+        data: { call: { id: "collect-1", name: "wait_agents" } },
       },
       {
         type: "tool.start",
-        data: { call: { id: "collect-2", name: "shell_collect" } },
+        data: { call: { id: "collect-2", name: "wait_agents" } },
       },
     ]);
     expect(running.activeToolCalls).toHaveLength(2);
@@ -180,7 +180,7 @@ describe("turnStateFromEvent", () => {
     );
     expect(oneDone.activeToolCalls).toEqual(["collect-1"]);
     // the leftover collect keeps its own name record; the resolved one's is gone
-    expect(oneDone.callNameById["collect-1"]).toBe("shell_collect");
+    expect(oneDone.callNameById["collect-1"]).toBe("wait_agents");
     expect("collect-2" in oneDone.callNameById).toBe(false);
 
     const bothDone = turnStateFromEvent(

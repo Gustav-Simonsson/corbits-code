@@ -1,23 +1,13 @@
-import { internPackage } from "@corbits/agent-intern";
 import type { AgentProfile, CapabilityFilter } from "../profile-types.js";
-import { randPackage } from "./rand/package.js";
-import { bruckheimerPackage } from "./bruckheimer/package.js";
-import { criticPackage } from "./critic/package.js";
-import { draperPackage } from "./draper/package.js";
-import { emilPackage } from "./emil/package.js";
+import { artistPackage } from "./artist/package.js";
+import { coderPackage } from "./coder/package.js";
+import { designerPackage } from "./designer/package.js";
+import { dispatchPackage } from "./dispatch/package.js";
 import { explorerPackage } from "./explorer/package.js";
-import { gaasbotPackage } from "./gaasbot/package.js";
-import { greybeardPackage } from "./greybeard/package.js";
-import { builderPackage } from "./builder/package.js";
-import { migratorPackage } from "./migrator/package.js";
-import { neckbeardPackage } from "./neckbeard/package.js";
-import { counselPackage } from "./counsel/package.js";
-import { shakespearePackage } from "./shakespeare/package.js";
-import { skywalkerPackage } from "./skywalker/package.js";
-import { testerPackage } from "./tester/package.js";
-import { testsmithPackage } from "./testsmith/package.js";
-import { gauntletPackage } from "./gauntlet/package.js";
+import { plannerPackage } from "./planner/package.js";
 import { proberPackage } from "./prober/package.js";
+import { reviewerPackage } from "./reviewer/package.js";
+import { shakespearePackage } from "./shakespeare/package.js";
 import { wardenPackage } from "./warden/package.js";
 import { formatDirectorSystemPrompt } from "./identity.js";
 import {
@@ -34,10 +24,10 @@ import {
 export const INTENT_DEFAULT_DIRECTOR: Readonly<
   Record<Exclude<TaskIntent, "general">, DirectorId>
 > = {
-  implement: "builder",
+  implement: "coder",
   explore: "explorer",
-  plan: "counsel",
-  review: "critic",
+  plan: "planner",
+  review: "reviewer",
 };
 
 /**
@@ -46,26 +36,16 @@ export const INTENT_DEFAULT_DIRECTOR: Readonly<
  */
 export const DIRECTOR_REGISTRY: Readonly<Record<DirectorId, DirectorPackage>> =
   {
-    skywalker: skywalkerPackage,
-    builder: builderPackage,
+    dispatch: dispatchPackage,
     explorer: explorerPackage,
-    counsel: counselPackage,
-    intern: internPackage,
-    critic: criticPackage,
-    greybeard: greybeardPackage,
-    neckbeard: neckbeardPackage,
-    bruckheimer: bruckheimerPackage,
-    gaasbot: gaasbotPackage,
-    draper: draperPackage,
-    emil: emilPackage,
-    rand: randPackage,
-    shakespeare: shakespearePackage,
-    testsmith: testsmithPackage,
-    tester: testerPackage,
-    gauntlet: gauntletPackage,
-    prober: proberPackage,
-    migrator: migratorPackage,
+    planner: plannerPackage,
+    coder: coderPackage,
+    reviewer: reviewerPackage,
+    designer: designerPackage,
+    artist: artistPackage,
     warden: wardenPackage,
+    shakespeare: shakespearePackage,
+    prober: proberPackage,
   };
 
 export function isDirectorId(value: unknown): value is DirectorId {
@@ -146,15 +126,15 @@ export function packageToProfile(pkg: DirectorPackage): AgentProfile {
     description: `${pkg.description} (agent id: ${pkg.id})`,
     systemPromptRole: formatDirectorSystemPrompt(pkg),
     // Nested spawn is still gated by allowOrchestrator on the parent fleet tools.
-    // Skywalker maySpawn marks intent; leaves stay non-orchestrator.
+    // Dispatch maySpawn marks intent; leaves stay non-orchestrator.
     orchestrator: pkg.spawn.maySpawn,
     ...(capabilities !== undefined ? { capabilities } : {}),
   };
 }
 
-/** Spawnable director profiles (closed set minus primary skywalker). */
+/** Spawnable director profiles (closed set minus primary dispatch). */
 export function directorProfiles(): AgentProfile[] {
   return listDirectors()
-    .filter((pkg) => pkg.id !== "skywalker")
+    .filter((pkg) => pkg.id !== "dispatch")
     .map(packageToProfile);
 }

@@ -48,7 +48,7 @@ describe("assertTierMayMountFleetVerb", () => {
     ).not.toThrow();
   });
 
-  // CL-7051: fleet discovery is Skywalker (Tier 1) only — nested directors keep
+  // CL-7051: fleet discovery is dispatch (Tier 1) only — nested directors keep
   // spawn allowlists but must not discover the full fleet.
   test("Tier 2 nested orchestrator cannot mount search_agents but may list its own fleet", () => {
     expect(() =>
@@ -76,68 +76,68 @@ describe("assertTierMayMountFleetVerb", () => {
 });
 
 describe("assertCanTargetAgent", () => {
-  // Tree: skywalker(root) -> greybeard -> intern
-  //                       -> build (sibling of greybeard)
+  // Tree: dispatch(root) -> planner -> coder
+  //                      -> explorer (sibling of planner)
   const nodes = [
-    { id: "skywalker-session" },
-    { id: "greybeard-session", parentSessionId: "skywalker-session" },
-    { id: "intern-session", parentSessionId: "greybeard-session" },
-    { id: "build-session", parentSessionId: "skywalker-session" },
+    { id: "dispatch-session" },
+    { id: "planner-session", parentSessionId: "dispatch-session" },
+    { id: "coder-session", parentSessionId: "planner-session" },
+    { id: "explorer-session", parentSessionId: "dispatch-session" },
   ];
 
   test("Tier 1 primary orchestrator can target anyone in the tree", () => {
-    const skywalker = {
-      id: "skywalker-session",
+    const dispatch = {
+      id: "dispatch-session",
       tier: "orchestrator" as const,
     };
     expect(() =>
-      assertCanTargetAgent(skywalker, "greybeard-session", nodes),
+      assertCanTargetAgent(dispatch, "planner-session", nodes),
     ).not.toThrow();
     expect(() =>
-      assertCanTargetAgent(skywalker, "intern-session", nodes),
+      assertCanTargetAgent(dispatch, "coder-session", nodes),
     ).not.toThrow();
     expect(() =>
-      assertCanTargetAgent(skywalker, "build-session", nodes),
+      assertCanTargetAgent(dispatch, "explorer-session", nodes),
     ).not.toThrow();
   });
 
   test("Tier 2 nested orchestrator can target its own descendant", () => {
-    const greybeard = {
-      id: "greybeard-session",
+    const planner = {
+      id: "planner-session",
       tier: "nested-orchestrator" as const,
     };
     expect(() =>
-      assertCanTargetAgent(greybeard, "intern-session", nodes),
+      assertCanTargetAgent(planner, "coder-session", nodes),
     ).not.toThrow();
   });
 
   test("Tier 2 nested orchestrator can target itself", () => {
-    const greybeard = {
-      id: "greybeard-session",
+    const planner = {
+      id: "planner-session",
       tier: "nested-orchestrator" as const,
     };
     expect(() =>
-      assertCanTargetAgent(greybeard, "greybeard-session", nodes),
+      assertCanTargetAgent(planner, "planner-session", nodes),
     ).not.toThrow();
   });
 
   test("Tier 2 nested orchestrator cannot target a sibling", () => {
-    const greybeard = {
-      id: "greybeard-session",
+    const planner = {
+      id: "planner-session",
       tier: "nested-orchestrator" as const,
     };
     expect(() =>
-      assertCanTargetAgent(greybeard, "build-session", nodes),
+      assertCanTargetAgent(planner, "explorer-session", nodes),
     ).toThrow(FleetAuthorityError);
   });
 
   test("Tier 2 nested orchestrator cannot target an ancestor", () => {
-    const greybeard = {
-      id: "greybeard-session",
+    const planner = {
+      id: "planner-session",
       tier: "nested-orchestrator" as const,
     };
     expect(() =>
-      assertCanTargetAgent(greybeard, "skywalker-session", nodes),
+      assertCanTargetAgent(planner, "dispatch-session", nodes),
     ).toThrow(FleetAuthorityError);
   });
 

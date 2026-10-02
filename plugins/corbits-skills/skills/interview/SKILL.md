@@ -1,14 +1,12 @@
 ---
 name: interview
 argument-hint: "<topic>[; <context>]"
-description: Conduct an iterative multiple-choice interview using AskUserQuestion. Returns the Q&A inline. Use as a utility when a caller needs structured user input on a topic.
-tools:
-  - AskUserQuestion
+description: Conduct an iterative multiple-choice interview using `ask_operator`. Returns the Q&A inline. Use as a utility when a caller needs structured user input on a topic.
 ---
 
 # Interview
 
-Use this skill to gather user input on a topic by asking multiple-choice questions in batches via `AskUserQuestion`. Return the questions and answers in the conversation. The caller decides what to do with them.
+Use this skill to gather user input on a topic by asking multiple-choice questions in batches via `ask_operator`. Return the questions and answers in the conversation. The caller decides what to do with them.
 
 This is a utility, not a planner. It does not decide what to build, write any files, or invoke other skills.
 
@@ -31,7 +29,7 @@ Probe objective and priorities before details. They shape every later question, 
 
 ### Ask in batches
 
-Each round uses `AskUserQuestion`. Refer to the tool's own documentation for parameter limits and multi-select behavior.
+Each round uses `ask_operator`. Refer to the tool's own documentation for parameter limits and multi-select behavior.
 
 **Quality bar for options:**
 
@@ -95,7 +93,7 @@ After emitting the findings, stop. Do not load other skills, invoke other agents
 **Round 1** (3 questions, bundled because none depends on the others):
 
 ```
-AskUserQuestion([
+ask_operator([
   { header: "Goal", question: "What is the primary goal of the notification system?",
     options: [
       { label: "Alert on critical events", description: "Errors, security issues, SLA breaches" },

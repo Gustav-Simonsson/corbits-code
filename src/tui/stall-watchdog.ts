@@ -74,11 +74,7 @@ function silentPastThreshold(
  * mapping-owning sibling resolves first and clears the shared slot.
  */
 function isStallBoundedToolName(name: string | null | undefined): boolean {
-  return (
-    name === "shell_collect" ||
-    name === "wait_agents" ||
-    name === "ask_director"
-  );
+  return name === "wait_agents" || name === "ask_director";
 }
 
 function isStallBoundedInFlightTool(args: ShouldAbortForStallArgs): boolean {

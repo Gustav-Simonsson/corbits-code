@@ -2,14 +2,19 @@
  * Mount coverage for Codex: no advertised apply_patch/shell/update_plan,
  * engines stay posix-named, hidden aliases dispatch without dual-publish.
  */
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import * as posixModule from "@intx/tools-posix";
 
 import { BUILD_TOOLS, DOCS_TOOLS } from "./directors/tool-sets.js";
-import { advertisedTools, CORE_TOOL_NAMES } from "./tool-search.js";
+import { foldFileToolNames } from "./tool-aliases.js";
+import {
+  ADVERTISED_TOOL_NAMES,
+  advertisedTools,
+  CORE_TOOL_NAMES,
+} from "./tool-search.js";
 
 afterEach(() => {
   spyOn(posixModule, "createPosixTools").mockRestore();
@@ -42,7 +47,7 @@ describe("Codex tool proxy mount", () => {
     await toolset.dispose();
   });
 
-  test("Codex createAgentToolset does not advertise apply_patch/shell/update_plan", async () => {
+  test("Codex createAgentToolset keeps engines posix-named and projects wire names by profile", async () => {
     // Unstubbed createPosixTools: write_file / edit_file / delete_file come from
     // the real posix + delete-file plugin mount. An empty stub would hide them
     // and make the DIY-remains assertion meaningless.
@@ -74,6 +79,17 @@ describe("Codex tool proxy mount", () => {
     expect(advertised).not.toContain("shell");
     expect(advertised).not.toContain("apply_patch");
     expect(advertised).not.toContain("update_plan");
+    const gptAdvertised = advertisedTools(
+      toolset.dynamicRunner.currentDefinitions(),
+      [],
+      foldFileToolNames(ADVERTISED_TOOL_NAMES, "gpt"),
+      "gpt",
+    ).map((d) => d.name);
+    expect(gptAdvertised).toContain("shell");
+    expect(gptAdvertised).toContain("apply_patch");
+    expect(gptAdvertised).toContain("update_plan");
+    expect(gptAdvertised).not.toContain("write");
+    expect(gptAdvertised).not.toContain("bash");
     await toolset.dispose();
   });
 
@@ -108,6 +124,36 @@ describe("Codex tool proxy mount", () => {
       new AbortController().signal,
     );
     expect(result.isError).toBeFalsy();
+    await toolset.dispose();
+  });
+
+  test("wire names from every profile dispatch onto the mounted engines", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "corbits-codex-mount-"));
+    const { createAgentToolset } = await import("./tools.js");
+    const toolset = await createAgentToolset({
+      cwd,
+      permissionGate: {
+        check: async () => ({ allowed: true }),
+        getSkipPermissions: () => false,
+      } as never,
+      onOperatorGate: async () => ({ kind: "option", index: 0 }),
+      isCodex: true,
+    });
+    const call = (name: string, args: Record<string, unknown>) =>
+      toolset.dynamicRunner.run(
+        { id: name, name, arguments: args },
+        new AbortController().signal,
+      );
+    const patched = await call("apply_patch", {
+      input: "*** Begin Patch\n*** Add File: made.txt\n+hi\n*** End Patch",
+    });
+    expect(patched.isError).toBeFalsy();
+    expect(readFileSync(join(cwd, "made.txt"), "utf8")).toBe("hi\n");
+    const todo = await call("todowrite", {
+      action: "create",
+      tasks: [{ id: "t1", title: "x", status: "todo" }],
+    });
+    expect(todo.isError).toBeFalsy();
     await toolset.dispose();
   });
 

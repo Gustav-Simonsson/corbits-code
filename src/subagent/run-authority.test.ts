@@ -56,7 +56,7 @@ function nestedDispatch(
     getWorkdirBase: () => join(cwd, ".ctx"),
     provider: { providerName: "test", baseURL, model: "test-model" },
     ...(withProfiles
-      ? { profiles: [{ id: "intern", systemPromptRole: "You are intern." }] }
+      ? { profiles: [{ id: "coder", systemPromptRole: "You are coder." }] }
       : {}),
   };
 }
@@ -160,7 +160,7 @@ describe("runSubAgent search_agents mount gate (CL-7051, Tier-1 only)", () => {
     const cwd = await tmpCwd();
     const searchAgentsMounts = await probeSearchAgentsMount(
       cwd,
-      "greybeard-session",
+      "planner-session",
       "nested-orchestrator",
     );
 
@@ -171,7 +171,7 @@ describe("runSubAgent search_agents mount gate (CL-7051, Tier-1 only)", () => {
     const cwd = await tmpCwd();
     const searchAgentsMounts = await probeSearchAgentsMount(
       cwd,
-      "skywalker-session",
+      "dispatch-session",
       "orchestrator",
     );
 

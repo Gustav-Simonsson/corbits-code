@@ -112,19 +112,17 @@ export function formatAgentSearchResults(
 export const searchAgentsDefinition: ToolDefinition = {
   name: "search_agents",
   description:
-    "Find spawnable agent profiles by capability, role, or team name (e.g. 'review', 'review team', 'architect', 'security'). Returns profile ids, descriptions, and spawn metadata (orchestrator flag, source). Pass include_body=true to include the loaded system prompt / body for each match (truncated). Use the id in spawn_agent(agent=...). Call this when the user asks to spin up specialists or a team without naming exact ids.",
+    "Find spawnable agent profiles by role or capability. Returns ids for spawn_agent(agent=...).",
   inputSchema: {
     type: "object",
     properties: {
       query: {
         type: "string",
-        description:
-          "What kind of agent or team you need — keywords from the user's request (e.g. 'review team', 'code quality', 'explore codebase').",
+        description: "Role or capability.",
       },
       include_body: {
         type: "boolean",
-        description:
-          "When true, include each match's loaded system prompt / body (truncated). Default false: id, description, and spawn metadata only.",
+        description: "Include profile body.",
       },
     },
     required: ["query"],

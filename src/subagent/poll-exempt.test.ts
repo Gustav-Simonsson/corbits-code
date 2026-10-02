@@ -68,32 +68,11 @@ describe("isPollOnlyPendingBatch", () => {
     }
   });
 
-  test("running shell_collect is exempt; completed or cancelling counts", () => {
-    const collect = call("shell_collect");
-    expect(
-      isPollOnlyPendingBatch(
-        [collect],
-        [result({ shell_id: "s1", status: "running" })],
-      ),
-    ).toBe(true);
-    for (const status of ["completed", "cancelling"]) {
-      expect(
-        isPollOnlyPendingBatch([collect], [result({ shell_id: "s1", status })]),
-      ).toBe(false);
-    }
-  });
-
   test("unparseable or error poll output counts normally", () => {
     expect(
       isPollOnlyPendingBatch(
         [call("wait_agents")],
         [result("Error: timed out waiting")],
-      ),
-    ).toBe(false);
-    expect(
-      isPollOnlyPendingBatch(
-        [call("shell_collect")],
-        [result("No background shell with id s9.")],
       ),
     ).toBe(false);
   });
@@ -110,15 +89,6 @@ describe("isPollOnlyPendingBatch", () => {
   test("mixed poll and non-poll batches count normally", () => {
     expect(
       isPollOnlyPendingBatch(
-        [call("wait_agents"), call("shell_collect")],
-        [
-          result(waitContent(["running"], true)),
-          result({ shell_id: "s1", status: "running" }),
-        ],
-      ),
-    ).toBe(true);
-    expect(
-      isPollOnlyPendingBatch(
         [call("wait_agents"), call("read")],
         [
           result(waitContent(["running"], true)),
@@ -131,10 +101,10 @@ describe("isPollOnlyPendingBatch", () => {
   test("a settled poll beside a pending poll counts normally", () => {
     expect(
       isPollOnlyPendingBatch(
-        [call("wait_agents", "c1"), call("shell_collect", "c2")],
+        [call("wait_agents", "c1"), call("wait_agents", "c2")],
         [
           { callId: "c1", content: waitContent(["done"], false) },
-          { callId: "c2", content: { shell_id: "s1", status: "running" } },
+          { callId: "c2", content: waitContent(["running"], true) },
         ],
       ),
     ).toBe(false);

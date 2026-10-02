@@ -40,28 +40,19 @@ describe("buildWorkerContract", () => {
     expect(withoutAsk).toContain("best-judgment");
   });
 
-  test("default worker gets the no-recursion rule, not the spawn grant", () => {
+  test("default worker is told not to spawn, not granted spawn_agent", () => {
     const contract = buildWorkerContract({ askDirector: true });
-    expect(contract).toContain(
-      "Only the primary Corbits Code session (or a built-in orchestrator director) may call `spawn_agent`",
-    );
-    expect(contract).toContain("You are a worker");
-    expect(contract).not.toContain("MAY call `spawn_agent`");
+    expect(contract).toContain("Do not spawn agents");
+    expect(contract).not.toContain("You may spawn_agent");
   });
 
-  test("orchestrator variant grants the spawn exception without mailbox copy", () => {
+  test("orchestrator variant grants spawn_agent without mailbox copy", () => {
     const contract = buildWorkerContract({
       askDirector: true,
       orchestrator: true,
     });
-    expect(contract).toContain("You are an orchestrator");
-    expect(contract).toContain("MAY call `spawn_agent`");
-    expect(contract).toContain(
-      'spawn_agent(agent="greybeard", description="Review approach", prompt="...")',
-    );
-    expect(contract).not.toContain(
-      "Only the primary Corbits Code session (or a built-in orchestrator director) may call `spawn_agent`",
-    );
+    expect(contract).toContain("You may spawn_agent");
+    expect(contract).not.toContain("Do not spawn agents");
     expect(contract).not.toContain("mailbox");
   });
 });

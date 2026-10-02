@@ -189,7 +189,7 @@ export type RunSubAgentParams = {
    */
   skipPricingSeed?: boolean;
   systemPromptRole?: string;
-  /** Resolved closed-director id (e.g. "critic") when the worker is one. Structured gate key — prefer over persona-string matching in systemPromptRole. */
+  /** Resolved closed-director id (e.g. "reviewer") when the worker is one. Structured gate key — prefer over persona-string matching in systemPromptRole. */
   directorId?: string;
   // When true, the assembled system prompt grants this sub-agent permission
   // to call `spawn_agent` to spawn further agents (orchestrator exception to

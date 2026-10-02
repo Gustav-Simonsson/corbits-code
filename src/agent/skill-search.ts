@@ -77,6 +77,20 @@ const SkillSearchArgs = type({ query: "string" });
 
 const DEFAULT_LIMIT = 8;
 
+export function searchSkillCatalog(
+  skills: readonly SkillSummary[],
+  query: string,
+): string[] {
+  const rawQuery = query.toLowerCase().trim();
+  const queryTokens = tokenizeLexical(query);
+  if (queryTokens.length === 0) return [];
+  return rankAndCut(
+    skills,
+    (skill) => scoreSkill(skill, queryTokens, rawQuery),
+    DEFAULT_LIMIT,
+  ).map((skill) => `- ${skill.name}: ${skill.description}`);
+}
+
 export function createSkillSearchTool(
   args: CreateSkillSearchToolArgs,
 ): AgentTool {

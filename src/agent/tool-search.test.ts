@@ -211,17 +211,12 @@ describe("createToolIndex", () => {
     expect(advertised).toContain("web_search");
   });
 
-  test("skill_search is catalog-advertised at the end, never CORE", () => {
+  test("skill_search is never advertised; skills are found via tool_search", () => {
     expect(CORE_TOOL_NAMES).not.toContain("skill_search");
-    expect(CATALOG_TOOL_NAMES[CATALOG_TOOL_NAMES.length - 1]).toBe(
-      "skill_search",
-    );
-    const advertised = advertisedToolNamesForSessionMode(
-      "orchestrator",
-      FULL_AVAILABILITY,
-    );
-    expect(advertised).toContain("skill_search");
-    expect(advertised[advertised.length - 1]).toBe("skill_search");
+    expect(CATALOG_TOOL_NAMES).not.toContain("skill_search");
+    expect(
+      advertisedToolNamesForSessionMode("orchestrator", FULL_AVAILABILITY),
+    ).not.toContain("skill_search");
   });
 
   test("lsp is advertised only when a language server was detected at startup", () => {
@@ -305,6 +300,39 @@ describe("createToolIndex", () => {
     expect(ranked).toContain("mcp__linear__save_issue");
     expect(ranked.length).toBeGreaterThanOrEqual(1);
     expect(ranked.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("createToolSearchTool skills", () => {
+  test("skill matches render as a use_skill block", async () => {
+    const tool = createToolSearchTool({
+      search: () => [],
+      searchSkills: () => ["- scribe: write docs"],
+      lookup: () => undefined,
+    });
+    const out = await call(tool, { query: "docs" });
+    expect(out).toContain("use_skill");
+    expect(out).toContain("- scribe: write docs");
+  });
+
+  test("a skill hit still waits for a connecting server so its tools mount", async () => {
+    const live: ToolDefinition[] = [];
+    const tool = createToolSearchTool({
+      search: (query) => createToolIndex(() => live).search(query),
+      searchSkills: () => ["- linear-triage: triage issues"],
+      lookup: (name) => live.find((def) => def.name === name),
+      awaitPendingConnections: async () => {
+        live.push({
+          name: "mcp__linear__create_issue",
+          description: "Create an issue in the tracker",
+          inputSchema: { type: "object", properties: {}, required: [] },
+        });
+        return 0;
+      },
+    });
+    const out = await call(tool, { query: "linear tracker" });
+    expect(out).toContain("mcp__linear__create_issue");
+    expect(out).toContain("- linear-triage: triage issues");
   });
 });
 
@@ -558,7 +586,7 @@ describe("createToolSearchTool", () => {
       awaitPendingConnections: async () => 0,
     });
     const out = await call(tool, { query: "nonsense" });
-    expect(out).toContain("No tools matched");
+    expect(out).toContain("matched");
     expect(out).toContain("different keywords");
     expect(out).not.toMatch(
       /still connecting|still starting up|retry shortly/i,
@@ -949,20 +977,6 @@ describe("advertisedTools", () => {
     for (const name of [...CORE_TOOL_NAMES, ...CATALOG_TOOL_NAMES]) {
       expect(index.search(name)).not.toContain(name);
     }
-  });
-
-  test("tool_search does not return skill_search even when it is registered", () => {
-    const withSkillSearch: ToolDefinition[] = [
-      ...defs,
-      {
-        name: "skill_search",
-        description: "Look up skill details by capability",
-        inputSchema: { type: "object", properties: {}, required: [] },
-      },
-    ];
-    const idx = createToolIndex(() => withSkillSearch);
-    expect(idx.search("skill")).not.toContain("skill_search");
-    expect(idx.search("capability")).not.toContain("skill_search");
   });
 });
 

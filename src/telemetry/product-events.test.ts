@@ -504,7 +504,7 @@ test("subagent_end parent_trace_id is the in-flight turn at spawn, not the last 
 
 test("buildSubagentEndProperties shapes rollup fields and omits empty parentTraceId", () => {
   const withRollup = buildSubagentEndProperties({
-    agentName: "builder",
+    agentName: "coder",
     status: "completed",
     durationMs: 42,
     model: "gpt-test",
@@ -522,7 +522,7 @@ test("buildSubagentEndProperties shapes rollup fields and omits empty parentTrac
     },
   });
   expect(withRollup).toEqual({
-    agent_name: "builder",
+    agent_name: "coder",
     status: "completed",
     duration_ms: 42,
     model: "gpt-test",
@@ -558,7 +558,7 @@ test("buildSubagentEndProperties shapes rollup fields and omits empty parentTrac
 });
 
 test("first-party director ids are reported by name; unknown profiles stay custom", () => {
-  for (const name of ["worker", "builder", "shakespeare"]) {
+  for (const name of ["worker", "coder", "shakespeare"]) {
     expect(classifyAgentName(name)).toBe(name);
   }
   expect(classifyAgentName("acmecorp-release-captain")).toBe("custom");

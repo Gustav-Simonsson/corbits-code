@@ -88,10 +88,7 @@ import {
   createSendInputTool,
 } from "../subagent/lifecycle-tools.js";
 import { createManageTasksRunner } from "./tasks.js";
-import {
-  createShellCollectTool,
-  createSpillingBackgroundShellExitNotifier,
-} from "./background-shell-tool.js";
+import { createSpillingBackgroundShellExitNotifier } from "./background-shell-tool.js";
 import {
   createBackgroundShellRegistry,
   type BackgroundShellExit,
@@ -108,7 +105,7 @@ import {
 } from "../tools/web-search.js";
 import { createApplyPatchTool } from "./apply-patch-tool.js";
 import { createUseSkillTool } from "./use-skill.js";
-import { createSkillSearchTool } from "./skill-search.js";
+import { searchSkillCatalog } from "./skill-search.js";
 import {
   createToolIndex,
   createToolSearchTool,
@@ -445,8 +442,8 @@ export async function createAgentToolset(
     toolAvailability = { languageServerAvailable: true },
   } = args;
   let mcpServersSource = args.mcpServersSource ?? "none";
-  // One registry per toolset: run_shell background:true starts here, the
-  // shell_collect tool and dispose read the same instance.
+  // One registry per toolset: run_shell background:true starts here, dispose
+  // reads the same instance.
   const backgroundShells = createBackgroundShellRegistry({
     ...(args.onBackgroundShellExit !== undefined
       ? {
@@ -457,7 +454,6 @@ export async function createAgentToolset(
         }
       : {}),
   });
-  const shellCollect = createShellCollectTool(backgroundShells);
   // Per-call bounded live-output tails of foreground shells, polled by the TUI
   // for each pending run_shell row's live lines. Workers get a map too; nothing
   // reads it unless a transcript polls it (silent degradation).
@@ -671,16 +667,11 @@ export async function createAgentToolset(
     }),
     createUseSkillTool(cwd, skillDirs, args.telemetry),
     createApplyPatchTool(cwd),
-    createSkillSearchTool({ skills }),
     builtinExaEnabled
       ? createExaMCPWebFetchTool({ connect: waitForBuiltinExaConnection })
       : createWebFetchTool(),
     createWebSearchTool(),
     ...orchestratorTools,
-    stringTool({
-      definition: shellCollect.definition,
-      handler: shellCollect.handler,
-    }),
     stringTool({
       definition: manageTasksDefinition,
       handler: async (rawArgs: Record<string, unknown>): Promise<string> => {
@@ -808,6 +799,7 @@ export async function createAgentToolset(
     baseTools.push(
       createToolSearchTool({
         search: (query, limit) => toolIndex.search(query, limit),
+        searchSkills: (query) => searchSkillCatalog(skills, query),
         lookup: (name) =>
           runnerHolder.current
             ?.currentDefinitions()

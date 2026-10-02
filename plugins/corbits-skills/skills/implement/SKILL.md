@@ -1,11 +1,11 @@
 ---
 name: implement
-description: Disciplined per-commit workflow with Greybeard review, build gates, and Critique loops
+description: Disciplined per-commit workflow with Planner review, build gates, and Reviewer loops
 ---
 
 # Implement
 
-A disciplined implementation workflow that produces reviewed, verified commits. Load this skill when you want each commit to go through architectural review, build verification, and code critique before it lands.
+A disciplined implementation workflow that produces reviewed, verified commits. Load this skill when you want each commit to go through architectural review, build verification, and code review before it lands.
 
 ## Prerequisites
 
@@ -19,43 +19,43 @@ The caller defines what work to do and where the commit boundaries are. This ski
 
 ## Tracking Progress
 
-Use `TaskCreate`, `TaskUpdate`, and `TaskList` to track progress throughout the workflow. These tools give the user real-time visibility into what you're doing.
+Use `manage_tasks` to track progress throughout the workflow. It gives the user real-time visibility into what you're doing.
 
 ### Initial Planning
 
-Before starting implementation, use `TaskCreate` for each commit-sized unit of work from the caller's instructions:
+Before starting implementation, use `manage_tasks` to add each commit-sized unit of work from the caller's instructions:
 
-- **subject**: Clear imperative description of the unit of work
+- **title**: Clear imperative description of the unit of work
 - **description**: Enough context that you could pick it up cold
-- **activeForm**: Present continuous form for the spinner (e.g., "Refactoring HTTP client retry logic")
+- **active form**: Present continuous form for the status line (e.g., "Refactoring HTTP client retry logic")
 
 ### During the Per-Commit Workflow
 
-When you begin a unit of work, mark its task `in_progress` with `TaskUpdate`. As you move through the workflow steps, update the task's `activeForm` to reflect which step you're in:
+When you begin a unit of work, mark its task `in_progress` with `manage_tasks`. As you move through the workflow steps, update the task's active form to reflect which step you're in:
 
-- **Step 1**: "Reviewing approach with Greybeard: {subject}"
+- **Step 1**: "Reviewing approach with Planner: {subject}"
 - **Step 2**: "Implementing: {subject}"
 - **Step 3**: "Running build gate: {subject}"
 - **Step 4**: "Committing: {subject}"
-- **Step 5**: "Running Critique loop: {subject}"
+- **Step 5**: "Running Reviewer loop: {subject}"
 
-When the commit lands and Critique is clean, mark the task `completed`.
+When the commit lands and Reviewer is clean, mark the task `completed`.
 
 ### Discovered Work
 
-If new work surfaces during implementation (Greybeard suggests a preparatory refactor, Critique reveals a missing edge case that warrants its own commit), create a new task with `TaskCreate` and work it through the full per-commit workflow.
+If new work surfaces during implementation (Planner suggests a preparatory refactor, Reviewer reveals a missing edge case that warrants its own commit), add a new task with `manage_tasks` and work it through the full per-commit workflow.
 
 ## Workflow Per Commit
 
 For each logical unit of work that results in a commit, follow these steps in order. Do not skip steps.
 
-### Step 1: Greybeard Review
+### Step 1: Planner Review
 
-Mark the task `in_progress` and set `activeForm` to "Reviewing approach with Greybeard: {subject}".
+Mark the task `in_progress` and set the active form to "Reviewing approach with Planner: {subject}".
 
-Before writing any code, describe your implementation approach to Greybeard and ask for feedback.
+Before writing any code, describe your implementation approach to Planner and ask for feedback.
 
-**What to send Greybeard:**
+**What to send Planner:**
 
 - What you're about to change and why
 - Which files you expect to touch
@@ -64,16 +64,16 @@ Before writing any code, describe your implementation approach to Greybeard and 
 
 **How to handle feedback:**
 
-- If Greybeard identifies problems with your approach, adjust before proceeding
-- If Greybeard suggests a fundamentally different approach, consider it seriously
+- If Planner identifies problems with your approach, adjust before proceeding
+- If Planner suggests a fundamentally different approach, consider it seriously
 - You don't need to agree with every suggestion, but you need a reason to disagree
 - Once you're aligned on approach, move to Step 2
 
-Use the `@greybeard` subagent for this step.
+Use `spawn_agent(agent="planner")` for this step.
 
 ### Step 2: Implement and Test
 
-Update `activeForm` to "Implementing: {subject}".
+Update the active form to "Implementing: {subject}".
 
 The order of operations depends on whether you're fixing a bug or building a feature. In both cases, follow the repository's existing test conventions — look at how existing tests are structured, where they live, what framework they use, and match that style. If the repository has no existing tests, ask the caller what test framework and conventions to use before proceeding.
 
@@ -98,7 +98,7 @@ Keep the scope tight to what was discussed. If you discover additional work is n
 
 ### Step 3: Build Gate
 
-Update `activeForm` to "Running build gate: {subject}".
+Update the active form to "Running build gate: {subject}".
 
 Run `make` (or the project's equivalent full pipeline: format, lint, build, test).
 
@@ -111,19 +111,19 @@ Run `make` (or the project's equivalent full pipeline: format, lint, build, test
 
 ### Step 4: Commit
 
-Update `activeForm` to "Committing: {subject}".
+Update the active form to "Committing: {subject}".
 
 Create the commit. Follow the commit message conventions from the `style` skill. Include the test in the same unit of work as the implementation — same commit when committing — one logical unit — and update the docs when the commit changes documented behavior. Worker-chain branch/PR convention: branch name carries the issue id, the PR body ends with `Fixes CL-…` and carries no AI-attribution lines (CONTRIBUTING: title is a Conventional Commits subject, body is Summary/Verification).
 
-### Step 5: Critique Loop
+### Step 5: Reviewer Loop
 
-Update `activeForm` to "Running Critique loop: {subject}".
+Update the active form to "Running Reviewer loop: {subject}".
 
-Ask Critique to review the committed change.
+Ask Reviewer to review the committed change.
 
 **How to run:**
 
-1. Spawn the `@critique` subagent and ask it to review the output of `git show HEAD`. Include the intent from Step 1 (what the change is meant to accomplish and the approach agreed with Greybeard) so Critique can evaluate whether the implementation matches the plan, not just surface-level quality. Tell Critique to limit its findings to the scope of the current commit -- pre-existing issues in touched files are out of scope.
+1. Use `spawn_agent(agent="reviewer")` to ask it to review the output of `git show HEAD`. Include the intent from Step 1 (what the change is meant to accomplish and the approach agreed with Planner) so Reviewer can evaluate whether the implementation matches the plan, not just surface-level quality. Tell Reviewer to limit its findings to the scope of the current commit -- pre-existing issues in touched files are out of scope.
 2. Read its findings
 3. For each issue marked VERIFIED or HIGH confidence: fix it
 4. Re-run the build gate (Step 3) to verify fixes
@@ -140,30 +140,30 @@ Ask Critique to review the committed change.
 
    If the situation calls for more elaborate history surgery, search your available skills for one whose description covers git rebase or branch-history cleanup, and load it. Re-run the build gate after the rebase completes.
 
-6. Ask Critique to review `git show HEAD` again. Re-include the original intent from Step 1 and tell it what you fixed since the last pass so it can focus on verifying the fixes and checking for new issues rather than re-reviewing the entire change from scratch.
-7. Repeat until Critique comes back clean or all remaining findings are acknowledged and intentional
+6. Ask Reviewer to review `git show HEAD` again. Re-include the original intent from Step 1 and tell it what you fixed since the last pass so it can focus on verifying the fixes and checking for new issues rather than re-reviewing the entire change from scratch.
+7. Repeat until Reviewer comes back clean or all remaining findings are acknowledged and intentional
 
 **When to stop looping:**
 
-- Critique reports no issues
+- Reviewer reports no issues
 - Remaining findings are judgment calls you've consciously decided against, not oversights
 - The build passes after the last round of fixes
 
 ### Step 6: Next
 
-Mark the current task `completed` with `TaskUpdate`. Move to the next unit of work and return to Step 1.
+Mark the current task `completed` with `manage_tasks`. Move to the next unit of work and return to Step 1.
 
 ## Guidelines
 
-**Don't shortcut the loop.** The value is in the discipline. Skipping Greybeard "because this change is simple" or skipping Critique "because the build passes" defeats the purpose.
+**Don't shortcut the loop.** The value is in the discipline. Skipping Planner "because this change is simple" or skipping Reviewer "because the build passes" defeats the purpose.
 
-**Keep commits focused, but do not drop findings.** When Critique surfaces something outside the current commit's scope, every finding must be assigned one of four dispositions: (a) fix in the current commit, (b) commit it separately on this branch, (c) file a new issue with concrete acceptance criteria, or (d) accept it as-is. "Out of scope" is not a disposition. "Note it for later" is not a disposition unless you also say which of (a)–(d) "later" means.
+**Keep commits focused, but do not drop findings.** When Reviewer surfaces something outside the current commit's scope, every finding must be assigned one of four dispositions: (a) fix in the current commit, (b) commit it separately on this branch, (c) file a new issue with concrete acceptance criteria, or (d) accept it as-is. "Out of scope" is not a disposition. "Note it for later" is not a disposition unless you also say which of (a)–(d) "later" means.
 
-**Disposition (d) always requires operator approval** — neither you nor greybeard can drop a finding on your own. For (c), the issue must be filed in this session, with its ID or URL in the status update; a promise to file it later is dropping the work. If you are orchestrated by karen, route the decision through karen's section 9 procedure (consult greybeard, paste his recommendation verbatim, escalate to the operator for any "accept as-is" or any unclear answer). If you are running directly, consult the operator before choosing (c) or (d).
+**Disposition (d) always requires operator approval** — neither you nor planner can drop a finding on your own. For (c), the issue must be filed in this session, with its ID or URL in the status update; a promise to file it later is dropping the work. If you are orchestrated by karen, route the decision through karen's section 9 procedure (consult planner, paste his recommendation verbatim, escalate to the operator for any "accept as-is" or any unclear answer). If you are running directly, consult the operator before choosing (c) or (d).
 
 **Build must pass before every commit, amend, and rebase stop.** Never commit code that doesn't compile or pass tests. Fix build failures first, then commit, amend, or continue the rebase.
 
-**Greybeard is for approach, Critique is for execution.** Greybeard reviews your plan before you write code. Critique reviews your code after you write it. Don't conflate the two.
+**Planner is for approach, Reviewer is for execution.** Planner reviews your plan before you write code. Reviewer reviews your code after you write it. Don't conflate the two.
 
 ## Acknowledgment
 

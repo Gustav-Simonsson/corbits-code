@@ -46,7 +46,7 @@ export interface InferenceSpec {
 }
 
 export interface AgentProfile {
-  // Unique identifier, used in workflow steps as `agent: "greybeard"`.
+  // Unique identifier, used in workflow steps as `agent: "coder"`.
   id: string;
   description?: string;
   // Explicit per-agent model selection. When absent, the agent runs on the

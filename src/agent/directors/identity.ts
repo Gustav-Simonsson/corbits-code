@@ -73,7 +73,6 @@ export function packageAllowedSkillNames(
 
 /**
  * Product default reasoning effort by package modelRole (CL-5816 slice).
- * Intern is the cheap worker: same implement role, lower effort budget.
  */
 export const MODEL_ROLE_DEFAULT_EFFORT = {
   orchestrator: "high",
@@ -88,6 +87,5 @@ export const MODEL_ROLE_DEFAULT_EFFORT = {
 export function defaultEffortForDirector(
   pkg: DirectorPackage,
 ): ReasoningEffort {
-  if (pkg.id === "intern") return "low";
   return MODEL_ROLE_DEFAULT_EFFORT[pkg.modelRole];
 }

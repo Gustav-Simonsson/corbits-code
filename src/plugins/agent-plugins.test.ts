@@ -77,16 +77,16 @@ describe("resolveAgentPluginProfiles", () => {
     const a = agentModule("p1", [validProfile]);
     const b = agentModule("p2", [
       {
-        id: "reviewer",
-        description: "Code reviewer",
-        systemPromptRole: "You review code.",
+        id: "auditor",
+        description: "Code auditor",
+        systemPromptRole: "You audit code.",
       },
     ]);
     const profiles = await resolveAgentPluginProfiles([a.mod, b.mod], {
       ...a.config,
       ...b.config,
     });
-    expect(profiles.map((p) => p.id).sort()).toEqual(["reviewer", "scout"]);
+    expect(profiles.map((p) => p.id).sort()).toEqual(["auditor", "scout"]);
   });
 
   test("profiles from a non-array agents field are skipped", async () => {
@@ -156,7 +156,7 @@ describe("resolveAgentPluginProfiles", () => {
         systemPromptRole: "Should be skipped.",
       },
       {
-        id: "builder",
+        id: "coder",
         description: "Also reserved",
         systemPromptRole: "Should be skipped.",
       },
@@ -172,7 +172,7 @@ describe("resolveAgentPluginProfiles", () => {
     ).toBe(true);
     expect(
       warnings.some(
-        (w) => w.includes('agent "builder"') && w.includes("reserved"),
+        (w) => w.includes('agent "coder"') && w.includes("reserved"),
       ),
     ).toBe(true);
   });

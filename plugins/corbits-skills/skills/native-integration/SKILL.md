@@ -28,9 +28,9 @@ When a GaaS skill names a Claude/GaaS tool, use the Corbits equivalent. Do not c
 | TaskUpdate              | `manage_tasks`                                     |
 | TaskList                | `manage_tasks`                                     |
 | AskUserQuestion         | `ask_operator` (primary) / `ask_director` (worker) |
-| `Task` / `@greybeard`   | `spawn_agent(agent="greybeard")`                   |
-| `@critic` / `@critique` | `spawn_agent(agent="critic")`                      |
-| `@intern`               | `spawn_agent(agent="intern")`                      |
+| `Task` / `@greybeard`   | `spawn_agent(agent="planner")`                     |
+| `@critic` / `@critique` | `spawn_agent(agent="reviewer")`                    |
+| `@intern`               | `spawn_agent(agent="coder")`                       |
 | `@explorer`             | `spawn_agent(agent="explorer")`                    |
 | Read / Write / Edit     | `read` / `write` / `edit`                          |
 | Glob / Grep             | `glob` / `grep`                                    |
@@ -39,19 +39,19 @@ When a GaaS skill names a Claude/GaaS tool, use the Corbits equivalent. Do not c
 
 `intent="general"` is not a Corbits spawn. Use a closed director id.
 
-GaaS ast-grep invokes `sg` as a CLI. Corbits extras: run `sg` via `bash`. Do not fork the GaaS ast-grep body.
+GaaS ast-grep invokes `sg` as a CLI. Corbits extras: run `sg` via `bash`.
 
 Slash names that differ from GaaS skill ids: `/review` is GaaS `code-review`; `/create-issue` is GaaS `linear-create`. Keep those Corbits names.
 
-GaaS code-review uses "ask the user", "sub-agents"/"subagent", and `typescript-conventions`. Corbits extras: slash stays `/review`; `ask_operator` (tool mapping above); fleet `spawn_agent` for sub-agents; load `typescript` not `typescript-conventions`; findings-only — do not implement fixes; GitHub posting and Linear In Review (this skill). Do not fork the GaaS code-review body.
+GaaS code-review uses "ask the user", "sub-agents"/"subagent", and `typescript-conventions`. Corbits extras: slash stays `/review`; `ask_operator` (tool mapping above); fleet `spawn_agent` for sub-agents; load `typescript` not `typescript-conventions`; findings-only — do not implement fixes; GitHub posting and Linear In Review (this skill).
 
-GaaS refactor says "ask clarifying questions" / "ask the user". Corbits extras: `ask_operator` (tool mapping above). Do not fork the GaaS refactor body.
+GaaS refactor says "ask clarifying questions" / "ask the user". Corbits extras: `ask_operator` (tool mapping above).
 
-GaaS scribe uses the `question` tool. Corbits extras: `ask_operator` (tool mapping above). Do not fork the GaaS scribe body.
+GaaS scribe uses the `question` tool (now `ask_operator` in the Corbits body). Corbits extras: `ask_operator` (tool mapping above).
 
-When GaaS implement says you are orchestrated by karen, that is the Corbits primary (Skywalker). Route those disposition decisions through the primary, not a worker.
+When GaaS implement says you are orchestrated by karen, that is the Corbits primary (Dispatch). Route those disposition decisions through the primary, not a worker.
 
-GaaS implement "Initial Planning" / Greybeard-before-code is not `/plan`. Substantial Builder work consumes a counsel / `/plan` plan (files, acceptance criteria, non-goals, risks, ordered steps) and blocks if that plan is missing. Tiny parent-DIY stays plan-optional. `/plan` and counsel author; they do not ship. `/implement` does not steal planning from `/plan`. Do not fork the GaaS implement body.
+GaaS implement "Initial Planning" / planner-before-code is not `/plan`. Substantial coder work consumes a planner / `/plan` plan (files, acceptance criteria, non-goals, risks, ordered steps) and blocks if that plan is missing. Tiny parent-DIY stays plan-optional. `/plan` and planner author; they do not ship. `/implement` does not steal planning from `/plan`.
 
 ## Linear claim-first
 
@@ -67,7 +67,7 @@ GaaS linear-issue-workflow inlines `git worktree add` and marks In Progress afte
 
 GaaS `style` refuses to operate outside a git repo. Corbits does not: a folder without `.git` is a valid working directory (scratch, unpacked tarball, new project). Git-using skills (`implement`, `review`, `git-rebase`, `pull-request-review`) still no-op or ask when they need a repo. Do not invent a git repo to satisfy those skills.
 
-When GaaS git-rebase writes `/tmp` editor scripts, Corbits still plans on the primary and intern executes sequenced git via `bash`; intern may use inline `GIT_SEQUENCE_EDITOR` instead of write editor scripts. Do not fork the GaaS git-rebase body.
+When GaaS git-rebase writes `/tmp` editor scripts, Corbits still plans on the primary and the coder executes sequenced git via `bash`; it may use inline `GIT_SEQUENCE_EDITOR` instead of write editor scripts. Do not fork the GaaS git-rebase body.
 
 ## Tracker-agnostic issues
 
@@ -100,14 +100,14 @@ Do **not** post when the user only asked for a private/local read with no PR, or
 
 ### Multi-persona reviews
 
-When the workflow ran more than one review lens (for example `critic` for behavioral/architecture, `greybeard` for waivers or product judgment, an OSS/quality agent for packaging and public-API bar), each lens that produced a distinct judgment **posts its own review**. Do not collapse independent verdicts into one mushy "team thinks" paragraph.
+When the workflow ran more than one review lens (for example `reviewer` for behavioral/architecture, `planner` for waivers or product judgment, an OSS/quality agent for packaging and public-API bar), each lens that produced a distinct judgment **posts its own review**. Do not collapse independent verdicts into one mushy "team thinks" paragraph.
 
-| Lens                   | What it owns                                                       | When to post                                                                              |
-| ---------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| Primary / orchestrator | Verdict on the branch as it stands; residual findings; waiver list | Always when posting                                                                       |
-| Critic                 | Behavioral bugs, missing tests, architecture, commit coherence     | When a critic director ran                                                                |
-| Greybeard              | Waiver rulings and intentional exceptions                          | When Greybeard authorized any waiver, or when product/architecture judgment was requested |
-| OSS / quality          | Public-API, packaging, polish bar for shippable surface            | When that lens was explicitly run                                                         |
+| Lens                   | What it owns                                                       | When to post                                                                                |
+| ---------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Primary / orchestrator | Verdict on the branch as it stands; residual findings; waiver list | Always when posting                                                                         |
+| Reviewer               | Behavioral bugs, missing tests, architecture, commit coherence     | When a reviewer director ran                                                                |
+| Planner                | Waiver rulings and intentional exceptions                          | When the planner authorized any waiver, or when product/architecture judgment was requested |
+| OSS / quality          | Public-API, packaging, polish bar for shippable surface            | When that lens was explicitly run                                                           |
 
 Same GitHub account is fine. Label each post so a human can tell which lens spoke. Prefer separate `gh pr review` / `gh pr comment` posts over one mega-comment when more than one lens has substance.
 

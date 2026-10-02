@@ -455,7 +455,7 @@ describe("stall watchdog", () => {
       t.bridge.submit("build it", "immediate");
       t.bridge.handle({
         type: "inference.tool_call.end",
-        data: { name: "shell_collect", callId: "c1" },
+        data: { name: "wait_agents", callId: "c1" },
       });
       t.port.clear();
 

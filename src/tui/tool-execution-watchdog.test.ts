@@ -79,17 +79,6 @@ describe("tool execution watchdog", () => {
     ).toBe(5_000 + RUN_SHELL_WATCHDOG_SLACK_MS);
   });
 
-  test("shell_collect is exempt from the settings watchdog", () => {
-    const call = {
-      id: "1",
-      name: "shell_collect",
-      arguments: { shell_id: "x", action: "collect", wait_ms: 4_000 },
-    };
-    expect(
-      resolveToolExecutionTimeoutMs({ defaultMs: 660_000 }, call),
-    ).toBeUndefined();
-  });
-
   test("ask_director is unbounded and exempt from the settings watchdog", () => {
     // Awaiting the director can outlast settings.tools.timeoutMs; aborting
     // would cancel the pending ask so later send_input steers instead of answering.

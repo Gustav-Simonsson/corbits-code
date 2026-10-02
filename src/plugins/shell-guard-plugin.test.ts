@@ -474,7 +474,7 @@ describe("advertiseShellGuardTimeout", () => {
     const timeout = timeoutSchema(rewritten);
     expect(resolved).toBe(60_000);
     expect(timeout?.default).toBe(resolved);
-    expect(timeout?.description).toContain(`foreground default: ${resolved}`);
+    expect(timeout?.description).toContain(`foreground default ${resolved}`);
   });
 
   test("leaves other tools unchanged", () => {

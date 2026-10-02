@@ -86,7 +86,6 @@ export const KNOWN_CAPABILITY_ENGINES: readonly string[] = [
   "search_files",
   "list_dir",
   "lsp",
-  "shell_collect",
   "web_fetch",
   "web_search",
   "skill_search",
@@ -177,7 +176,7 @@ function nearestToolName(raw: string): string | undefined {
 }
 
 /**
- * Spawnable directors (closed set minus primary skywalker) whose mounted
+ * Spawnable directors (closed set minus primary dispatch) whose mounted
  * tool set includes `canonical` — derived from packageToCapabilities over
  * DIRECTOR_REGISTRY, so the hint tracks the envelopes. Sorted before the cap
  * so the three named are the first alphabetically, not the first in registry
@@ -187,7 +186,7 @@ export function rerouteAlternatives(canonical: string): readonly string[] {
   const want = canonicalToolName(canonical);
   const out: string[] = [];
   for (const pkg of Object.values(DIRECTOR_REGISTRY)) {
-    if (pkg.id === "skywalker") continue;
+    if (pkg.id === "dispatch") continue;
     const capabilities = packageToCapabilities(pkg);
     if (capabilities === undefined) {
       out.push(pkg.id);
@@ -203,7 +202,7 @@ export function rerouteAlternatives(canonical: string): readonly string[] {
 }
 
 /**
- * Tier-3 leaf directors (closed set, skywalker excluded) for the tier-gate
+ * Tier-3 leaf directors (closed set, dispatch excluded) for the tier-gate
  * hint when requires_tools names the leaf reporting channel on a non-leaf
  * tier. submit_result/ask_director mount post-filter, so no envelope mentions
  * them and rerouteAlternatives would report none — this names the directors
@@ -211,7 +210,7 @@ export function rerouteAlternatives(canonical: string): readonly string[] {
  */
 export function leafTierAlternatives(): readonly string[] {
   return Object.values(DIRECTOR_REGISTRY)
-    .filter((pkg) => pkg.id !== "skywalker" && pkg.tier === "leaf")
+    .filter((pkg) => pkg.id !== "dispatch" && pkg.tier === "leaf")
     .map((pkg) => pkg.id)
     .sort()
     .slice(0, 3);

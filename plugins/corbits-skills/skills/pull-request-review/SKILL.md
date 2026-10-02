@@ -135,7 +135,7 @@ dispatch: this skill already owns the target (this PR) and the fleet
 
 ### Step 9: Surface Pass
 
-Run a surface pass on the diff: Critic on the diff plus at most one
+Run a surface pass on the diff: Reviewer on the diff plus at most one
 extra lens. Do not dispatch a wider fleet.
 
 ### Step 10: Post the Review on GitHub

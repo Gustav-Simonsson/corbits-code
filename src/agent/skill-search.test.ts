@@ -95,8 +95,8 @@ describe("createSkillSearchTool", () => {
   });
 });
 
-describe("createAgentToolset skill_search mount", () => {
-  test("advertises skill_search on the primary wire", async () => {
+describe("createAgentToolset skill mount", () => {
+  test("primary wire carries use_skill and tool_search but not skill_search", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "corbits-skill-search-mount-"));
     const { createAgentToolset } = await import("./tools.js");
     const permissionGate = {
@@ -111,12 +111,9 @@ describe("createAgentToolset skill_search mount", () => {
       skills: snapshot,
     });
     const names = toolset.dynamicRunner.currentDefinitions().map((d) => d.name);
-    expect(names).toContain("skill_search");
+    expect(names).not.toContain("skill_search");
     expect(names).toContain("use_skill");
-    const skillSearch = toolset.dynamicRunner
-      .currentDefinitions()
-      .find((d) => d.name === "skill_search");
-    expect(skillSearch?.description).not.toMatch(/attached/i);
+    expect(names).toContain("tool_search");
     expect(toolset.skills).toEqual(snapshot);
     await toolset.dispose();
   });

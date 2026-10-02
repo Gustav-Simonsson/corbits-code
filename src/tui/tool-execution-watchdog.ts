@@ -100,8 +100,8 @@ export const MAX_TOOL_APPROVAL_PAUSE_MS = 1_800_000;
  * dispatch that should return at once (or a worker that carries its own bound).
  * ask_director is a long block awaiting the director; aborting it cancels the
  * pending ask so later send_input steers instead of answering.
- * shell_collect and run_shell background:true stay exempt: start returns at
- * once and collect is a bounded poll over a process that outlives the turn.
+ * run_shell background:true stays exempt: start returns at once and the
+ * process outlives the turn.
  *
  * mcp__* tool calls are the opposite of exempt: they arm unconditionally (see
  * resolveMcpToolTimeoutMs) even when no Settings are configured, because an
@@ -115,10 +115,7 @@ export function resolveToolExecutionTimeoutMs(
   if (
     call?.name === "spawn_agent" ||
     call?.name === "wait_agents" ||
-    call?.name === "ask_director" ||
-    // shell_collect with wait_ms is a capped poll over a background shell that
-    // outlives the turn; aborting the collect would not stop the process.
-    call?.name === "shell_collect"
+    call?.name === "ask_director"
   ) {
     return undefined;
   }

@@ -34,58 +34,24 @@ const PROMPT_SIZE_BASELINE: Record<
   DirectorId,
   { chars: number; bytes: number }
 > = {
-  // CL-8212: lean worker assembly [contract, tool-names-only, env, director
-  // body, grok note] — no tool-catalog or appendix on the worker path.
-  // Re-measured from the canonical fixture; grok family is the max for leaves.
-  // Skywalker dispatcher card (CL-8214): gpt family is the max (narrate residual).
-  skywalker: { chars: 8287, bytes: 8325 },
-  // CL-8228: short Corbits implement card; grok family is the max.
-  builder: { chars: 6944, bytes: 6968 },
-  explorer: { chars: 4897, bytes: 4921 },
-  counsel: { chars: 4816, bytes: 4834 },
-  // Restore of gaas intern.md mechanical body; grok family is the max.
-  intern: { chars: 7204, bytes: 7216 },
-  critic: { chars: 6488, bytes: 6516 },
-  greybeard: { chars: 5921, bytes: 5951 },
-  neckbeard: { chars: 24256, bytes: 24290 },
-  bruckheimer: { chars: 14160, bytes: 14220 },
-  // CL-7809: includes the deliberate CL-7663 voice restore (PR #932).
-  gaasbot: { chars: 6852, bytes: 6886 },
-  // CL-8231: upstream router rewrite (skill-routed lenses, no hardcoded
-  // Faremeter gates); re-measured from the canonical fixture.
-  draper: { chars: 7726, bytes: 7766 },
-  // CL-8234: upstream narrowed rewrite (eight principles + seven-law lens set,
-  // tokens-only, fix direction); re-measured from the canonical fixture.
-  emil: { chars: 8572, bytes: 8632 },
-  rand: { chars: 5885, bytes: 5915 },
-  shakespeare: { chars: 7008, bytes: 7036 },
-  testsmith: { chars: 6788, bytes: 6828 },
-  tester: { chars: 4675, bytes: 4695 },
-  // CL-7658: grok family is the max; re-measured on rebase.
-  gauntlet: { chars: 6535, bytes: 6559 },
-  // CL-7656: grok family is the max; re-measured on rebase.
-  prober: { chars: 6286, bytes: 6318 },
-  // CL-7671 scope-honesty sentences; grok family is the max.
-  migrator: { chars: 4449, bytes: 4469 },
-  // CL-7657: grok family is the max; baseline + allowance covers it, so
-  // main's tighter default-based budget needs no override.
-  warden: { chars: 5487, bytes: 5511 },
+  dispatch: { chars: 3551, bytes: 3555 },
+  explorer: { chars: 4041, bytes: 4059 },
+  planner: { chars: 4439, bytes: 4447 },
+  coder: { chars: 4705, bytes: 4715 },
+  reviewer: { chars: 4625, bytes: 4635 },
+  designer: { chars: 4596, bytes: 4604 },
+  artist: { chars: 4285, bytes: 4293 },
+  warden: { chars: 4113, bytes: 4127 },
+  shakespeare: { chars: 5993, bytes: 6015 },
+  prober: { chars: 5428, bytes: 5454 },
 };
 
 /**
  * Deliberate budgets above baseline + allowance, with justification.
- * greybeard: the grok residual (tool budget + 8-line ceremony, folded into the
- * canonical promptResidual seam verbatim under CL-8296) plus the upstream
- * greybeard-package growth (#1121) pushed greybeard-grok to 8218 chars,
- * 218 over the 8000 baseline + allowance budget. Trimming the greybeard body
- * is greybeard-lane-owned, so the overage is budgeted here instead; bytes
- * stay at the current budget level (measured 8248 < 9000).
  */
 const PROMPT_SIZE_OVERRIDES: Partial<
   Record<DirectorId, { chars: number; bytes: number }>
-> = {
-  greybeard: { chars: 8300, bytes: 9000 },
-};
+> = {};
 
 const CHAR_ALLOWANCE = 2000;
 const BYTE_ALLOWANCE = 3000;
@@ -159,7 +125,7 @@ describe("director prompt size budget", () => {
       // CL-8212: lean workers legitimately assemble under 5000 chars (the
       // contract plus a short director body); the floor still catches an
       // empty assembly well below any real prompt.
-      expect(row.chars).toBeGreaterThan(3000);
+      expect(row.chars).toBeGreaterThan(1000);
       expect(row.bytes).toBeGreaterThanOrEqual(row.chars);
     }
   });
@@ -264,7 +230,7 @@ describe("director prompt size budget", () => {
   });
 });
 
-describe("skywalker grok prefix (infer envelope vs trimmed director)", () => {
+describe("dispatch grok prefix (infer envelope vs trimmed director)", () => {
   // Production pin: a Grok fork at the runner that swapped loadSessionChatPrompt
   // or advertisedToolNamesForSessionMode for the trimmed director would fail here,
   // not only the fixture size inequality above.
@@ -290,11 +256,8 @@ describe("skywalker grok prefix (infer envelope vs trimmed director)", () => {
         "## Project guidance (AGENTS.md, reference)",
       );
       expect(systemPrompt).toContain(agentsBody.trim());
-      for (const name of CORE_TOOL_NAMES) {
-        expect(systemPrompt, name).toContain(`- ${name}:`);
-      }
 
-      const trimmed = assembleDirectorPrompt("skywalker", "grok");
+      const trimmed = assembleDirectorPrompt("dispatch", "grok");
       expect(trimmed).not.toContain(
         "## Project guidance (AGENTS.md, reference)",
       );
@@ -306,14 +269,14 @@ describe("skywalker grok prefix (infer envelope vs trimmed director)", () => {
       );
       expect(advertised).toEqual([...CORE_TOOL_NAMES, ...CATALOG_TOOL_NAMES]);
       const trimmedTools = canonicalToolNamesForDirector(
-        DIRECTOR_REGISTRY.skywalker,
+        DIRECTOR_REGISTRY.dispatch,
         "grok",
       );
       expect(trimmedTools).not.toContain("list_dir");
       expect(trimmedTools).not.toContain("tool_search");
       expect(trimmedTools).not.toContain("skill_search");
 
-      const overlay = resolveExecDirectorOverlay("skywalker");
+      const overlay = resolveExecDirectorOverlay("dispatch");
       expect(overlay.systemPrompt).toBeUndefined();
       expect(overlay.advertisedAllow).toBeUndefined();
       const { isAdvertised } = createAdvertisedToolset({

@@ -132,7 +132,7 @@ export class SubAgentDirector extends DefaultDirector {
   private readonly _systemPrompt: string;
   /** When true (CritiqueDirector), empty readCounts is not a successful complete. */
   private readonly requireEvidence: boolean;
-  /** When true (counsel / intent=plan), stub plan Findings is not a complete. */
+  /** When true (planner / intent=plan), stub plan Findings is not a complete. */
   private readonly requirePlanSubstance: boolean;
   private turnsCompleted = 0;
   private thrashState: ThrashState = EMPTY_THRASH_STATE;

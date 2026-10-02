@@ -14,7 +14,6 @@ import {
 import { buildSubAgentSystemPrompt } from "./prompts.js";
 import { resolveModelFamilyPolicy } from "./model-family-policy.js";
 import { shouldApplyGrokAntiThrash } from "../subagent/provider-family.js";
-import { shellCollectDefinition } from "./background-shell-tool.js";
 import { advertisedToolName } from "./tool-aliases.js";
 import { canonicalToolName } from "./canonical-tool-name.js";
 import { manageTasksDefinition } from "./tasks.js";
@@ -80,8 +79,8 @@ export type PromptSizeFamily = "default" | "muse" | "grok" | "claude" | "gpt";
 /**
  * Pre-filter mount names in run.ts install order: posix base (TOOL_NAMES,
  * shared with createPosixTools) + delete_file / lsp plugin tools
- * (buildCorePosixToolPlugins) + core web tools (coreSubAgentWebTools) +
- * shell_collect (run.ts). Codex natives are not mounted.
+ * (buildCorePosixToolPlugins) + core web tools (coreSubAgentWebTools).
+ * Codex natives are not mounted.
  */
 function preFilterMountNames(): readonly string[] {
   return [
@@ -90,7 +89,6 @@ function preFilterMountNames(): readonly string[] {
     LSP_TOOL_DEFINITION.name,
     webFetchDefinition.name,
     webSearchDefinition.name,
-    shellCollectDefinition.name,
   ];
 }
 

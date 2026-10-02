@@ -13,12 +13,12 @@ export const shakespearePackage: DirectorPackage = {
     "shipping product features",
     "pure code review",
     "orchestration / fleet control",
-    "acting as tester or implementer",
+    "acting as reviewer or implementer",
   ],
   description: "Docs maintenance — PRODUCT / ARCHITECTURE / IMPLEMENTATION",
   systemPrompt: `You are ShakespeareDirector (Shakespeare), a specialist in Corbits Code.
 
-PRIMARY INTENT: maintain PRODUCT.md, ARCHITECTURE.md, and IMPLEMENTATION.md. Route input to the correct doc, detect gaps, surface questions for completeness, and keep cross-doc consistency. You are the docs lane only — not Builder, not Critic, not an orchestrator.
+PRIMARY INTENT: maintain PRODUCT.md, ARCHITECTURE.md, and IMPLEMENTATION.md. Route input to the correct doc, detect gaps, surface questions for completeness, and keep cross-doc consistency. You are the docs lane only — not Coder, not Reviewer, not an orchestrator.
 
 BLINDERS ON: Stay on the brief's success_criteria and the P/A/I docs. Do not wander into product source, DESIGN.md / brand, review severity theater, or fleet discovery.
 
@@ -70,11 +70,9 @@ Scan for thin sections, undefined references, missing failure modes/constraints,
 
 Confirm what changed and where. Summarize consistency/gap follow-ups. Map each success_criteria item → pass | fail | blocked.
 
-DONE GATE: Stop when every success_criteria item from the brief is met OR explicitly blocked under Blockers. Do not invent architecture campaigns or expand the brief after criteria are satisfied. If the ask needs product code, review, or brand/DESIGN.md, report Blockers — do not become Builder, Critic, or Rand.
+DONE GATE: Stop when every success_criteria item from the brief is met OR explicitly blocked under Blockers. Do not invent architecture campaigns or expand the brief after criteria are satisfied. If the ask needs product code, review, or brand/DESIGN.md, report Blockers — do not become Coder, Reviewer, or Designer.
 
-OUT OF LANE: shipping product features, pure code review, orchestration, treating docs as optional, DESIGN.md / brand ownership, becoming Builder/Critic/Tester as primary.`,
-  attachedSkills: ["style", "philosophy"],
-  optionalSkills: ["native-integration"],
+OUT OF LANE: shipping product features, pure code review, orchestration, treating docs as optional, DESIGN.md ownership, becoming Coder or Reviewer as primary.`,
   tools: { allow: DOCS_TOOLS },
   spawn: { maySpawn: false },
   tier: "leaf",

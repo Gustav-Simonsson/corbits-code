@@ -4,26 +4,16 @@
 import type { OutputType } from "../../subagent/submit-result.js";
 
 export const DIRECTOR_IDS = [
-  "skywalker",
-  "builder",
+  "dispatch",
   "explorer",
-  "counsel",
-  "intern",
-  "critic",
-  "greybeard",
-  "neckbeard",
-  "bruckheimer",
-  "gaasbot",
-  "draper",
-  "emil",
-  "rand",
-  "shakespeare",
-  "testsmith",
-  "tester",
-  "gauntlet",
-  "prober",
-  "migrator",
+  "planner",
+  "coder",
+  "reviewer",
+  "designer",
+  "artist",
   "warden",
+  "shakespeare",
+  "prober",
 ] as const;
 
 export type DirectorId = (typeof DIRECTOR_IDS)[number];
@@ -39,7 +29,7 @@ export type TaskIntent =
  * Fleet authority tier (CL-6941). Runtime-enforced at the tool-mount point in
  * subagent/run.ts and by subagent/authority.ts — never by prompt wording.
  *
- * - "orchestrator": Tier 1, primary (skywalker). Full fleet control over the
+ * - "orchestrator": Tier 1, primary (dispatch). Full fleet control over the
  *   whole tree.
  * - "nested-orchestrator": Tier 2, scoped to its own subtree (no closed
  *   director uses this tier today). May manage only its own descendants,
@@ -105,7 +95,7 @@ export interface DirectorPackage {
   /**
    * Skill names whose bodies are injected once into the worker system prompt
    * at spawn (zero extra turn). Do not duplicate these names in optionalSkills.
-   * Skywalker/primary and intern leave this unset.
+   * Dispatch/primary leaves this unset.
    */
   readonly attachedSkills?: readonly string[];
   /** Optional skill names (ordered). Workers load matching bodies on demand with skill_search + use_skill, scoped to the union of attachedSkills and optionalSkills; the primary orchestrator keeps them use_skill-loadable. */

@@ -29,7 +29,7 @@ const USE_SKILL_INPUT_SCHEMA = {
 export const useSkillDefinition: ToolDefinition = {
   name: "use_skill",
   description:
-    "Load the full instructions for a skill. Names are listed under 'Skills' in the system prompt; call skill_search for descriptions, then this tool with the skill's name to load the body. The returned instructions stay in effect for the rest of the task.",
+    "Load a skill's instructions by name (find names with tool_search). They stay in effect for the task.",
   inputSchema: USE_SKILL_INPUT_SCHEMA,
 };
 

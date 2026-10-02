@@ -40,7 +40,7 @@ export const FLEET_VERBS = new Set([
 ]);
 
 /**
- * Fleet discovery — Tier 1 (skywalker) only. Nested orchestrators spawn from
+ * Fleet discovery — Tier 1 (dispatch) only. Nested orchestrators spawn from
  * a closed allowlist and must not index the full fleet (CL-7051).
  */
 export const ORCHESTRATOR_ONLY_FLEET_VERBS = new Set(["search_agents"]);
@@ -80,7 +80,7 @@ export function assertTierMayMountFleetVerb(
   if (tier === "nested-orchestrator" && isOrchestratorOnlyFleetVerb(toolName)) {
     throw new FleetAuthorityError(
       `Tier 2 nested orchestrators cannot mount fleet discovery verb "${toolName}". ` +
-        `Only Tier 1 (skywalker) may discover the fleet; nested directors spawn from their allowlist.`,
+        `Only Tier 1 (dispatch) may discover the fleet; nested directors spawn from their allowlist.`,
     );
   }
 }

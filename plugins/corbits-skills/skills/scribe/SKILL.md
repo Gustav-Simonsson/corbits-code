@@ -1,13 +1,6 @@
 ---
 name: scribe
 description: Maintain product, architecture, and implementation docs — routes input, detects gaps, and interviews for completeness
-tools:
-  - question
-  - read
-  - write
-  - edit
-  - glob
-  - grep
 ---
 
 # Scribe
@@ -54,7 +47,7 @@ Before processing input, locate the documentation files:
 
 ## Using the Question Tool
 
-Throughout this skill, you will use the `question` tool (also known as AskUserQuestion in some contexts) to interact with the user. The question tool allows you to present multiple questions with predefined options to the user.
+Throughout this skill, you will use the `ask_operator` tool to interact with the user. `ask_operator` allows you to present multiple questions with predefined options to the user.
 
 **Key mechanics:**
 - You can present multiple questions in a single tool call (as an array of questions)
@@ -171,10 +164,10 @@ Use these learned signals alongside general heuristics. Project-specific vocabul
 
 If the categorization is clear, proceed to update the appropriate document.
 
-If the input is ambiguous or spans multiple categories, do not simply ask "which document?" Instead, use the `question` tool to interview the user and decompose the input into distinct claims that can each be routed precisely:
+If the input is ambiguous or spans multiple categories, do not simply ask "which document?" Instead, use the `ask_operator` tool to interview the user and decompose the input into distinct claims that can each be routed precisely:
 
 1. Explain what makes the input ambiguous — identify the product, architecture, and/or implementation aspects you see in it.
-2. Use the `question` tool to ask targeted questions that separate those aspects. Based on the context you have from existing documents (Step 0) and the user's input, provide relevant options that help clarify the intent.
+2. Use the `ask_operator` tool to ask targeted questions that separate those aspects. Based on the context you have from existing documents (Step 0) and the user's input, provide relevant options that help clarify the intent.
 
 **If documents have content with patterns to reference:**
    - When user mentions "fast and reliable", reference existing performance promises or design constraints:
@@ -222,7 +215,7 @@ Read the other two documents and check whether the new content implies entries t
 - An implementation detail referencing a component not described in architecture
 - A product goal with no implementation approach mentioned
 
-If gaps are found, use the `question` tool to present them as a batch of 2-4 questions. Based on the context from existing documents (Step 0) and the change just made, provide specific, relevant options.
+If gaps are found, use the `ask_operator` tool to present them as a batch of 2-4 questions. Based on the context from existing documents (Step 0) and the change just made, provide specific, relevant options.
 
 **Example with existing patterns:**
 
@@ -230,7 +223,7 @@ If you just added an export service to ARCHITECTURE.md, and PRODUCT.md has no me
 
 > I updated ARCHITECTURE.md with the export service. I noticed some potential gaps in other documents.
 
-Use the `question` tool with:
+Use the `ask_operator` tool with:
 - Question 1: "Should PRODUCT.md describe data export as a user-facing capability?"
   - **If PRODUCT.md has similar features**: "Add export as data access capability (like reports feature)" / "Add as part of reporting feature"
   - **If PRODUCT.md is minimal**: "Yes, add as new user-facing capability" / "No, exports are internal only"
@@ -250,7 +243,7 @@ Scan the updated document for weaknesses:
 - Missing failure modes, edge cases, or constraints
 - Decisions stated without rationale
 
-Use the `question` tool to present 2-4 probing questions as a batch. Focus on non-obvious gaps — things the user might not think to document unprompted. Based on the content just added, questions already answered in this session, and patterns from existing documentation, provide specific, contextual options.
+Use the `ask_operator` tool to present 2-4 probing questions as a batch. Focus on non-obvious gaps — things the user might not think to document unprompted. Based on the content just added, questions already answered in this session, and patterns from existing documentation, provide specific, contextual options.
 
 **Example with existing patterns:**
 
@@ -297,9 +290,9 @@ These examples demonstrate how classification and the active documentation steps
 **Input:** "Data export is fast and reliable"
 **Classification:** Ambiguous — has both product and architecture aspects.
 
-Instead of asking "which document?", use the `question` tool to decompose. After reading existing docs (Step 0) and seeing that PRODUCT.md already mentions "reports" as a user-facing feature and ARCHITECTURE.md discusses latency targets for other services:
+Instead of asking "which document?", use the `ask_operator` tool to decompose. After reading existing docs (Step 0) and seeing that PRODUCT.md already mentions "reports" as a user-facing feature and ARCHITECTURE.md discusses latency targets for other services:
 
-Use the `question` tool:
+Use the `ask_operator` tool:
 - Question 1: "Is 'fast and reliable' a promise to users or a system design requirement?"
   - Option 1: "User-facing promise (add to PRODUCT.md like other user benefits)"
   - Option 2: "System design requirement (add to ARCHITECTURE.md with latency targets)"
@@ -319,7 +312,7 @@ If the user selects "Both" and "under 5 seconds", this produces two updates:
 
 After updating, scribe reads the other documents and finds that PRODUCT.md has no mention of notifications as a user-facing feature, but does mention "alerts" in a different context. IMPLEMENTATION.md describes other third-party integrations using specific provider names.
 
-Use the `question` tool:
+Use the `ask_operator` tool:
 - Question 1: "Should PRODUCT.md describe notifications as a user-facing capability?"
   - Option 1: "Yes - add as new notifications feature (users receive updates via email/SMS/push)"
   - Option 2: "Yes - integrate with existing 'alerts' feature (notifications are how alerts are delivered)"
@@ -335,7 +328,7 @@ Use the `question` tool:
 
 After updating, scribe scans the section and identifies gaps. From reading ARCHITECTURE.md (Step 0), scribe notices other sections mention security constraints and timeout values. IMPLEMENTATION.md describes storage mechanisms for other sensitive data.
 
-Use the `question` tool:
+Use the `ask_operator` tool:
 - Question 1: "What happens when a refresh token is revoked?"
   - Option 1: "User signed out immediately (like session invalidation elsewhere in the system)"
   - Option 2: "User signed out at next request (deferred enforcement)"
@@ -353,7 +346,7 @@ Use the `question` tool:
 
 ### Document does not exist
 
-If the target document does not exist, use the `question` tool to ask the user if they want to create it, with context about what type of document it is:
+If the target document does not exist, use the `ask_operator` tool to ask the user if they want to create it, with context about what type of document it is:
 
 Question: "The [DOCUMENT].md file does not exist. Should I create it?"
 Options:
@@ -362,7 +355,7 @@ Options:
 
 ### Content conflicts
 
-If the new content contradicts existing content, use the `question` tool to flag it with specific options:
+If the new content contradicts existing content, use the `ask_operator` tool to flag it with specific options:
 
 Question: "This conflicts with existing content in [DOCUMENT].md: '[existing content]'. How should I resolve this?"
 Options based on the nature of the conflict:
@@ -372,7 +365,7 @@ Options based on the nature of the conflict:
 
 ### Unclear scope
 
-If the input is too broad or vague to place in a specific document, use the `question` tool to narrow it down:
+If the input is too broad or vague to place in a specific document, use the `ask_operator` tool to narrow it down:
 
 Question: "I'm not sure where '[user input]' belongs. Can you help me place it?"
 Options based on what aspects you can detect:

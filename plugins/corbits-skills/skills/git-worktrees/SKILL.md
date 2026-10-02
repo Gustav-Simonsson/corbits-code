@@ -7,7 +7,7 @@ description: Create a git worktree from origin/<default-branch> and tear it down
 
 # git-worktrees
 
-How to create a worktree from origin/<default-branch> and tear it down. Load via `use_skill("git-worktrees")` and copy commands into an intern brief. Intern executes via `run_shell`. Do not run the git on the parent.
+How to create a worktree from origin/<default-branch> and tear it down. Load via `use_skill("git-worktrees")` and copy commands into a coder brief. The coder executes via `run_shell`. Do not run the git on the parent.
 
 ## Create from origin/<default-branch>
 
@@ -17,7 +17,7 @@ git fetch origin
 git worktree add ../worktree/<branch-name> -b <branch-name> origin/<default-branch>
 ```
 
-Always base new branches on `origin/<default-branch>` (whatever the repository uses). After creating the worktree, intern `cd`s into it and installs local dependencies (`bun install` when the project uses Bun; otherwise follow developer docs). Worktrees do not share `node_modules`.
+Always base new branches on `origin/<default-branch>` (whatever the repository uses). After creating the worktree, the coder `cd`s into it and installs local dependencies (`bun install` when the project uses Bun; otherwise follow developer docs). Worktrees do not share `node_modules`.
 
 ## Teardown
 

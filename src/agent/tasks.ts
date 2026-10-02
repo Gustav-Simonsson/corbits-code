@@ -47,40 +47,33 @@ export type ManageTasksArgs = typeof ManageTasksArgsSchema.infer;
 export const manageTasksDefinition: ToolDefinition = {
   name: "manage_tasks",
   description:
-    "Maintain your own ordered work list for multi-step jobs. " +
-    'action="create" replaces the full list (use to seed or replan). ' +
-    'action="update" patches by id: status (todo→doing→done/cancelled), title edits, ' +
-    "and appends when the id is new and title is set. " +
-    "Keep this list live — add, cancel, and re-title steps as you learn more. " +
-    "Skip for trivial single-step changes.",
+    "Your work checklist for multi-step jobs. create replaces the list; update patches by id (status todo|doing|done|cancelled) and appends unknown ids that have a title. Skip for one-step work.",
   inputSchema: {
     type: "object",
     properties: {
       action: {
         type: "string",
         enum: ["create", "update"],
-        description:
-          '"create" replaces the list; "update" patches by id and can append new tasks (id + title).',
+        description: "create or update.",
       },
       tasks: {
         type: "array",
-        description:
-          'For action="create": the new ordered task list (full replace).',
+        description: "Full list (create).",
         items: {
           type: "object",
           properties: {
             id: {
               type: "string",
-              description: "Stable id, unique within this list (e.g. t1, t2).",
+              description: "Unique id.",
             },
             title: {
               type: "string",
-              description: "Short, action-oriented description.",
+              description: "Action title.",
             },
             status: {
               type: "string",
               enum: ["todo", "doing", "done", "cancelled"],
-              description: 'Defaults to "todo" when omitted.',
+              description: "Default todo.",
             },
           },
           required: ["id", "title"],
@@ -88,20 +81,17 @@ export const manageTasksDefinition: ToolDefinition = {
       },
       updates: {
         type: "array",
-        description:
-          'For action="update": per-task patches. Unknown id + title appends a new task; ' +
-          'status "cancelled" removes it from active work.',
+        description: "Patches (update).",
         items: {
           type: "object",
           properties: {
             id: {
               type: "string",
-              description: "Id of an existing task, or a new id to append.",
+              description: "Task id.",
             },
             title: {
               type: "string",
-              description:
-                "Required when appending a new id; optional rename for existing.",
+              description: "Required for new ids.",
             },
             status: {
               type: "string",

@@ -142,10 +142,10 @@ describe("shouldAbortForStall — execution-watchdog-exempt tools do not pin for
     stallTimeoutMs: STALL_TIMEOUT_MS,
     isProcessing: true,
     streamingType: "tool" as const,
-    currentToolName: "shell_collect",
+    currentToolName: "wait_agents",
     activeToolCalls: ["collect-1"],
-    callIdByName: { shell_collect: "collect-1" },
-    callNameById: { "collect-1": "shell_collect" },
+    callIdByName: { wait_agents: "collect-1" },
+    callNameById: { "collect-1": "wait_agents" },
   };
 
   test("in-flight collect auto-aborts after the stall budget", () => {
@@ -168,7 +168,7 @@ describe("shouldAbortForStall — execution-watchdog-exempt tools do not pin for
   });
 
   // tool.done of a sibling bash clears currentToolName and streamingType
-  // while shell_collect is still in activeToolCalls. Keying only the last
+  // while wait_agents is still in activeToolCalls. Keying only the last
   // name would leave that poll unbounded forever.
   test("sibling tool.done while collect is in-flight still aborts at the stall budget", () => {
     const afterSiblingDone = {
@@ -177,8 +177,8 @@ describe("shouldAbortForStall — execution-watchdog-exempt tools do not pin for
       streamingType: null,
       awaitingResponse: false,
       activeToolCalls: ["collect-1"],
-      callIdByName: { shell_collect: "collect-1" },
-      callNameById: { "collect-1": "shell_collect" },
+      callIdByName: { wait_agents: "collect-1" },
+      callNameById: { "collect-1": "wait_agents" },
     };
     expect(
       shouldAbortForStall({ ...afterSiblingDone, nowMs: STALL_TIMEOUT_MS - 1 }),
@@ -213,7 +213,7 @@ describe("shouldAbortForStall — execution-watchdog-exempt tools do not pin for
       awaitingResponse: false,
       activeToolCalls: ["collect-1"],
       callIdByName: {},
-      callNameById: { "collect-1": "shell_collect" },
+      callNameById: { "collect-1": "wait_agents" },
     };
     expect(
       shouldAbortForStall({ ...leftover, nowMs: STALL_TIMEOUT_MS - 1 }),
@@ -226,11 +226,11 @@ describe("shouldAbortForStall — execution-watchdog-exempt tools do not pin for
       { type: "inference.start" },
       {
         type: "tool.start",
-        data: { call: { id: "collect-1", name: "shell_collect" } },
+        data: { call: { id: "collect-1", name: "wait_agents" } },
       },
       {
         type: "tool.start",
-        data: { call: { id: "collect-2", name: "shell_collect" } },
+        data: { call: { id: "collect-2", name: "wait_agents" } },
       },
       {
         type: "tool.done",
@@ -372,7 +372,7 @@ describe("shouldNoticeStall", () => {
       ...base,
       awaitingResponse: false,
       streamingType: "tool" as const,
-      currentToolName: "shell_collect",
+      currentToolName: "wait_agents",
       activeToolCalls: ["collect-1"],
     };
     expect(shouldNoticeStall(collect)).toBe(true);
