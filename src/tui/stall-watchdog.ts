@@ -1,4 +1,4 @@
-import { canonicalToolName } from "../agent/canonical-tool-name.js";
+import { isSameTool } from "../agent/canonical-tool-name.js";
 import type { TurnStatus } from "./chrome-state.js";
 
 // How long the run can be continuously awaiting a response with no new content
@@ -76,8 +76,7 @@ function silentPastThreshold(
  */
 function isStallBoundedToolName(name: string | null | undefined): boolean {
   if (name === null || name === undefined) return false;
-  const engine = canonicalToolName(name);
-  return engine === "wait_agents" || engine === "ask_director";
+  return isSameTool(name, "wait_agents") || isSameTool(name, "ask_director");
 }
 
 function isStallBoundedInFlightTool(args: ShouldAbortForStallArgs): boolean {

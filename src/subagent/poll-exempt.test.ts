@@ -30,6 +30,15 @@ describe("isPollOnlyPendingBatch", () => {
     ).toBe(true);
   });
 
+  test("gpt wire alias wait is exempt like wait_agents", () => {
+    expect(
+      isPollOnlyPendingBatch(
+        [call("wait")],
+        [result(waitContent(["running"], true))],
+      ),
+    ).toBe(true);
+  });
+
   test("live wait statuses without timeout are exempt", () => {
     for (const status of ["running", "queued", "awaiting_director"]) {
       expect(

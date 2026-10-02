@@ -43,7 +43,7 @@ describe("tool execution watchdog", () => {
 
   // Dispatch returns immediately / collect can outlast tools.timeoutMs while
   // workers still run: the generic per-tool budget must never arm on either.
-  test.each(["spawn_agent", "wait_agents"] as const)(
+  test.each(["spawn_agent", "wait_agents", "wait"] as const)(
     "%s is unbounded and exempt from the settings watchdog",
     (name) => {
       const call = { id: "1", name, arguments: {} };
@@ -60,24 +60,27 @@ describe("tool execution watchdog", () => {
     },
   );
 
-  test("background run_shell start is exempt; foreground arms requested+slack", () => {
-    const background = {
-      id: "1",
-      name: "run_shell",
-      arguments: { command: "sleep 60", timeout: 5_000, background: true },
-    };
-    expect(
-      resolveToolExecutionTimeoutMs({ defaultMs: 660_000 }, background),
-    ).toBeUndefined();
-    const foreground = {
-      id: "2",
-      name: "run_shell",
-      arguments: { command: "sleep 60", timeout: 5_000 },
-    };
-    expect(
-      resolveToolExecutionTimeoutMs({ defaultMs: 660_000 }, foreground),
-    ).toBe(5_000 + RUN_SHELL_WATCHDOG_SLACK_MS);
-  });
+  test.each(["run_shell", "bash", "shell"] as const)(
+    "background %s start is exempt; foreground arms requested+slack",
+    (name) => {
+      const background = {
+        id: "1",
+        name,
+        arguments: { command: "sleep 60", timeout: 5_000, background: true },
+      };
+      expect(
+        resolveToolExecutionTimeoutMs({ defaultMs: 660_000 }, background),
+      ).toBeUndefined();
+      const foreground = {
+        id: "2",
+        name,
+        arguments: { command: "sleep 60", timeout: 5_000 },
+      };
+      expect(
+        resolveToolExecutionTimeoutMs({ defaultMs: 660_000 }, foreground),
+      ).toBe(5_000 + RUN_SHELL_WATCHDOG_SLACK_MS);
+    },
+  );
 
   test("ask_director is unbounded and exempt from the settings watchdog", () => {
     // Awaiting the director can outlast settings.tools.timeoutMs; aborting

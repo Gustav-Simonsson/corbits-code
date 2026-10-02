@@ -15,7 +15,7 @@
  * for the pagination cursor.
  */
 
-import { canonicalToolName } from "../agent/canonical-tool-name.js";
+import { isSameTool } from "../agent/canonical-tool-name.js";
 import {
   fg as fgChunk,
   bold as boldChunk,
@@ -502,7 +502,7 @@ const USE_SKILL_TOOL = "use_skill";
  * future wording) simply does not collapse.
  */
 function loadedSkillName(name: string, content: string): string | undefined {
-  if (canonicalToolName(name) !== USE_SKILL_TOOL) return undefined;
+  if (!isSameTool(name, USE_SKILL_TOOL)) return undefined;
   return /^Skill "([^"]+)"/.exec(content)?.[1];
 }
 

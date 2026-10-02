@@ -1,4 +1,4 @@
-import { canonicalToolName } from "../agent/canonical-tool-name.js";
+import { isSameTool } from "../agent/canonical-tool-name.js";
 import type {
   ContentBlock as RuntimeContentBlock,
   ConversationTurn,
@@ -167,10 +167,7 @@ function finalizeResumeToolBlocks(
   // so an errored or missing result must not leave the raw rows behind.
   for (let i = 0; i < blocks.length; i += 1) {
     const call = blocks[i];
-    if (
-      call?.type !== "tool_call" ||
-      canonicalToolName(call.name) !== "manage_tasks"
-    )
+    if (call?.type !== "tool_call" || !isSameTool(call.name, "manage_tasks"))
       continue;
     indicesToRemove.add(i);
     const resultIndex =
@@ -186,7 +183,8 @@ function finalizeResumeToolBlocks(
     const callIndex = callIdToCallIndex.get(result.callId);
     if (callIndex === undefined) continue;
     const call = blocks[callIndex];
-    if (call?.type !== "tool_call" || call.name !== "submit_plan") continue;
+    if (call?.type !== "tool_call" || !isSameTool(call.name, "submit_plan"))
+      continue;
 
     indicesToRemove.add(callIndex);
     indicesToRemove.add(i);
@@ -300,7 +298,8 @@ export function turnsToContentBlocks(
   // Collapse present tool calls into view blocks when args are still available.
   for (let i = 0; i < out.length; i++) {
     const block = out[i];
-    if (block?.type !== "tool_call" || block.name !== "present") continue;
+    if (block?.type !== "tool_call" || !isSameTool(block.name, "present"))
+      continue;
     try {
       const view = (JSON.parse(block.arguments) as { view?: unknown }).view;
       const validated = validateView(view);

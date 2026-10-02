@@ -1,4 +1,4 @@
-import { canonicalToolName } from "../agent/canonical-tool-name.js";
+import { isSameTool } from "../agent/canonical-tool-name.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   formatMcpToolTimeoutMessage,
@@ -113,16 +113,15 @@ export function resolveToolExecutionTimeoutMs(
   config?: ToolWatchdogConfig,
   call?: ToolCall,
 ): number | undefined {
-  const engineName =
-    call !== undefined ? canonicalToolName(call.name) : undefined;
   if (
-    engineName === "spawn_agent" ||
-    engineName === "wait_agents" ||
-    engineName === "ask_director"
+    call !== undefined &&
+    (isSameTool(call.name, "spawn_agent") ||
+      isSameTool(call.name, "wait_agents") ||
+      isSameTool(call.name, "ask_director"))
   ) {
     return undefined;
   }
-  if (call?.name === "run_shell") {
+  if (call !== undefined && isSameTool(call.name, "run_shell")) {
     // A background run returns at once and finishes after tool.boundary; the
     // watchdog must not arm requested+slack against the START call or it would
     // abort mid-run. The process's own timeout still bounds it.

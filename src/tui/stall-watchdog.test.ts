@@ -76,6 +76,21 @@ describe("shouldAbortForStall", () => {
       }),
     ).toBe(false);
   });
+
+  test.each(["wait_agents", "wait"] as const)(
+    "in-flight %s is stall-bounded under any wire name",
+    (currentToolName) => {
+      // streamingType "tool" isolates the stall-bounded branch: an ordinary
+      // tool run with this shape is not a stall (see above).
+      expect(
+        shouldAbortForStall({
+          ...base,
+          streamingType: "tool",
+          currentToolName,
+        }),
+      ).toBe(true);
+    },
+  );
 });
 
 // Awaiting the model's next response with no tokens yet — set right after

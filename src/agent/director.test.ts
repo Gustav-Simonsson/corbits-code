@@ -1013,29 +1013,42 @@ describe("open-task termination guard", () => {
     expect(hasInfer(actions)).toBe(false);
   });
 
-  test("a task change emits the updated task list on the chat event", async () => {
-    const director = createChatDirector("base", [], {});
-    const actions = actionsArray(
-      await director.decide(
-        manageTasksEvent("doing"),
-        stubReactorState,
-        stubReactorCapabilities,
-      ),
-    );
-    expect(
-      actions.filter(
-        (a) =>
-          a.type === "emit" &&
-          (a as { eventType?: string }).eventType === CHAT_TASKS_CHANGED_EVENT,
-      ),
-    ).toEqual([
-      {
-        type: "emit",
-        eventType: CHAT_TASKS_CHANGED_EVENT,
-        data: { tasks: [{ id: "t1", title: "work", status: "doing" }] },
-      },
-    ]);
-  });
+  test.each(["manage_tasks", "todowrite", "update_plan"] as const)(
+    "a task change via %s emits the updated task list on the chat event",
+    async (name) => {
+      const director = createChatDirector("base", [], {});
+      const actions = actionsArray(
+        await director.decide(
+          makeInferenceDoneEvent([
+            {
+              id: "m",
+              name,
+              args: {
+                action: "create",
+                tasks: [{ id: "t1", title: "work", status: "doing" }],
+              },
+            },
+          ]),
+          stubReactorState,
+          stubReactorCapabilities,
+        ),
+      );
+      expect(
+        actions.filter(
+          (a) =>
+            a.type === "emit" &&
+            (a as { eventType?: string }).eventType ===
+              CHAT_TASKS_CHANGED_EVENT,
+        ),
+      ).toEqual([
+        {
+          type: "emit",
+          eventType: CHAT_TASKS_CHANGED_EVENT,
+          data: { tasks: [{ id: "t1", title: "work", status: "doing" }] },
+        },
+      ]);
+    },
+  );
 
   test("stops nudging and lets the turn end after the cap of content-free attempts", async () => {
     const director = createChatDirector("base", [], {});
