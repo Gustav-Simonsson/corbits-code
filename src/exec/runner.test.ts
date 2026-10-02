@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import type { ToolCall } from "@intx/types/runtime";
 import type { AgentTool } from "@intx/agent";
 import { submitOutputDefinition } from "../agent/director.js";
 import { DIRECTOR_REGISTRY } from "../agent/directors/registry.js";
@@ -19,6 +20,7 @@ import {
 } from "../auth/codex/session.js";
 import type { Config } from "../config/index.js";
 import { CREDENTIAL_FAILURE_USER_MESSAGE } from "../inference-error-message.js";
+import { createPermissionGate } from "../permission/gate.js";
 import {
   clearActiveRun,
   getActiveRun,
@@ -47,6 +49,7 @@ import {
   refreshSelectedProviderCredential,
   resolveExecDirectorOverlay,
   resolveExecDirectorOverlayForPackage,
+  resolveExecInteractive,
   runExec,
 } from "./runner.js";
 
@@ -813,5 +816,147 @@ describe("exec tool call gate and promoter", () => {
     expect(
       computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
     ).not.toContain("list_dir");
+  });
+});
+
+describe("exec permission prompt gating (CL-9002)", () => {
+  test("piped stdout with a stdin TTY still prompts", () => {
+    expect(resolveExecInteractive({ stdinTTY: true, stdoutTTY: false })).toBe(
+      true,
+    );
+  });
+
+  test("full TTY prompts", () => {
+    expect(resolveExecInteractive({ stdinTTY: true, stdoutTTY: true })).toBe(
+      true,
+    );
+  });
+
+  test("headless stdin never prompts, whatever stdout is", () => {
+    expect(resolveExecInteractive({ stdinTTY: false, stdoutTTY: false })).toBe(
+      false,
+    );
+    expect(resolveExecInteractive({ stdinTTY: false, stdoutTTY: true })).toBe(
+      false,
+    );
+    expect(
+      resolveExecInteractive({ stdinTTY: undefined, stdoutTTY: true }),
+    ).toBe(false);
+  });
+
+  // Exec-identical headless gate wiring: interactive:false with the prompt seam
+  // armed to throw, so a test passes only when decide() denies on the real
+  // production path (the old direct-seam test never went through decide()).
+  const headlessGate = (onDeny: (reason: string) => void) =>
+    createPermissionGate({
+      approvals: [],
+      requestApproval: async () => {
+        throw new Error("headless run must never reach the prompt seam");
+      },
+      interactive: false,
+      onHeadlessDeny: onDeny,
+      skipPermissions: false,
+      reactorGated: true,
+    });
+
+  const captureStdio = () => {
+    const errWrites: string[] = [];
+    const outWrites: string[] = [];
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
+      chunk: unknown,
+    ) => {
+      errWrites.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(((
+      chunk: unknown,
+    ) => {
+      outWrites.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    return {
+      errWrites,
+      outWrites,
+      restore: () => {
+        stderrSpy.mockRestore();
+        stdoutSpy.mockRestore();
+      },
+    };
+  };
+
+  test("headless gate deny names the action and remedy on stderr, stdout clean", async () => {
+    const stdio = captureStdio();
+    try {
+      // Same shape as runner.ts: the denial surfaces on stderr, never stdout.
+      const gate = headlessGate((reason) => {
+        process.stderr.write(`Permission denied: ${reason}\n`);
+      });
+      const authorized = await gate.authorizeCall({
+        id: "h1",
+        name: "web_fetch",
+        arguments: { url: "https://example.com/docs", format: "markdown" },
+      } as ToolCall);
+      expect(authorized.effect).toBe("deny");
+      const evaluated = await gate.evaluate({
+        id: "h2",
+        name: "web_fetch",
+        arguments: { url: "https://example.com/other", format: "markdown" },
+      } as ToolCall);
+      expect(evaluated.allowed).toBe(false);
+    } finally {
+      stdio.restore();
+    }
+    const denial = stdio.errWrites.join("");
+    expect(denial).toContain("Permission denied:");
+    expect(denial).toContain("requires operator approval");
+    expect(denial).toContain("--dangerously-skip-permissions");
+    expect(stdio.outWrites).toEqual([]);
+  });
+
+  test("secret-path headless deny names the action without bypass coaching", async () => {
+    const stdio = captureStdio();
+    try {
+      const gate = headlessGate((reason) => {
+        process.stderr.write(`Permission denied: ${reason}\n`);
+      });
+      const verdict = await gate.evaluate({
+        id: "s1",
+        name: "run_shell",
+        arguments: { command: "cat .env" },
+      } as ToolCall);
+      expect(verdict.allowed).toBe(false);
+    } finally {
+      stdio.restore();
+    }
+    const denial = stdio.errWrites.join("");
+    expect(denial).toContain("sensitive path");
+    expect(denial).not.toContain("--dangerously-skip-permissions");
+    expect(stdio.outWrites).toEqual([]);
+  });
+
+  test("piped stdout with a stdin TTY keeps the ask advertised and round-trips", async () => {
+    expect(resolveExecInteractive({ stdinTTY: true, stdoutTTY: false })).toBe(
+      true,
+    );
+    const seen: string[] = [];
+    const gate = createPermissionGate({
+      approvals: [],
+      requestApproval: async (request) => {
+        seen.push(request.subject);
+        return { allow: true };
+      },
+      interactive: true,
+      skipPermissions: false,
+      reactorGated: true,
+    });
+    const call = {
+      id: "i1",
+      name: "web_fetch",
+      arguments: { url: "https://example.com/docs", format: "markdown" },
+    } as ToolCall;
+    const authorized = await gate.authorizeCall(call);
+    expect(authorized.effect).toBe("ask");
+    expect(await gate.evaluate(call)).toEqual({ allowed: true });
+    expect(seen).toEqual(["https://example.com/docs"]);
   });
 });
