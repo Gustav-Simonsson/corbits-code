@@ -25,8 +25,7 @@ const WebSearchArgs = type({
 
 export const webSearchDefinition: ToolDefinition = {
   name: "web_search",
-  description:
-    "Search the web. Backed by a keyless hosted MCP provider (Exa by default) — no local API key required unless a provider override with credentials is configured. Returns ranked results as text.",
+  description: "Search the web; returns ranked results as text.",
   inputSchema: {
     type: "object",
     properties: {
