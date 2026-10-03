@@ -132,6 +132,39 @@ describe("normalizeToolArguments", () => {
 });
 
 describe("deriveBehaviorMetrics", () => {
+  test("counts parent file mutations across wire and engine tool names", () => {
+    const metrics = deriveBehaviorMetrics(
+      summary([
+        turn({
+          toolCalls: [
+            { name: "read" },
+            { name: "edit" },
+            { name: "write_file" },
+            { name: "spawn_agent", arguments: { agent: "coder" } },
+            { name: "delete" },
+            { name: "edit_file" },
+            { name: "write" },
+            { name: "delete_file" },
+          ],
+        }),
+      ]),
+    );
+    expect(metrics.parentFileMutationToolCallCount).toBe(6);
+    expect(metrics.spawnAgentToolCallCount).toBe(1);
+  });
+
+  test("delegation without parent file mutations reports zero parent writes", () => {
+    const metrics = deriveBehaviorMetrics(
+      summary([
+        turn({ toolCalls: [{ name: "read" }, { name: "grep" }] }),
+        turn({
+          toolCalls: [{ name: "spawn_agent", arguments: { agent: "coder" } }],
+        }),
+      ]),
+    );
+    expect(metrics.parentFileMutationToolCallCount).toBe(0);
+  });
+
   test("counts env-prefix and export commands", () => {
     const metrics = deriveBehaviorMetrics(
       summary([
@@ -302,6 +335,18 @@ describe("parseCapturedRunSummary", () => {
 });
 
 describe("parseBehaviorMetrics", () => {
+  test("derives parent mutations from stored per-name counts when the field is absent", () => {
+    const metrics = deriveBehaviorMetrics(
+      summary([
+        turn({ toolCalls: [{ name: "edit" }, { name: "write_file" }] }),
+      ]),
+    );
+    const { parentFileMutationToolCallCount: _dropped, ...stored } = metrics;
+    expect(parseBehaviorMetrics(stored)?.parentFileMutationToolCallCount).toBe(
+      2,
+    );
+  });
+
   test("round-trips a derived metrics object", () => {
     const metrics = deriveBehaviorMetrics(summary([shellTurn("ls")]));
     expect(parseBehaviorMetrics(JSON.parse(JSON.stringify(metrics)))).toEqual(
