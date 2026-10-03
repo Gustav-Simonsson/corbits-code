@@ -110,8 +110,9 @@ function toolDoneContents(events: ReactorEmittedEvent[]): string[] {
   );
 }
 
-// Wires production promote-on-execute: search returns cards only; a call to a
-// registered-but-unadvertised name declares that one schema, then dispatches.
+// Wires production load-on-search: top ranked hits join the advertised tail
+// for the next infer; a call to a remaining unadvertised name still
+// promote-on-execute.
 function promoteDynamicTools(session: IntegrationSession): void {
   const advertised = createAdvertisedToolset({
     sessionMode: "orchestrator",

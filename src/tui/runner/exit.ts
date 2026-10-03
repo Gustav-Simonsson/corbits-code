@@ -464,10 +464,9 @@ export async function createRunLifecycle(
   };
   state.reloadIfIdle = reloadIfIdle;
 
-  // Promote-on-execute (and contextual triggers, e.g. the lsp hint) open the
-  // call gate and commit that one name onto the next infer's wire. Search
-  // returns cards only and does not pre-promote the match set. Cache prefix
-  // growth on a called name is the cost of making the call valid for strict
+  // Search loads the top ranked hits onto the next infer's tail. Promote-on-execute
+  // still declares a called name that was not in that prefix. Cache prefix
+  // growth on those names is the cost of making the call valid for strict
   // providers.
   const promoteTools = (names: string[]): void => {
     activateAndCommitWire(names);

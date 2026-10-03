@@ -2,12 +2,9 @@
  * CL-9704: Linear MCP discovery-to-invocation on the primary session.
  *
  * Regression lock for "discoverable but not callable": tool_search finds
- * `mcp__linear__*`, and promote-on-execute must then commit a callable
- * schema for exactly the called name and dispatch it — list_teams first,
- * then save_issue. Search alone never promotes (the wire stays
- * built-ins-only until a call), and promoting one name never implies its
- * siblings: the primary session mounts MCP tools on demand, mirroring the
- * worker requires_tools gate.
+ * `mcp__linear__*`, loads the top ranked hits onto the next infer's tail,
+ * and promote-on-execute still commits a called name that was not in that
+ * prefix — list_teams via search-load, then save_issue via execute.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
@@ -126,20 +123,26 @@ describe("CL-9704 linear MCP discovery-to-invocation", () => {
           toolset.dynamicRunner
             .currentDefinitions()
             .find((d) => d.name === name),
+        promote: (names) => {
+          advertised.activated.activate(names);
+          if (advertised.flushPromotions()) {
+            wire = advertised
+              .computeAdvertised(toolset.dynamicRunner.currentDefinitions())
+              .map((d) => d.name);
+          }
+        },
       });
       if (search.kind !== "string") throw new Error("expected string tool");
 
-      // Discovery: the card names list_teams with its description.
+      // Discovery: the card names list_teams; search loads the top ranked
+      // hits onto the next infer's tail.
       const card = await search.handler(
         { query: "linear teams" },
         new AbortController().signal,
       );
       expect(card).toContain("mcp__linear__list_teams");
       expect(card).toContain("List Linear teams");
-
-      // Search alone promotes nothing: no Linear schema on the wire.
-      expect(wire).not.toContain("mcp__linear__list_teams");
-      expect(wire).not.toContain("mcp__linear__save_issue");
+      expect(wire).toContain("mcp__linear__list_teams");
 
       const run = (name: string, args: Record<string, unknown> = {}) =>
         toolset.dynamicRunner.run(

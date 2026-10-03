@@ -18,6 +18,7 @@ import {
   TOOL_SEARCH_MAX_RESULTS,
   TOOL_SEARCH_LIMIT_MAX,
   TOOL_SEARCH_SCHEMA_MAX,
+  TOOL_SEARCH_SCHEMA_CARDS,
   toolSearchDefinition,
   type ToolAvailability,
 } from "./tool-search.js";
@@ -470,6 +471,32 @@ describe("createToolSearchTool", () => {
     expect(listed.every((name) => catalogNames.includes(name))).toBe(true);
   });
 
+  test("search loads the top ranked names when a promoter is wired", async () => {
+    const catalog: ToolDefinition[] = Array.from({ length: 8 }, (_, i) => ({
+      name: `mcp__linear__op_${i}`,
+      description: "Linear issue operation",
+      inputSchema: {
+        type: "object",
+        properties: { [`field_${i}`]: { type: "string" } },
+        required: [`field_${i}`],
+      },
+    }));
+    const loaded: string[] = [];
+    const tool = createToolSearchTool({
+      search: () => catalog.map((d) => d.name),
+      lookup: (name) => catalog.find((d) => d.name === name),
+      promote: (names) => {
+        loaded.push(...names);
+      },
+    });
+    const out = await call(tool, { query: "linear" });
+    expect(loaded).toEqual(
+      catalog.slice(0, TOOL_SEARCH_SCHEMA_CARDS).map((d) => d.name),
+    );
+    expect(out).toContain("mcp__linear__op_7");
+    expect(out).not.toContain("field_7");
+  });
+
   test("search cards include the input schema so a first call is formable", async () => {
     const tool = createToolSearchTool({
       search: (q) => index.search(q),
@@ -484,8 +511,8 @@ describe("createToolSearchTool", () => {
     );
   });
 
-  test("only the top two ranked cards include input schema", async () => {
-    const catalog: ToolDefinition[] = Array.from({ length: 5 }, (_, i) => ({
+  test("only the top ranked cards include input schema", async () => {
+    const catalog: ToolDefinition[] = Array.from({ length: 8 }, (_, i) => ({
       name: `mcp__linear__op_${i}`,
       description: "Linear issue operation",
       inputSchema: {
@@ -501,20 +528,15 @@ describe("createToolSearchTool", () => {
     const out = await call(tool, { query: "linear" });
     expect(listedToolNames(out)).toEqual(catalog.map((d) => d.name));
     expect(out).toContain("field_0");
-    expect(out).toContain("field_1");
-    expect(out).not.toContain("field_2");
-    expect(out).not.toContain("field_3");
-    expect(out).not.toContain("field_4");
-    expect(out).toContain("mcp__linear__op_2");
-    expect(out).toContain("mcp__linear__op_4");
+    expect(out).toContain("field_4");
+    expect(out).not.toContain("field_5");
+    expect(out).not.toContain("field_7");
+    expect(out).toContain("mcp__linear__op_7");
   });
 
-  test("tool_search description does not claim matches load on the next turn", () => {
-    expect(toolSearchDefinition.description).not.toMatch(
-      /load on the next turn/i,
-    );
+  test("tool_search description says top matches join the list next turn", () => {
+    expect(toolSearchDefinition.description).toMatch(/next turn/i);
     expect(toolSearchDefinition.description).toMatch(/schema/i);
-    expect(toolSearchDefinition.description).toMatch(/call a listed name/i);
   });
 
   test("an oversized input schema is capped on the card", async () => {
@@ -819,6 +841,10 @@ describe("promote-on-execute", () => {
       search: (q, limit) => wideIndex.search(q, limit),
       lookup: (name) =>
         runner.currentDefinitions().find((d) => d.name === name),
+      promote: (names) => {
+        advertised.activated.activate(names);
+        advertised.flushPromotions();
+      },
     });
     return { runner, advertised, promoted, search };
   }
@@ -842,7 +868,7 @@ describe("promote-on-execute", () => {
       .map((d) => d.name);
   }
 
-  test("a tool_search call does not change the advertised set", async () => {
+  test("a tool_search call loads ranked hits onto the advertised tail", async () => {
     const { advertised, promoted, search, runner } = wirePromoteOnExecute();
     const before = advertisedNames(advertised, runner);
     if (search.kind !== "string") throw new Error("expected string tool");
@@ -850,13 +876,19 @@ describe("promote-on-execute", () => {
       { query: "linear issue", limit: 3 },
       new AbortController().signal,
     );
-    expect(listedToolNames(out).length).toBe(3);
+    const listed = listedToolNames(out);
+    expect(listed.length).toBe(3);
     expect(promoted).toEqual([]);
-    expect(advertised.activated.list()).toEqual([]);
-    expect(advertisedNames(advertised, runner)).toEqual(before);
+    const loaded = listed.slice(0, TOOL_SEARCH_SCHEMA_CARDS);
+    const rest = listed.slice(TOOL_SEARCH_SCHEMA_CARDS);
+    expect(advertised.activated.list()).toEqual(loaded);
+    const after = advertisedNames(advertised, runner);
+    for (const name of loaded) expect(after).toContain(name);
+    for (const name of rest) expect(after).not.toContain(name);
+    expect(before.every((name) => after.includes(name))).toBe(true);
   });
 
-  test("a subsequent call to a searched name promotes only that name", async () => {
+  test("a call to an already-loaded search hit does not re-promote", async () => {
     const { advertised, promoted, search, runner } = wirePromoteOnExecute();
     if (search.kind !== "string") throw new Error("expected string tool");
     const listed = listedToolNames(
@@ -866,19 +898,35 @@ describe("promote-on-execute", () => {
       ),
     );
     expect(listed).toHaveLength(3);
-    expect(promoted).toEqual([]);
     const called = listed[0];
     if (called === undefined) throw new Error("expected a listed tool");
-    const others = listed.slice(1);
+    const result = await dispatch(runner, called);
+    expect(result.content).toBe(`ran:${called}`);
+    expect(result.isError).toBeUndefined();
+    expect(promoted).toEqual([]);
+    expect(advertisedNames(advertised, runner)).toContain(called);
+  });
+
+  test("a call to a search hit past the loaded set still promote-on-execute", async () => {
+    const { advertised, promoted, search, runner } = wirePromoteOnExecute();
+    if (search.kind !== "string") throw new Error("expected string tool");
+    const listed = listedToolNames(
+      await search.handler(
+        { query: "linear issue", limit: 8 },
+        new AbortController().signal,
+      ),
+    );
+    const called = listed[TOOL_SEARCH_SCHEMA_CARDS];
+    if (called === undefined)
+      throw new Error("expected a hit past the load cap");
+    const loaded = listed.slice(0, TOOL_SEARCH_SCHEMA_CARDS);
     const result = await dispatch(runner, called);
     expect(result.content).toBe(`ran:${called}`);
     expect(result.isError).toBeUndefined();
     expect(promoted).toEqual([called]);
     const names = advertisedNames(advertised, runner);
     expect(names).toContain(called);
-    for (const other of others) {
-      expect(names).not.toContain(other);
-    }
+    for (const name of loaded) expect(names).toContain(name);
   });
 
   test("a never-searched undeclared name still promote-on-execute", async () => {

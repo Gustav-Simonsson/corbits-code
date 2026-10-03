@@ -93,12 +93,10 @@ Tools from connected servers are not advertised to the model up front; they are
 registered for dispatch as soon as the server connects (including later in the
 same turn) and surfaced on demand through dynamic tool discovery
 (`tool_search`). A match is a ranked handful of names plus capped
-descriptions. The top two cards also include a compact input schema so
-the first call is formable. `tool_search` does not promote
-names onto the next inference or into `run.json`. Calling a discovered
-name declares that one schema on the next infer (promote-on-execute),
-persists it in the session's `run.json`, and re-advertises it on resume
-and after rebuilds. Fold drops idle execute-promoted schemas and persists
+descriptions. The top five cards also include a compact input schema and
+are loaded onto the next inference's advertised tail (Codex/Pi deferred)
+and into `run.json`. Remaining hits stay name + description until called
+(promote-on-execute). Fold drops idle execute-promoted schemas and persists
 that empty set so a crash or resume does not restore them.
 
 For integrations a project calls constantly, `pinnedTools` in local

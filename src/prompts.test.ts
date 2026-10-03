@@ -30,7 +30,7 @@ test("environment context lists configured MCP servers", () => {
   });
   expect(prompt).toContain("MCP: linear, exa");
   expect(prompt).toContain("tool_search");
-  expect(prompt).toContain("schema");
+  expect(prompt).toContain("next turn");
 });
 
 test("environment context omits MCP when none are configured", () => {
