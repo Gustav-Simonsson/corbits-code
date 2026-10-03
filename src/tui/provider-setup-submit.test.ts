@@ -79,6 +79,182 @@ async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
 }
 
 describe("buildProviderSubmitHandler", () => {
+  test.each(["preset", "oauth"] as const)(
+    "%s ignores stale hidden custom numeric fields",
+    async (pathKind) => {
+      await withTempDir(async (dir) => {
+        const path = join(dir, "settings.json");
+        let committed = false;
+        const submit = buildProviderSubmitHandler(path, null, null);
+        await submit(
+          {
+            name: "openai/work",
+            baseURL: "https://api.example/v1",
+            apiKey: "test-key",
+            model: "test-model",
+            oauthProfile: "work",
+            contextWindow: "not-a-number",
+            maxTokens: "-1",
+            temperature: "0.7",
+            topP: "0.9",
+          },
+          noopSetPhase,
+          pathKind === "preset"
+            ? {
+                skipValidation: true,
+                preset: {
+                  id: "openai",
+                  models: ["test-model"],
+                  anthropic: false,
+                  opencodeGo: false,
+                },
+              }
+            : {
+                skipValidation: true,
+                oauth: stagedCodexOAuth(async () => {
+                  committed = true;
+                }),
+              },
+        );
+        const provider = (await loadSettings(path))?.providers[
+          pathKind === "preset" ? "openai/work" : "codex/work"
+        ];
+        expect(provider).toBeDefined();
+        for (const field of [
+          "contextWindow",
+          "maxTokens",
+          "temperature",
+          "topP",
+        ] as const) {
+          expect(provider?.[field]).toBeUndefined();
+        }
+        expect(committed).toBe(pathKind === "oauth");
+      });
+    },
+  );
+
+  test.each([
+    ["contextWindow", "0"],
+    ["contextWindow", "-1"],
+    ["contextWindow", "12.5"],
+    ["maxTokens", "0"],
+    ["maxTokens", "-1"],
+    ["maxTokens", "12.5"],
+    ["maxTokens", "Infinity"],
+    ["maxTokens", "not-a-number"],
+    ["temperature", "-0.1"],
+    ["temperature", "2.1"],
+    ["topP", "-0.1"],
+    ["topP", "1.1"],
+  ] as const)(
+    "custom submit rejects invalid %s=%s before persistence",
+    async (field, value) => {
+      let writes = 0;
+      const probes = connectionChecks.length;
+      const submit = buildProviderSubmitHandler(
+        "/tmp/unused-custom-provider-settings.json",
+        null,
+        null,
+        async (apply) => {
+          writes++;
+          return apply({ providers: {} });
+        },
+      );
+      await expect(
+        submit(
+          {
+            name: "custom",
+            baseURL: "https://custom.example/v1",
+            apiKey: "",
+            model: "test-model",
+            oauthProfile: "",
+            contextWindow: "",
+            maxTokens: "",
+            temperature: "",
+            topP: "",
+            [field]: value,
+          },
+          noopSetPhase,
+          { skipValidation: false },
+        ),
+      ).rejects.toThrow();
+      expect(writes).toBe(0);
+      expect(connectionChecks.length).toBe(probes);
+    },
+  );
+
+  test("custom submit rejects simultaneous sampling options before persistence", async () => {
+    let writes = 0;
+    const submit = buildProviderSubmitHandler(
+      "/tmp/unused-custom-provider-settings.json",
+      null,
+      null,
+      async (apply) => {
+        writes++;
+        return apply({ providers: {} });
+      },
+    );
+    await expect(
+      submit(
+        {
+          name: "custom",
+          baseURL: "https://custom.example/v1",
+          apiKey: "",
+          model: "test-model",
+          oauthProfile: "",
+          contextWindow: "",
+          maxTokens: "",
+          temperature: "0",
+          topP: "0",
+        },
+        noopSetPhase,
+        { skipValidation: true },
+      ),
+    ).rejects.toThrow();
+    expect(writes).toBe(0);
+  });
+
+  test("custom numeric fields round-trip, preserve zero sampling, and clear on blank edit", async () => {
+    await withTempDir(async (dir) => {
+      const path = join(dir, "settings.json");
+      const values: ProviderFormValues = {
+        name: "custom",
+        baseURL: "https://custom.example/v1",
+        apiKey: "",
+        model: "test-model",
+        oauthProfile: "",
+        contextWindow: "32000",
+        maxTokens: "8192",
+        temperature: "0",
+        topP: "",
+      };
+      await buildProviderSubmitHandler(path, null, null)(values, noopSetPhase, {
+        skipValidation: true,
+      });
+      const saved = await loadSettings(path);
+      expect(saved?.providers["custom"]).toMatchObject({
+        contextWindow: 32_000,
+        maxTokens: 8192,
+        temperature: 0,
+      });
+      await buildProviderSubmitHandler(path, saved, null)(
+        {
+          ...values,
+          contextWindow: " ",
+          maxTokens: "",
+          temperature: "",
+        },
+        noopSetPhase,
+        { skipValidation: true },
+      );
+      const edited = (await loadSettings(path))?.providers["custom"];
+      expect(edited?.contextWindow).toBeUndefined();
+      expect(edited?.maxTokens).toBeUndefined();
+      expect(edited?.temperature).toBeUndefined();
+      expect(edited?.topP).toBeUndefined();
+    });
+  });
+
   test("rejects an empty key on a key-required preset without persisting", async () => {
     await withTempDir(async (dir) => {
       const path = join(dir, "settings.json");
@@ -90,6 +266,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "gpt-5",
         oauthProfile: "",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       };
       const preset = {
         id: "openai",
@@ -121,6 +301,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       };
 
       // skipValidation avoids the live connection probe in this unit test.
@@ -146,6 +330,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "sk-stale-secret",
         model: "qwen3",
         oauthProfile: "default",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       };
       const preset = {
         id: "ollama",
@@ -184,6 +372,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "qwen3",
         oauthProfile: "default",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       };
       const preset = {
         id: "ollama",
@@ -236,6 +428,10 @@ describe("buildProviderSubmitHandler", () => {
           apiKey: "",
           model: "llama3",
           oauthProfile: "",
+          contextWindow: "",
+          maxTokens: "",
+          temperature: "",
+          topP: "",
         },
         noopSetPhase,
         { skipValidation: true },
@@ -264,6 +460,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "sk-test-fake",
         model: "gpt-5",
         oauthProfile: "",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       };
       const preset = {
         id: "openai",
@@ -288,6 +488,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "sk-test-fake",
         model: "gpt-5",
         oauthProfile: "",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       },
       options: {
         skipValidation: true,
@@ -308,6 +512,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       },
       options: { skipValidation: true },
       provider: "ollama",
@@ -320,6 +528,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "gpt-5",
         oauthProfile: "work",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       },
       options: {
         skipValidation: true,
@@ -379,6 +591,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "sk-test-fake",
         model: "gpt-5",
         oauthProfile: "",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       },
       options: {
         skipValidation: true,
@@ -400,6 +616,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       },
       options: { skipValidation: true },
       provider: "ollama",
@@ -413,6 +633,10 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "gpt-5",
         oauthProfile: "work",
+        contextWindow: "",
+        maxTokens: "",
+        temperature: "",
+        topP: "",
       },
       options: { skipValidation: true, oauth: stagedCodexOAuth() },
       provider: "codex/work",
@@ -461,6 +685,10 @@ describe("buildProviderSubmitHandler", () => {
             apiKey: "",
             model: "gpt-5",
             oauthProfile: "work",
+            contextWindow: "",
+            maxTokens: "",
+            temperature: "",
+            topP: "",
           },
           noopSetPhase,
           {
@@ -502,6 +730,10 @@ describe("buildProviderSubmitHandler", () => {
               apiKey: "",
               model: "gpt-5",
               oauthProfile: "work",
+              contextWindow: "",
+              maxTokens: "",
+              temperature: "",
+              topP: "",
             },
             noopSetPhase,
             {
@@ -546,6 +778,10 @@ describe("buildProviderSubmitHandler", () => {
               apiKey: "",
               model: "gpt-5",
               oauthProfile: "work",
+              contextWindow: "",
+              maxTokens: "",
+              temperature: "",
+              topP: "",
             },
             noopSetPhase,
             {
@@ -586,6 +822,10 @@ describe("buildProviderSubmitHandler", () => {
             apiKey: "",
             model: "gpt-5",
             oauthProfile: "work",
+            contextWindow: "",
+            maxTokens: "",
+            temperature: "",
+            topP: "",
           },
           noopSetPhase,
           {
@@ -625,6 +865,10 @@ describe("buildProviderSubmitHandler", () => {
             apiKey: "",
             model: "gpt-5",
             oauthProfile: "work",
+            contextWindow: "",
+            maxTokens: "",
+            temperature: "",
+            topP: "",
           },
           noopSetPhase,
           {
@@ -688,6 +932,10 @@ describe("buildProviderSubmitHandler", () => {
             apiKey: "",
             model: "gpt-5",
             oauthProfile: "work",
+            contextWindow: "",
+            maxTokens: "",
+            temperature: "",
+            topP: "",
           },
           noopSetPhase,
           { skipValidation: true, oauth: stagedCodexOAuth() },
@@ -715,6 +963,10 @@ describe("buildProviderSubmitHandler", () => {
           apiKey: "sk-test-fake",
           model: "gpt-5",
           oauthProfile: "",
+          contextWindow: "",
+          maxTokens: "",
+          temperature: "",
+          topP: "",
         };
 
         await submit(values, noopSetPhase, {
@@ -752,6 +1004,10 @@ describe("buildProviderSubmitHandler", () => {
               apiKey: "",
               model: "gpt-5",
               oauthProfile: "",
+              contextWindow: "",
+              maxTokens: "",
+              temperature: "",
+              topP: "",
             },
             noopSetPhase,
             {
