@@ -233,6 +233,7 @@ export function cycleReasoningEffort(
   current: ReasoningEffort | undefined,
   isCodex = false,
   providerEfforts: readonly ReasoningEffort[] = [],
+  providerDefault?: ReasoningEffort,
 ): ReasoningEffort | undefined {
   const supported = supportedEfforts(
     model,
@@ -246,6 +247,7 @@ export function cycleReasoningEffort(
     current,
     isCodex,
     providerEfforts,
+    providerDefault,
   );
   if (implicit === undefined || !supported.includes(implicit)) {
     return supported[0];
@@ -374,6 +376,7 @@ export interface ResolveEffortForRoleOpts {
   parentEffort?: ReasoningEffort;
   model: string;
   isCodex?: boolean;
+  providerEfforts?: readonly ReasoningEffort[];
 }
 
 /**
@@ -428,6 +431,7 @@ export function resolveEffortForRole(
     opts.model,
     undefined,
     opts.isCodex === true,
+    opts.providerEfforts,
   );
   const roleDefault =
     opts.roleDefault ??

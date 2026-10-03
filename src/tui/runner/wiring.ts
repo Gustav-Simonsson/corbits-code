@@ -42,6 +42,7 @@ import {
   resolveSessionEffort,
 } from "../../provider/reasoning-effort.js";
 import { isCodexProviderName } from "../../config/codex-providers.js";
+import { customReasoningSettings } from "../../config/providers.js";
 import { RUNTIME_FLASH_MS } from "../runtime-notices.js";
 import {
   RESUME_TRANSCRIPT_TURN_LIMIT,
@@ -452,12 +453,19 @@ export function wirePostStartup(
   // Shift+Tab: cycle reasoning effort for the live model and rebuild sources so
   // the next inference turn picks up the new providerOptions.reasoning_effort.
   setEffortCycleHandler(hostOf(state).shell, () => {
+    const reasoning = customReasoningSettings(
+      state.config.providerName,
+      state.config.settings?.providers[state.config.providerName],
+      state.config.providers.find(
+        (entry) => entry.name === state.config.providerName,
+      ),
+    );
     const next = cycleReasoningEffort(
       state.config.model,
       state.config.reasoningEffort,
       isCodexProviderName(state.config.providerName),
-      state.config.settings?.providers[state.config.providerName]
-        ?.reasoningEfforts,
+      reasoning?.reasoningEfforts,
+      reasoning?.defaultReasoningEffort,
     );
     if (next === undefined) {
       setStatusFlash(
@@ -584,14 +592,19 @@ export function wirePostStartup(
   // move the prompt border label only. While the landing holds, the notice
   // strip shows the latest deferred wording; the transcript keeps the full
   // order.
+  const reasoning = customReasoningSettings(
+    state.config.providerName,
+    state.config.settings?.providers[state.config.providerName],
+    state.config.providers.find(
+      (entry) => entry.name === state.config.providerName,
+    ),
+  );
   const headerEffort = resolveSessionEffort(
     state.config.model,
     state.config.reasoningEffort,
     isCodexProviderName(state.config.providerName),
-    state.config.settings?.providers[state.config.providerName]
-      ?.reasoningEfforts,
-    state.config.settings?.providers[state.config.providerName]
-      ?.defaultReasoningEffort,
+    reasoning?.reasoningEfforts,
+    reasoning?.defaultReasoningEffort,
   );
   surfaceSystemNotice(
     hostOf(state).shell,

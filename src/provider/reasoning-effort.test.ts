@@ -180,6 +180,25 @@ describe("validateEffort", () => {
 describe("cycleReasoningEffort", () => {
   afterEach(() => setModelReasoningCapabilities({}));
 
+  test("an unset custom session cycles from its displayed provider default", () => {
+    const ladder = ["low", "medium", "high", "xhigh"] as const;
+    const displayed = resolveSessionEffort(
+      "custom-model",
+      undefined,
+      false,
+      ladder,
+      "high",
+    );
+    expect(
+      cycleReasoningEffort("custom-model", undefined, false, ladder, "high"),
+    ).toBe(
+      cycleReasoningEffort("custom-model", displayed, false, ladder, "high"),
+    );
+    expect(
+      cycleReasoningEffort("custom-model", "none", false, ladder, "high"),
+    ).toBe("xhigh");
+  });
+
   test("walks the gpt-5 ladder and wraps", () => {
     expect(cycleReasoningEffort("gpt-5", "minimal")).toBe("low");
     expect(cycleReasoningEffort("gpt-5", "low")).toBe("medium");

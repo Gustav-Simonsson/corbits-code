@@ -633,9 +633,21 @@ const ProviderSettingsSchema = type({
   "anthropic?": "boolean",
   "opencodeGo?": "boolean",
   "verified?": "boolean",
-  "reasoningEfforts?": "string[]",
-  "defaultReasoningEffort?": "string",
-});
+  "reasoningEfforts?": type
+    .enumerated(...REASONING_EFFORTS)
+    .array()
+    .narrow(
+      (levels, ctx) =>
+        levels.length > 0 || ctx.reject("at least one reasoning effort"),
+    ),
+  "defaultReasoningEffort?": type.enumerated(...REASONING_EFFORTS),
+}).narrow(
+  (provider, ctx) =>
+    provider.defaultReasoningEffort === undefined ||
+    provider.reasoningEfforts?.includes(provider.defaultReasoningEffort) ===
+      true ||
+    ctx.reject("a default reasoning effort from the enabled levels"),
+);
 
 const ModelRefSchema = type({
   provider: "string",

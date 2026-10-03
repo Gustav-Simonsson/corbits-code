@@ -81,6 +81,21 @@ export function buildProviderSubmitHandler(
     const persistedBaseURL = isOllama
       ? normalizeOllamaRootURL(trimmedBaseURL)
       : trimmedBaseURL;
+    const effortLevels = normalizeProviderEfforts(values.reasoningEfforts);
+    const trimmedDefaultEffort = values.defaultReasoningEffort.trim();
+    if (preset === undefined && oauth === undefined) {
+      if (effortLevels.length === 0) {
+        throw new Error("Enable at least one reasoning effort.");
+      }
+      if (
+        !isReasoningEffort(trimmedDefaultEffort) ||
+        !effortLevels.includes(trimmedDefaultEffort)
+      ) {
+        throw new Error(
+          "Choose a default reasoning effort from the enabled levels.",
+        );
+      }
+    }
 
     // OAuth credentials stay staged until setup validation authorizes durable
     // persistence. Definitive API-scope or credential failures block the save;
@@ -160,8 +175,6 @@ export function buildProviderSubmitHandler(
     // picked default flow through to the catalog so /model cycling and
     // session resolution use the operator set. Only the custom path carries
     // these values (presets/OAuth never set them on the form).
-    const effortLevels = normalizeProviderEfforts(values.reasoningEfforts);
-    const trimmedDefaultEffort = values.defaultReasoningEffort.trim();
     const newProvider: ProviderSettings = {
       baseURL: persistedBaseURL,
       models,

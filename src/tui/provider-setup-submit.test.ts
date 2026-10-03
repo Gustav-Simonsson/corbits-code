@@ -79,6 +79,42 @@ async function withTempDir(run: (dir: string) => Promise<void>): Promise<void> {
 }
 
 describe("buildProviderSubmitHandler", () => {
+  test.each([
+    { reasoningEfforts: [], defaultReasoningEffort: "none" },
+    { reasoningEfforts: ["low"], defaultReasoningEffort: "max" },
+    { reasoningEfforts: ["low"], defaultReasoningEffort: "" },
+  ])(
+    "refuses saving invalid custom reasoning controls: %j",
+    async (reasoning) => {
+      let writes = 0;
+      const submit = buildProviderSubmitHandler(
+        "/unused",
+        null,
+        null,
+        async (apply) => {
+          writes += 1;
+          return apply({ providers: {} });
+        },
+      );
+      await expect(
+        submit(
+          {
+            name: "custom",
+            baseURL: "https://custom.example/v1",
+            apiKey: "",
+            model: "custom-model",
+            oauthProfile: "",
+            ...reasoning,
+            reasoningEfforts: [...reasoning.reasoningEfforts],
+          },
+          noopSetPhase,
+          { skipValidation: true },
+        ),
+      ).rejects.toThrow(/reasoning effort/i);
+      expect(writes).toBe(0);
+    },
+  );
+
   test("rejects an empty key on a key-required preset without persisting", async () => {
     await withTempDir(async (dir) => {
       const path = join(dir, "settings.json");
@@ -123,8 +159,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
-        reasoningEfforts: [],
-        defaultReasoningEffort: "",
+        reasoningEfforts: ["low"],
+        defaultReasoningEffort: "low",
       };
 
       // skipValidation avoids the live connection probe in this unit test.
@@ -244,8 +280,8 @@ describe("buildProviderSubmitHandler", () => {
           apiKey: "",
           model: "llama3",
           oauthProfile: "",
-          reasoningEfforts: [],
-          defaultReasoningEffort: "",
+          reasoningEfforts: ["low"],
+          defaultReasoningEffort: "low",
         },
         noopSetPhase,
         { skipValidation: true },
@@ -322,8 +358,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
-        reasoningEfforts: [] as string[],
-        defaultReasoningEffort: "",
+        reasoningEfforts: ["low"] as string[],
+        defaultReasoningEffort: "low",
       },
       options: { skipValidation: true },
       provider: "ollama",
@@ -420,8 +456,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
-        reasoningEfforts: [] as string[],
-        defaultReasoningEffort: "",
+        reasoningEfforts: ["low"] as string[],
+        defaultReasoningEffort: "low",
       },
       options: { skipValidation: true },
       provider: "ollama",

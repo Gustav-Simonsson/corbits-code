@@ -119,7 +119,36 @@ describe("normalizeToolDefinitionsForProvider", () => {
     ).toBe(false);
   });
 
-  test("non-kimi providers get identity schemas (recursive present kept)", () => {
+  // Meta Muse Spark (OpenCode Go / Zen) rejects recursive $ref cycles with
+  // "Recursive JSON schemas are not currently supported". Same wire rewrite
+  // as Kimi — model-id gate via isMuseSparkLeafProvider.
+  test.each([
+    {
+      providerName: "opencode-go",
+      model: "muse-spark-1.3-contributor",
+    },
+    {
+      providerName: "opencode-go",
+      model: "muse-spark-1.2-contributor",
+    },
+    { providerName: "opencode-go", model: "muse-spark-1.3" },
+    { providerName: "zen", model: "muse-spark-1.3-contributor-free" },
+  ] as const)(
+    "$providerName + $model rewrites present (muse schema gate)",
+    (ctx) => {
+      const out = normalizeToolDefinitionsForProvider(defs, ctx);
+      const present = defined(out.find((d) => d.name === "present"));
+      expect(schemaHasRef(present.inputSchema)).toBe(false);
+      expect(schemaHasDefs(present.inputSchema)).toBe(false);
+      expect(present.inputSchema).toEqual(
+        structuredClone(
+          KIMI_PRESENT_INPUT_SCHEMA,
+        ) as typeof present.inputSchema,
+      );
+    },
+  );
+
+  test("providers that accept recursive schemas get identity present", () => {
     for (const ctx of [
       { providerName: "anthropic", model: "claude-sonnet-4" },
       { providerName: "openai", model: "gpt-5.6" },

@@ -7,6 +7,41 @@ import {
 import type { ReasoningEffort } from "../provider/reasoning-effort.js";
 import { normalizeProviderEfforts } from "../provider/reasoning-effort.js";
 import type { ProviderCatalogEntry } from "./index.js";
+import type { ProviderSettings } from "./settings.js";
+import { isZenProvider } from "../../packages/zen/src/index.js";
+
+// A declaration belongs to the plain OpenAI-compatible path, not to a
+// protocol-specific source that happens to carry the same settings fields.
+export function customReasoningSettings(
+  name: string,
+  settings: ProviderSettings | undefined,
+  entry?: ProviderCatalogEntry,
+):
+  | Pick<ProviderSettings, "reasoningEfforts" | "defaultReasoningEffort">
+  | undefined {
+  // Settings may already reflect an edit while asynchronous catalog discovery is pending.
+  const provider = settings ?? entry;
+  if (
+    provider?.reasoningEfforts === undefined ||
+    entry?.codexProfile !== undefined ||
+    entry?.xaiProfile !== undefined ||
+    entry?.anthropic === true ||
+    settings?.anthropic === true ||
+    entry?.bifrostVirtualKey === true ||
+    settings?.bifrostVirtualKey === true ||
+    isOpenCodeGoProvider({
+      name,
+      baseURL: provider.baseURL,
+      ...(entry?.opencodeGo === true || settings?.opencodeGo === true
+        ? { opencodeGo: true }
+        : {}),
+    }) ||
+    isZenProvider({ name, baseURL: provider.baseURL })
+  ) {
+    return undefined;
+  }
+  return provider;
+}
 
 export interface ProviderSubmission {
   name: string;

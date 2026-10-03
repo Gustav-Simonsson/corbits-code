@@ -9,6 +9,7 @@
 import type { Config } from "../../config/index.js";
 import { listFavoriteModels, listRecentModels } from "../../config/settings.js";
 import { isCodexProviderName } from "../../config/codex-providers.js";
+import { customReasoningSettings } from "../../config/providers.js";
 import { resolveSessionEffort } from "../../provider/reasoning-effort.js";
 import { liveTelemetry } from "../../telemetry/singleton.js";
 import { isFeedbackCapturePending } from "../../telemetry/feedback.js";
@@ -135,14 +136,19 @@ export async function runTUI(initialConfig: Config): Promise<number> {
       addProviderChoices: computeAddProviderChoices,
       onConnectProvider: settings.onConnectProvider,
       modelLabel: () => {
+        const reasoning = customReasoningSettings(
+          state.config.providerName,
+          state.config.settings?.providers[state.config.providerName],
+          state.config.providers.find(
+            (entry) => entry.name === state.config.providerName,
+          ),
+        );
         const effort = resolveSessionEffort(
           state.config.model,
           state.config.reasoningEffort,
           isCodexProviderName(state.config.providerName),
-          state.config.settings?.providers[state.config.providerName]
-            ?.reasoningEfforts,
-          state.config.settings?.providers[state.config.providerName]
-            ?.defaultReasoningEffort,
+          reasoning?.reasoningEfforts,
+          reasoning?.defaultReasoningEffort,
         );
         return {
           profile: state.config.providerName,

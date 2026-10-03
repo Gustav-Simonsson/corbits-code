@@ -37,6 +37,7 @@ import {
 import { createOverlayList } from "../shell/overlay-list.js";
 import {
   chooseProviderRow,
+  CUSTOM_REASONING_EFFORTS,
   enterDefaultEffortRows,
   enterEffortsRows,
   enterModelListRows,
@@ -169,6 +170,9 @@ export async function runProviderSetup(
       state.values.name = preselected.label;
       state.values.baseURL = preselected.baseURL;
       state.values.model = preselected.defaultModel;
+      state.values.reasoningEfforts = preselected.custom
+        ? [...CUSTOM_REASONING_EFFORTS]
+        : [];
       if (config.initialOAuthProfile !== undefined) {
         state.values.oauthProfile = config.initialOAuthProfile;
       }
@@ -392,6 +396,11 @@ export async function runProviderSetup(
     if (state.choice !== null && state.choice.custom) {
       const step = currentStep();
       if (step === "efforts") {
+        if (state.values.reasoningEfforts.length === 0) {
+          state.submitError = "Enable at least one reasoning effort.";
+          surface.paint();
+          return;
+        }
         state.stepIndex += 1;
         clearError();
         enterModelList();
@@ -546,6 +555,7 @@ export async function runProviderSetup(
 
     if (key.name === "space" && currentStep() === "efforts") {
       key.preventDefault();
+      clearError();
       toggleEffortRow(state, renderer);
       surface.paint();
       return;

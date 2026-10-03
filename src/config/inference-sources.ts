@@ -21,6 +21,7 @@ import {
 } from "../provider/reasoning-effort.js";
 import { isOpenCodeGoProvider } from "../../packages/opencode-go/src/index.js";
 import { isZenProvider } from "../../packages/zen/src/index.js";
+import { customReasoningSettings } from "./providers.js";
 
 export interface BuildSourceContext {
   sessionId: string;
@@ -188,14 +189,19 @@ export function buildInferenceSourceForRef(
   // Custom OpenAI-compatible providers (the manual form) land here. Honor the
   // operator-declared ladder + default only on this branch — the special
   // builders above already returned with the family-table `effort`.
+  const reasoning = customReasoningSettings(
+    ref.provider,
+    providerSettings,
+    entry,
+  );
   const customEffort =
-    configured !== undefined
+    configured !== undefined || reasoning !== undefined
       ? resolveSessionEffort(
           ref.model,
           configured,
           false,
-          entry?.reasoningEfforts,
-          entry?.defaultReasoningEffort,
+          reasoning?.reasoningEfforts,
+          reasoning?.defaultReasoningEffort,
         )
       : undefined;
   return buildOpenAISource({

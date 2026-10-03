@@ -65,7 +65,7 @@ export interface ProviderFormValues {
    * edits `name` free-form.
    */
   oauthProfile: string;
-  /** Operator-toggled effort levels the custom provider accepts (all six when empty). */
+  /** Explicit enabled levels; an empty custom set cannot be saved. */
   reasoningEfforts: string[];
   /** Operator-picked default effort level for new sessions ("" = none chosen). */
   defaultReasoningEffort: string;

@@ -85,8 +85,8 @@ const CUSTOM_PROVIDER: ProviderFormValues = {
   apiKey: "test-key",
   model: "test-model",
   oauthProfile: "",
-  reasoningEfforts: [],
-  defaultReasoningEffort: "",
+  reasoningEfforts: ["low"],
+  defaultReasoningEffort: "low",
 };
 
 const ISOLATED_PROVIDER: ProviderFormValues = {
@@ -95,8 +95,8 @@ const ISOLATED_PROVIDER: ProviderFormValues = {
   apiKey: "isolated-key",
   model: "isolated-model",
   oauthProfile: "",
-  reasoningEfforts: [],
-  defaultReasoningEffort: "",
+  reasoningEfforts: ["low"],
+  defaultReasoningEffort: "low",
 };
 
 /** Stub the setup flow to submit one provider form, validation skipped. */

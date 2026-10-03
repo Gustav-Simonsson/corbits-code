@@ -45,6 +45,7 @@ import {
   xaiProvidersAsSettings,
 } from "./xai-providers.js";
 import { fetchBifrostModels } from "./bifrost.js";
+import { customReasoningSettings } from "./providers.js";
 
 export { fetchBifrostModels };
 import { CODEX_BASE_URL } from "../auth/codex/constants.js";
@@ -1142,6 +1143,17 @@ export async function loadConfig(
     ),
   );
 
+  const providers = mergeOAuthCatalog(
+    settings,
+    resolved,
+    codexProfiles,
+    xaiProfiles,
+  );
+  const reasoning = customReasoningSettings(
+    resolved.providerName,
+    settingsForResolution?.providers[resolved.providerName],
+    providers.find((entry) => entry.name === resolved.providerName),
+  );
   // Enforce model/effort compatibility at the boundary. The modal only offers
   // supported levels, but a hand-edited local settings file can pair an effort
   // with a model that does not accept it; reject it here rather than shipping an
@@ -1151,6 +1163,7 @@ export async function loadConfig(
       resolved.model,
       local.reasoningEffort,
       isCodexProviderName(resolved.providerName),
+      reasoning?.reasoningEfforts,
     );
     if (!verdict.ok) {
       throw new Error(
@@ -1222,12 +1235,7 @@ export async function loadConfig(
     ...(settings?.defaultProvider !== undefined
       ? { globalDefaultProvider: settings.defaultProvider }
       : {}),
-    providers: mergeOAuthCatalog(
-      settings,
-      resolved,
-      codexProfiles,
-      xaiProfiles,
-    ),
+    providers,
     ...(profile.profile !== undefined ? { profile: profile.profile } : {}),
     ...(profile.systemPromptExtensions !== undefined
       ? { systemPromptExtensions: profile.systemPromptExtensions }

@@ -119,7 +119,7 @@ function settledValue(
   if (step === "efforts") {
     return values.reasoningEfforts.length > 0
       ? values.reasoningEfforts.join(", ")
-      : "all";
+      : "—";
   }
   if (step === "defaultEffort") {
     return values.defaultReasoningEffort.length > 0
