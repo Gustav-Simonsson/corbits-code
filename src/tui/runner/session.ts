@@ -453,6 +453,9 @@ export async function assembleTUISession(
     skills: toolset.skills,
     providerName: config.providerName,
     model: config.model,
+    ...(config.mcpServers !== undefined
+      ? { mcpServerNames: config.mcpServers.map((server) => server.name) }
+      : {}),
   });
 
   const directorHolder: { instance?: ReturnType<typeof createChatDirector> } =

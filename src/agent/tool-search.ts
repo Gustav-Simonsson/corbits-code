@@ -252,7 +252,7 @@ export function createActivatedToolTracker(): ActivatedToolTracker {
 export const toolSearchDefinition: ToolDefinition = {
   name: "tool_search",
   description:
-    "Find tools (MCP servers, integrations) and skills by capability. Matched tools load on the next turn; load a skill body with use_skill.",
+    "Find tools (MCP servers, integrations) and skills by capability. Top two matches include input schema — call a listed name to use it (it then joins the tool list). Unused matches stay off the list. Load a skill body with use_skill.",
   inputSchema: {
     type: "object",
     properties: {
@@ -282,6 +282,8 @@ export const TOOL_SEARCH_MAX_RESULTS = 5;
 export const TOOL_SEARCH_LIMIT_MAX = 20;
 export const TOOL_SEARCH_SCORE_RATIO = 0.75;
 export const TOOL_SEARCH_DESC_MAX = 160;
+export const TOOL_SEARCH_SCHEMA_MAX = 600;
+const TOOL_SEARCH_SCHEMA_CARDS = 2;
 
 export function createToolIndex(
   getDefs: () => readonly ToolDefinition[],
@@ -401,9 +403,48 @@ function capDescription(text: string, max = TOOL_SEARCH_DESC_MAX): string {
   return `${oneLine.slice(0, max - 1)}…`;
 }
 
-function renderToolCard(def: ToolDefinition | undefined, name: string): string {
+function isEmptyInputSchema(schema: unknown): boolean {
+  if (schema === undefined || schema === null) return true;
+  if (typeof schema !== "object") return true;
+  const json = JSON.stringify(schema);
+  return (
+    json === "{}" ||
+    json === '{"type":"object"}' ||
+    json === '{"type":"object","properties":{}}' ||
+    json === '{"type":"object","properties":{},"required":[]}'
+  );
+}
+
+function compactInputSchema(schema: unknown): string | undefined {
+  if (isEmptyInputSchema(schema)) return undefined;
+  const json = JSON.stringify(schema);
+  if (json.length <= TOOL_SEARCH_SCHEMA_MAX) return json;
+  const obj = schema as Record<string, unknown>;
+  const properties = obj.properties;
+  const keys =
+    properties !== undefined &&
+    typeof properties === "object" &&
+    properties !== null
+      ? Object.keys(properties)
+      : [];
+  const required = Array.isArray(obj.required) ? obj.required : [];
+  const stub = JSON.stringify({ properties: keys, required });
+  if (stub.length <= TOOL_SEARCH_SCHEMA_MAX) return stub;
+  return `${stub.slice(0, TOOL_SEARCH_SCHEMA_MAX - 1)}…`;
+}
+
+function renderToolCard(
+  def: ToolDefinition | undefined,
+  name: string,
+  includeSchema: boolean,
+): string {
   if (def === undefined) return `- ${name}`;
-  return `- ${def.name}: ${capDescription(def.description ?? "")}`;
+  const desc = capDescription(def.description ?? "");
+  const schema = includeSchema
+    ? compactInputSchema(def.inputSchema)
+    : undefined;
+  if (schema === undefined) return `- ${def.name}: ${desc}`;
+  return `- ${def.name}: ${desc}\n  ${schema}`;
 }
 
 // Race the dependency's pending-count wait against a bound, so a
@@ -479,11 +520,12 @@ export function createToolSearchTool(deps: ToolSearchDeps): AgentTool {
       if (names.length === 0) {
         return `No tools or skills matched "${query}". Try different keywords describing the capability.`;
       }
-      // Cards only — name + capped description. Search does not open the call
-      // gate or grow the tools array; promote-on-execute declares a name when
-      // the model actually calls it.
-      const blocks = names.map((name) =>
-        renderToolCard(deps.lookup(name), name),
+      // Ranked cards: top TOOL_SEARCH_SCHEMA_CARDS include a compact input
+      // schema so the first call is formable; the rest are name + description.
+      // Search does not open the call gate or grow the tools array;
+      // promote-on-execute declares a name when the model actually calls it.
+      const blocks = names.map((name, i) =>
+        renderToolCard(deps.lookup(name), name, i < TOOL_SEARCH_SCHEMA_CARDS),
       );
       return `Matching tools — call a listed name to use it:\n\n${blocks.join("\n")}${skillBlock}`;
     },

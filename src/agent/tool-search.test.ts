@@ -17,6 +17,7 @@ import {
   TOOL_SEARCH_DESC_MAX,
   TOOL_SEARCH_MAX_RESULTS,
   TOOL_SEARCH_LIMIT_MAX,
+  TOOL_SEARCH_SCHEMA_MAX,
   toolSearchDefinition,
   type ToolAvailability,
 } from "./tool-search.js";
@@ -469,16 +470,93 @@ describe("createToolSearchTool", () => {
     expect(listed.every((name) => catalogNames.includes(name))).toBe(true);
   });
 
-  test("returns name and capped description without a full input schema", async () => {
+  test("search cards include the input schema so a first call is formable", async () => {
+    const tool = createToolSearchTool({
+      search: (q) => index.search(q),
+      lookup: (name) => defs.find((d) => d.name === name),
+    });
+    const out = await call(tool, { query: "linear issue create" });
+    expect(out).toContain("mcp__linear__create_issue");
+    expect(out).toContain("title");
+    expect(out).toContain("teamId");
+    expect(advertisedTools(defs).map((d) => d.name)).not.toContain(
+      "mcp__linear__create_issue",
+    );
+  });
+
+  test("only the top two ranked cards include input schema", async () => {
+    const catalog: ToolDefinition[] = Array.from({ length: 5 }, (_, i) => ({
+      name: `mcp__linear__op_${i}`,
+      description: "Linear issue operation",
+      inputSchema: {
+        type: "object",
+        properties: { [`field_${i}`]: { type: "string" } },
+        required: [`field_${i}`],
+      },
+    }));
+    const tool = createToolSearchTool({
+      search: () => catalog.map((d) => d.name),
+      lookup: (name) => catalog.find((d) => d.name === name),
+    });
+    const out = await call(tool, { query: "linear" });
+    expect(listedToolNames(out)).toEqual(catalog.map((d) => d.name));
+    expect(out).toContain("field_0");
+    expect(out).toContain("field_1");
+    expect(out).not.toContain("field_2");
+    expect(out).not.toContain("field_3");
+    expect(out).not.toContain("field_4");
+    expect(out).toContain("mcp__linear__op_2");
+    expect(out).toContain("mcp__linear__op_4");
+  });
+
+  test("tool_search description does not claim matches load on the next turn", () => {
+    expect(toolSearchDefinition.description).not.toMatch(
+      /load on the next turn/i,
+    );
+    expect(toolSearchDefinition.description).toMatch(/schema/i);
+    expect(toolSearchDefinition.description).toMatch(/call a listed name/i);
+  });
+
+  test("an oversized input schema is capped on the card", async () => {
+    const hugeProps = Object.fromEntries(
+      Array.from({ length: 80 }, (_, i) => [
+        `field_${String(i).padStart(2, "0")}`,
+        { type: "string", description: "x".repeat(40) },
+      ]),
+    );
+    const huge: ToolDefinition = {
+      name: "mcp__linear__huge_schema",
+      description: "Linear issue with a large schema",
+      inputSchema: {
+        type: "object",
+        properties: hugeProps,
+        required: ["field_00"],
+      },
+    };
+    const tool = createToolSearchTool({
+      search: () => [huge.name],
+      lookup: () => huge,
+    });
+    const out = await call(tool, { query: "linear huge" });
+    expect(out).toContain("mcp__linear__huge_schema");
+    expect(out).toContain("field_00");
+    const schemaLine = out.split("\n").find((line) => line.startsWith("  {"));
+    expect(schemaLine).toBeDefined();
+    expect(schemaLine?.length ?? 0).toBeLessThanOrEqual(
+      TOOL_SEARCH_SCHEMA_MAX + 2,
+    );
+  });
+
+  test("search does not promote matches and keeps description lines short", async () => {
     const tool = createToolSearchTool({
       search: (q) => linearIndex.search(q),
       lookup: (name) => linearCatalog.find((d) => d.name === name),
     });
+    const before = advertisedTools(linearCatalog).map((d) => d.name);
     const out = await call(tool, { query: "linear issue" });
     expect(out).toContain("mcp__linear__");
-    expect(out).not.toMatch(/input schema/i);
-    expect(out).not.toContain("teamId");
     expect(out).not.toContain("end-marker");
+    expect(advertisedTools(linearCatalog).map((d) => d.name)).toEqual(before);
     const descLines = out
       .split("\n")
       .filter((line) => line.startsWith("- mcp__"));
@@ -488,6 +566,7 @@ describe("createToolSearchTool", () => {
     }
     expect(out).not.toMatch(/call them now/i);
     expect(out).not.toMatch(/promoted onto/i);
+    expect(out).not.toMatch(/load on the next turn/i);
     expect(out).toMatch(/call a listed name/i);
   });
 
