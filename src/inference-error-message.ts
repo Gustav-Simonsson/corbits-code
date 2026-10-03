@@ -20,6 +20,7 @@ import {
   isGatewayOverloadInferenceError,
   isKnownOAuthProviderId,
   isXaiShortRateLimitInferenceError,
+  normalizeInferenceErrorForTerminal,
   parseCodexUsageLimitFromError,
   RATE_LIMIT_USER_MESSAGE,
   type InferenceErrorLike,
@@ -253,18 +254,6 @@ function terminalProviderFailureGuidance(
     : 'Try again or switch models with "/model".';
 }
 
-function terminalProviderFailureSummary(
-  providerId: string,
-  error: InferenceErrorLike,
-  displayLabel?: string,
-): string {
-  const label = terminalProviderFailureLabel(providerId, displayLabel);
-  const category = terminalProviderFailureCategory(error);
-  const guidance = terminalProviderFailureGuidance(error, category, providerId);
-  const tail = guidance.length > 0 ? ` ${guidance}` : "";
-  return `${label} Provider failed (${category}).${tail}`;
-}
-
 export type ResolvedProviderFailureError = Error & {
   readonly name: "ResolvedProviderFailureError";
   readonly providerId: string;
@@ -277,16 +266,20 @@ export function createResolvedProviderFailureError(
   providerError: InferenceErrorLike,
   displayLabel?: string,
 ): ResolvedProviderFailureError {
+  const normalized = normalizeInferenceErrorForTerminal(
+    providerError,
+    providerId,
+  );
   return Object.assign(
     new Error(
-      terminalProviderFailureSummary(providerId, providerError, displayLabel),
+      terminalProviderFailureMessage(providerId, normalized, displayLabel),
     ),
     {
       name: "ResolvedProviderFailureError" as const,
       providerId,
-      category: terminalProviderFailureCategory(providerError),
-      ...(providerError.statusCode !== undefined
-        ? { statusCode: providerError.statusCode }
+      category: terminalProviderFailureCategory(normalized),
+      ...(normalized.statusCode !== undefined
+        ? { statusCode: normalized.statusCode }
         : {}),
     },
   );
