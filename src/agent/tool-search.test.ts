@@ -471,8 +471,8 @@ describe("createToolSearchTool", () => {
     expect(listed.every((name) => catalogNames.includes(name))).toBe(true);
   });
 
-  test("search loads the top two ranked names when a promoter is wired", async () => {
-    const catalog: ToolDefinition[] = Array.from({ length: 5 }, (_, i) => ({
+  test("search loads the top ranked names when a promoter is wired", async () => {
+    const catalog: ToolDefinition[] = Array.from({ length: 8 }, (_, i) => ({
       name: `mcp__linear__op_${i}`,
       description: "Linear issue operation",
       inputSchema: {
@@ -493,8 +493,8 @@ describe("createToolSearchTool", () => {
     expect(loaded).toEqual(
       catalog.slice(0, TOOL_SEARCH_SCHEMA_CARDS).map((d) => d.name),
     );
-    expect(out).toContain("mcp__linear__op_4");
-    expect(out).not.toContain("field_4");
+    expect(out).toContain("mcp__linear__op_7");
+    expect(out).not.toContain("field_7");
   });
 
   test("search cards include the input schema so a first call is formable", async () => {
@@ -511,8 +511,8 @@ describe("createToolSearchTool", () => {
     );
   });
 
-  test("only the top two ranked cards include input schema", async () => {
-    const catalog: ToolDefinition[] = Array.from({ length: 5 }, (_, i) => ({
+  test("only the top ranked cards include input schema", async () => {
+    const catalog: ToolDefinition[] = Array.from({ length: 8 }, (_, i) => ({
       name: `mcp__linear__op_${i}`,
       description: "Linear issue operation",
       inputSchema: {
@@ -528,12 +528,10 @@ describe("createToolSearchTool", () => {
     const out = await call(tool, { query: "linear" });
     expect(listedToolNames(out)).toEqual(catalog.map((d) => d.name));
     expect(out).toContain("field_0");
-    expect(out).toContain("field_1");
-    expect(out).not.toContain("field_2");
-    expect(out).not.toContain("field_3");
-    expect(out).not.toContain("field_4");
-    expect(out).toContain("mcp__linear__op_2");
-    expect(out).toContain("mcp__linear__op_4");
+    expect(out).toContain("field_4");
+    expect(out).not.toContain("field_5");
+    expect(out).not.toContain("field_7");
+    expect(out).toContain("mcp__linear__op_7");
   });
 
   test("tool_search description says top matches join the list next turn", () => {
@@ -870,7 +868,7 @@ describe("promote-on-execute", () => {
       .map((d) => d.name);
   }
 
-  test("a tool_search call loads the top two onto the advertised tail", async () => {
+  test("a tool_search call loads ranked hits onto the advertised tail", async () => {
     const { advertised, promoted, search, runner } = wirePromoteOnExecute();
     const before = advertisedNames(advertised, runner);
     if (search.kind !== "string") throw new Error("expected string tool");
@@ -909,17 +907,17 @@ describe("promote-on-execute", () => {
     expect(advertisedNames(advertised, runner)).toContain(called);
   });
 
-  test("a call to a search hit past the top two still promote-on-execute", async () => {
+  test("a call to a search hit past the loaded set still promote-on-execute", async () => {
     const { advertised, promoted, search, runner } = wirePromoteOnExecute();
     if (search.kind !== "string") throw new Error("expected string tool");
     const listed = listedToolNames(
       await search.handler(
-        { query: "linear issue", limit: 3 },
+        { query: "linear issue", limit: 8 },
         new AbortController().signal,
       ),
     );
     const called = listed[TOOL_SEARCH_SCHEMA_CARDS];
-    if (called === undefined) throw new Error("expected a third listed tool");
+    if (called === undefined) throw new Error("expected a hit past the load cap");
     const loaded = listed.slice(0, TOOL_SEARCH_SCHEMA_CARDS);
     const result = await dispatch(runner, called);
     expect(result.content).toBe(`ran:${called}`);

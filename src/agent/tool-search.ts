@@ -253,7 +253,7 @@ export function createActivatedToolTracker(): ActivatedToolTracker {
 export const toolSearchDefinition: ToolDefinition = {
   name: "tool_search",
   description:
-    "Find tools (MCP servers, integrations) and skills by capability. Top two matches include input schema and join the tool list on the next turn. Unused matches stay off the list. Load a skill body with use_skill.",
+    "Find tools (MCP servers, integrations) and skills by capability. Top matches include input schema and join the tool list on the next turn (default 5). Unused matches stay off the list. Load a skill body with use_skill.",
   inputSchema: {
     type: "object",
     properties: {
@@ -284,7 +284,7 @@ export const TOOL_SEARCH_LIMIT_MAX = 20;
 export const TOOL_SEARCH_SCORE_RATIO = 0.75;
 export const TOOL_SEARCH_DESC_MAX = 160;
 export const TOOL_SEARCH_SCHEMA_MAX = 600;
-export const TOOL_SEARCH_SCHEMA_CARDS = 2;
+export const TOOL_SEARCH_SCHEMA_CARDS = 5;
 
 export function createToolIndex(
   getDefs: () => readonly ToolDefinition[],
