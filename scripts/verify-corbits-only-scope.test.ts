@@ -40,10 +40,19 @@ async function initGitRepo(dir: string): Promise<void> {
   await run(["commit", "-m", "init"]);
 }
 
-test("verify-corbits-only-scope passes on clean corbits-only tree", async () => {
-  const { exitCode, stdout } = await runScopeScript(repoRoot);
-  expect(exitCode).toBe(0);
-  expect(stdout).toContain("OK: no forbidden path changes detected.");
+test("verify-corbits-only-scope passes on first-party changes in an isolated repo", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "scope-guard-product-"));
+  try {
+    await initGitRepo(dir);
+    await writeFile(join(dir, "README.md"), "updated\n");
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "usage.ts"), "export const usage = 0;\n");
+    const { exitCode, stdout } = await runScopeScript(dir);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("OK: no forbidden path changes detected.");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("verify-corbits-only-scope fails on untracked vendor path", async () => {

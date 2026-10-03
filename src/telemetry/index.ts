@@ -143,6 +143,7 @@ const EVENT_PROPERTY_ALLOWLIST: Record<TelemetryEvent, readonly string[]> = {
     "$ai_error",
     "$ai_cache_read_input_tokens",
     "$ai_cache_creation_input_tokens",
+    "$ai_cache_reporting_exclusive",
     "$ai_reasoning_tokens",
     // Aggregates folded from per-call spans (CL-6816). Custom properties —
     // PostHog LLM cost views still only query the $ai_*-prefixed fields above.

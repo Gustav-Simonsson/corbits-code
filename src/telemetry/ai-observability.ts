@@ -29,6 +29,14 @@ import {
 // property inflates every latency by 1000x and still renders plausibly.
 const MS_PER_SECOND = 1000;
 
+// These adapters share the normalized Chat Completions usage parser.
+const EXCLUSIVE_CHAT_COMPLETIONS_PROVIDERS = new Set([
+  "openai",
+  "openai-compatible",
+  "opencode-go",
+  "bifrost",
+]);
+
 export function secondsFromMs(durationMs: number): number {
   return durationMs / MS_PER_SECOND;
 }
@@ -175,6 +183,9 @@ export function emitAiObservability(
     $ai_is_error: false,
     $ai_cache_read_input_tokens: ctx.usage.cacheRead,
     $ai_cache_creation_input_tokens: ctx.usage.cacheWrite,
+    ...(EXCLUSIVE_CHAT_COMPLETIONS_PROVIDERS.has(ctx.source.provider)
+      ? { $ai_cache_reporting_exclusive: true }
+      : {}),
     $ai_reasoning_tokens: ctx.usage.thinking,
     tool_call_count: aggregates.tool_call_count,
     tool_error_count: aggregates.tool_error_count,
