@@ -56,6 +56,9 @@ export interface ProviderSubmission {
   opencodeGo?: boolean;
   reasoningEfforts?: ReasoningEffort[];
   defaultReasoningEffort?: ReasoningEffort;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
 }
 
 // Precedence for the active/backup model of a provider: defaultModel wins
@@ -149,6 +152,13 @@ export function buildProviderEntry(
           : {}),
       };
     })(),
+    ...(submission.maxTokens !== undefined
+      ? { maxTokens: submission.maxTokens }
+      : {}),
+    ...(submission.temperature !== undefined
+      ? { temperature: submission.temperature }
+      : {}),
+    ...(submission.topP !== undefined ? { topP: submission.topP } : {}),
   };
   const catalog = currentCatalog
     .filter(

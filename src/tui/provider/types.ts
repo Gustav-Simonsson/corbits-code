@@ -69,6 +69,15 @@ export interface ProviderFormValues {
   reasoningEfforts: string[];
   /** Operator-picked default effort level for new sessions ("" = none chosen). */
   defaultReasoningEffort: string;
+  /**
+   * Optional sampling/token knobs for the custom path. Kept as blank-by-default
+   * strings so an empty input means "leave unset" rather than a forced value;
+   * submit parses them to numbers and omits blanks.
+   */
+  contextWindow: string;
+  maxTokens: string;
+  temperature: string;
+  topP: string;
 }
 
 // "testing" covers the connection-check call against the entered credentials;

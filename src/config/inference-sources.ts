@@ -204,6 +204,11 @@ export function buildInferenceSourceForRef(
           reasoning?.defaultReasoningEffort,
         )
       : undefined;
+  // A cleared sampling field must not revive its stale catalog value.
+  const inferenceOptions = providerSettings ?? entry;
+  const maxTokens = inferenceOptions?.maxTokens;
+  const temperature = inferenceOptions?.temperature;
+  const topP = inferenceOptions?.topP;
   return buildOpenAISource({
     id: ref.provider,
     baseURL,
@@ -214,6 +219,9 @@ export function buildInferenceSourceForRef(
         : {}),
     model: ref.model,
     ...(customEffort !== undefined ? { reasoningEffort: customEffort } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(topP !== undefined ? { topP } : {}),
     ...(quirks !== undefined ? { quirks } : {}),
   });
 }

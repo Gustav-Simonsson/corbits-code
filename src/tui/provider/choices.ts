@@ -368,6 +368,10 @@ export function chooseProviderRow(
     ? [...CUSTOM_REASONING_EFFORTS]
     : [];
   state.values.defaultReasoningEffort = "";
+  state.values.contextWindow = "";
+  state.values.maxTokens = "";
+  state.values.temperature = "";
+  state.values.topP = "";
   state.typedModel = false;
   state.oauthProfileError = null;
   state.oauthProfileConfirmPending = false;

@@ -337,3 +337,31 @@ describe("buildProviderEntry reasoning effort forwarding", () => {
     expect(entry.defaultReasoningEffort).toBe("high");
   });
 });
+
+describe("buildProviderEntry token/sampling knobs", () => {
+  test("forwards maxTokens, temperature, and topP when present", () => {
+    const entry = expectBuiltEntry({
+      name: "custom",
+      baseURL: "https://api.example.com/v1",
+      apiKey: "sk-key",
+      models: ["m"],
+      maxTokens: 4096,
+      temperature: 0.7,
+    });
+    expect(entry.maxTokens).toBe(4096);
+    expect(entry.temperature).toBe(0.7);
+    expect(entry.topP).toBeUndefined();
+  });
+
+  test("omits all three when submission leaves them unset", () => {
+    const entry = expectBuiltEntry({
+      name: "custom",
+      baseURL: "https://api.example.com/v1",
+      apiKey: "sk-key",
+      models: ["m"],
+    });
+    expect(entry.maxTokens).toBeUndefined();
+    expect(entry.temperature).toBeUndefined();
+    expect(entry.topP).toBeUndefined();
+  });
+});

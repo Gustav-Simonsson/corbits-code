@@ -87,6 +87,10 @@ const CUSTOM_PROVIDER: ProviderFormValues = {
   oauthProfile: "",
   reasoningEfforts: ["low"],
   defaultReasoningEffort: "low",
+  contextWindow: "",
+  maxTokens: "",
+  temperature: "",
+  topP: "",
 };
 
 const ISOLATED_PROVIDER: ProviderFormValues = {
@@ -97,6 +101,10 @@ const ISOLATED_PROVIDER: ProviderFormValues = {
   oauthProfile: "",
   reasoningEfforts: ["low"],
   defaultReasoningEffort: "low",
+  contextWindow: "",
+  maxTokens: "",
+  temperature: "",
+  topP: "",
 };
 
 /** Stub the setup flow to submit one provider form, validation skipped. */
@@ -243,6 +251,10 @@ describe("runOnboarding settings source", () => {
           oauthProfile: "work",
           reasoningEfforts: [],
           defaultReasoningEffort: "",
+          contextWindow: "",
+          maxTokens: "",
+          temperature: "",
+          topP: "",
         },
         {
           skipValidation: true,

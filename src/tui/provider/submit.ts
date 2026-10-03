@@ -1,3 +1,5 @@
+import { type } from "arktype";
+
 import {
   isOllamaProviderId,
   normalizeOllamaRootURL,
@@ -25,6 +27,33 @@ import {
   isReasoningEffort,
   normalizeProviderEfforts,
 } from "../../provider/reasoning-effort.js";
+import { ProviderInferenceOptionsSchema } from "../../config/provider-inference-options.js";
+
+const CustomInferenceInputsSchema = type({
+  contextWindow: "string",
+  maxTokens: "string",
+  temperature: "string",
+  topP: "string",
+});
+
+function parseCustomInferenceOptions(
+  values: unknown,
+): typeof ProviderInferenceOptionsSchema.infer {
+  const inputs = CustomInferenceInputsSchema(values);
+  if (inputs instanceof type.errors) {
+    throw new Error(`Invalid custom provider options: ${inputs.summary}`);
+  }
+  const numbers: Record<string, number> = {};
+  for (const [field, raw] of Object.entries(inputs)) {
+    const trimmed = raw.trim();
+    if (trimmed.length > 0) numbers[field] = Number(trimmed);
+  }
+  const options = ProviderInferenceOptionsSchema(numbers);
+  if (options instanceof type.errors) {
+    throw new Error(`Invalid custom provider options: ${options.summary}`);
+  }
+  return options;
+}
 
 /**
  * Persist the project-local provider/model selection after a successful
@@ -75,6 +104,18 @@ export function buildProviderSubmitHandler(
     const trimmedBaseURL = baseURL.trim();
     const trimmedKey = apiKey.trim();
     const selectedModel = model.trim();
+
+    // Preset/OAuth paths never expose these fields, so stale drafts must not
+    // affect their credentials or persist hidden custom configuration.
+    const inferenceOptions =
+      preset === undefined && oauth === undefined
+        ? parseCustomInferenceOptions({
+            contextWindow: values.contextWindow,
+            maxTokens: values.maxTokens,
+            temperature: values.temperature,
+            topP: values.topP,
+          })
+        : {};
     const isOllama = preset !== undefined && isOllamaProviderId(preset.id);
     const effectiveApiKey =
       isOllama || trimmedKey.length === 0 ? undefined : trimmedKey;
@@ -190,6 +231,7 @@ export function buildProviderSubmitHandler(
       ...(preset === undefined && isReasoningEffort(trimmedDefaultEffort)
         ? { defaultReasoningEffort: trimmedDefaultEffort }
         : {}),
+      ...inferenceOptions,
       // "Save anyway" (Ctrl+S) persists a credential the connection test
       // never passed. Mark it so the running session can warn on first use
       // instead of surfacing a bare adapter error.

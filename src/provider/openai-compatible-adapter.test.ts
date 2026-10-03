@@ -66,6 +66,14 @@ describe("openai-compatible adapter providerOptions passthrough", () => {
     expect(body["reasoning_effort"]).toBe("high");
   });
 
+  test("merges temperature and top_p together from providerOptions", () => {
+    const body = bodyFor({
+      providerOptions: { temperature: 0.7, top_p: 0.9 },
+    } as InferenceOptions);
+    expect(body["temperature"]).toBe(0.7);
+    expect(body["top_p"]).toBe(0.9);
+  });
+
   test("leaves the body untouched when no providerOptions are present", () => {
     const body = bodyFor({} as InferenceOptions);
     expect("reasoning_effort" in body).toBe(false);

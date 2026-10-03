@@ -6,7 +6,15 @@
 import { isOllamaProviderId } from "../../provider/ollama.js";
 import type { ProviderChoice } from "./types.js";
 
-export type ProviderField = "name" | "baseURL" | "apiKey" | "model";
+export type ProviderField =
+  | "name"
+  | "baseURL"
+  | "apiKey"
+  | "model"
+  | "contextWindow"
+  | "maxTokens"
+  | "temperature"
+  | "topP";
 
 /** One screen of the flow. `provider` and `model` can be pick-lists. */
 export type SetupStep =
@@ -15,6 +23,10 @@ export type SetupStep =
   | "baseURL"
   | "apiKey"
   | "model"
+  | "contextWindow"
+  | "maxTokens"
+  | "temperature"
+  | "topP"
   | "efforts"
   | "defaultEffort"
   | "login";
@@ -54,6 +66,10 @@ export const CUSTOM_STEPS: readonly SetupStep[] = [
   "baseURL",
   "apiKey",
   "model",
+  "contextWindow",
+  "maxTokens",
+  "temperature",
+  "topP",
   "efforts",
   "defaultEffort",
 ];
@@ -64,6 +80,10 @@ export const STEP_LABELS: Record<SetupStep, string> = {
   baseURL: "base url",
   apiKey: "api key",
   model: "model",
+  contextWindow: "context window",
+  maxTokens: "max output tokens",
+  temperature: "temperature",
+  topP: "top p",
   efforts: "reasoning efforts",
   defaultEffort: "default effort",
   login: "sign in",
@@ -76,6 +96,11 @@ export const STEP_PROMPTS: Record<SetupStep, string> = {
     "paste the provider url — Ollama uses the server root; others may include /v1",
   apiKey: "paste the api key — leave blank for a keyless local endpoint",
   model: "pick the model to start with",
+  contextWindow:
+    "context window (tokens) — optional, leave blank to use the default",
+  maxTokens: "max output tokens — optional, leave blank to use the default",
+  temperature: "temperature (0..2) — optional; mutually exclusive with top p",
+  topP: "top p (0..1) — optional; mutually exclusive with temperature",
   efforts:
     "toggle the reasoning effort levels this provider accepts — space toggles, enter continues",
   defaultEffort: "pick the default reasoning effort for new sessions",

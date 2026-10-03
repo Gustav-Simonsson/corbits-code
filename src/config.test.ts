@@ -1344,6 +1344,51 @@ describe("buildOpenAISource", () => {
     });
   });
 
+  test("overrides maxTokens and adds temperature to providerOptions", () => {
+    const source = buildOpenAISource({
+      id: "fp",
+      baseURL: "https://fp/v1",
+      apiKey: "k",
+      model: "m",
+      maxTokens: 8192,
+      temperature: 0.7,
+    });
+    expect(source.defaults).toEqual({
+      maxTokens: 8192,
+      providerOptions: { temperature: 0.7 },
+    });
+  });
+
+  test("adds top_p to providerOptions when topP is present", () => {
+    const source = buildOpenAISource({
+      id: "fp",
+      baseURL: "https://fp/v1",
+      apiKey: "k",
+      model: "m",
+      topP: 0.9,
+    });
+    expect(source.defaults).toEqual({
+      maxTokens: SOURCE_MAX_TOKENS,
+      providerOptions: { top_p: 0.9 },
+    });
+  });
+
+  test("coexists temperature with reasoning_effort in one providerOptions", () => {
+    const source = buildOpenAISource({
+      id: "fp",
+      baseURL: "https://fp/v1",
+      apiKey: "k",
+      model: "gpt-5.1",
+      reasoningEffort: "medium",
+      temperature: 1.0,
+      maxTokens: 4096,
+    });
+    expect(source.defaults).toEqual({
+      maxTokens: 4096,
+      providerOptions: { reasoning_effort: "medium", temperature: 1.0 },
+    });
+  });
+
   test("projects an Ollama root URL to the OpenAI-compatible /v1 endpoint", () => {
     const source = buildOpenAISource({
       id: "ollama/default",
