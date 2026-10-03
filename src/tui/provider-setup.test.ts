@@ -60,6 +60,10 @@ const EMPTY: ProviderFormValues = {
   apiKey: "",
   model: "",
   oauthProfile: "",
+  contextWindow: "",
+  maxTokens: "",
+  temperature: "",
+  topP: "",
 };
 
 type LoginCompletion = Awaited<OAuthLoginStart["completed"]>;
@@ -178,6 +182,28 @@ describe("provider setup pure helpers", () => {
     expect(stepReady("apiKey", "")).toBe(true);
   });
 
+  test("numeric token/sampling steps accept blank or a valid in-range number", () => {
+    // Blank is always allowed (leave unset).
+    expect(stepReady("contextWindow", "")).toBe(true);
+    expect(stepReady("contextWindow", "  ")).toBe(true);
+    expect(stepReady("maxTokens", "")).toBe(true);
+    expect(stepReady("temperature", "")).toBe(true);
+    expect(stepReady("topP", "")).toBe(true);
+    // Valid finite numbers pass.
+    expect(stepReady("contextWindow", "128000")).toBe(true);
+    expect(stepReady("maxTokens", "8192")).toBe(true);
+    // Range checks: temperature 0..2, topP 0..1.
+    expect(stepReady("temperature", "0")).toBe(true);
+    expect(stepReady("temperature", "2")).toBe(true);
+    expect(stepReady("temperature", "2.5")).toBe(false);
+    expect(stepReady("topP", "0")).toBe(true);
+    expect(stepReady("topP", "1")).toBe(true);
+    expect(stepReady("topP", "1.5")).toBe(false);
+    // Non-numeric rejects.
+    expect(stepReady("maxTokens", "abc")).toBe(false);
+    expect(stepReady("temperature", "nan")).toBe(false);
+  });
+
   test("secrets render as capped bullets", () => {
     const masked = maskSecret("sk-abc");
     expect(masked).toHaveLength(6);
@@ -235,6 +261,10 @@ describe("provider setup pure helpers", () => {
       "baseURL",
       "apiKey",
       "model",
+      "contextWindow",
+      "maxTokens",
+      "temperature",
+      "topP",
     ]);
   });
 
@@ -496,6 +526,15 @@ async function connectCustom(harness: Harness): Promise<void> {
   type(harness, "sk-key");
   harness.pressKey("Enter");
   type(harness, "fp-small");
+  harness.pressKey("Enter");
+  await harness.renderOnce();
+  // The four optional token/sampling steps: Enter accepts blank (leave unset).
+  harness.pressKey("Enter");
+  await harness.renderOnce();
+  harness.pressKey("Enter");
+  await harness.renderOnce();
+  harness.pressKey("Enter");
+  await harness.renderOnce();
   harness.pressKey("Enter");
   await harness.renderOnce();
 }
@@ -1169,6 +1208,10 @@ describe("runProviderSetup", () => {
       apiKey: "sk-key",
       model: openai?.defaultModel ?? "",
       oauthProfile: "default",
+      contextWindow: "",
+      maxTokens: "",
+      temperature: "",
+      topP: "",
     });
     expect(opts[0]?.preset?.id).toBe("openai");
     expect(opts[0]?.preset?.models.length).toBeGreaterThan(1);
@@ -1182,7 +1225,7 @@ describe("runProviderSetup", () => {
       opts.push(o);
     });
     await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
-    expect(harness.captureCharFrame()).toContain("step 2 of 5");
+    expect(harness.captureCharFrame()).toContain("step 2 of 9");
     type(harness, "firepass");
     harness.pressKey("Enter");
     type(harness, "https://api.example.com");
@@ -1190,6 +1233,11 @@ describe("runProviderSetup", () => {
     type(harness, "sk-key");
     harness.pressKey("Enter");
     type(harness, "fp-small");
+    harness.pressKey("Enter");
+    // Token/sampling knobs are optional — leave all four blank.
+    harness.pressKey("Enter");
+    harness.pressKey("Enter");
+    harness.pressKey("Enter");
     harness.pressKey("Enter");
     await harness.renderOnce();
 
@@ -1200,6 +1248,10 @@ describe("runProviderSetup", () => {
       apiKey: "sk-key",
       model: "fp-small",
       oauthProfile: "",
+      contextWindow: "",
+      maxTokens: "",
+      temperature: "",
+      topP: "",
     });
     expect(opts[0]?.preset).toBeUndefined();
   });
@@ -1248,7 +1300,7 @@ describe("runProviderSetup", () => {
     await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
     harness.pressKey("Enter");
     await harness.renderOnce();
-    expect(harness.captureCharFrame()).toContain("step 2 of 5");
+    expect(harness.captureCharFrame()).toContain("step 2 of 9");
     harness.pressKey("Ctrl+C");
     await done;
   });

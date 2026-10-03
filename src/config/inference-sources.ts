@@ -179,6 +179,9 @@ export function buildInferenceSourceForRef(
   }
 
   const quirks = openAISourceQuirks(baseURL, ref.model);
+  const maxTokens = entry?.maxTokens ?? providerSettings?.maxTokens;
+  const temperature = entry?.temperature ?? providerSettings?.temperature;
+  const topP = entry?.topP ?? providerSettings?.topP;
   return buildOpenAISource({
     id: ref.provider,
     baseURL,
@@ -189,6 +192,9 @@ export function buildInferenceSourceForRef(
         : {}),
     model: ref.model,
     ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(topP !== undefined ? { topP } : {}),
     ...(quirks !== undefined ? { quirks } : {}),
   });
 }

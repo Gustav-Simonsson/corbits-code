@@ -70,6 +70,22 @@ export function buildProviderSubmitHandler(
     const trimmedBaseURL = baseURL.trim();
     const trimmedKey = apiKey.trim();
     const selectedModel = model.trim();
+
+    // Optional token/sampling knobs: blank means leave unset. temperature and
+    // topP are mutually exclusive at the OpenAI API level — never send both.
+    const parseOptionalNumber = (raw: string): number | undefined => {
+      const trimmed = raw.trim();
+      return trimmed.length === 0 ? undefined : Number(trimmed);
+    };
+    const contextWindow = parseOptionalNumber(values.contextWindow);
+    const maxTokens = parseOptionalNumber(values.maxTokens);
+    const temperature = parseOptionalNumber(values.temperature);
+    const topP = parseOptionalNumber(values.topP);
+    if (temperature !== undefined && topP !== undefined) {
+      throw new Error(
+        "temperature and top p are mutually exclusive — set only one.",
+      );
+    }
     const isOllama = preset !== undefined && isOllamaProviderId(preset.id);
     const effectiveApiKey =
       isOllama || trimmedKey.length === 0 ? undefined : trimmedKey;
@@ -160,6 +176,10 @@ export function buildProviderSubmitHandler(
         : { keyless: true }),
       ...(preset?.anthropic === true ? { anthropic: true } : {}),
       ...(preset?.opencodeGo === true ? { opencodeGo: true } : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(temperature !== undefined ? { temperature } : {}),
+      ...(topP !== undefined ? { topP } : {}),
       // "Save anyway" (Ctrl+S) persists a credential the connection test
       // never passed. Mark it so the running session can warn on first use
       // instead of surfacing a bare adapter error.

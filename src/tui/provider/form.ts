@@ -17,6 +17,10 @@ export const PROVIDER_FIELD_HINTS: Record<ProviderField, string> = {
   baseURL: "https://api.openai.com/v1",
   apiKey: "sk-… (blank for keyless/local)",
   model: "gpt-4o",
+  contextWindow: "128000 (optional)",
+  maxTokens: "8192 (optional)",
+  temperature: "0.7 (optional)",
+  topP: "0.9 (optional)",
 };
 
 /** Placeholder for the OAuth account-name step, which edits `oauthProfile`. */
@@ -44,8 +48,34 @@ export function maskEcho(value: string): string {
 }
 
 /** apiKey is optional — blank means a keyless local provider (e.g. Ollama). */
+const NUMERIC_STEPS: readonly SetupStep[] = [
+  "contextWindow",
+  "maxTokens",
+  "temperature",
+  "topP",
+];
+
+/** Range bounds for the numeric sampling/token steps; blank is always allowed. */
+const NUMERIC_BOUNDS: Partial<Record<SetupStep, { min: number; max: number }>> =
+  {
+    temperature: { min: 0, max: 2 },
+    topP: { min: 0, max: 1 },
+  };
+
+/**
+ * The four optional token/sampling steps accept a blank (leave unset) or a
+ * finite number in range. Everything else is ready once it is non-blank.
+ */
 export function stepReady(step: SetupStep, value: string): boolean {
-  return step === "apiKey" || value.trim().length > 0;
+  if (step === "apiKey") return true;
+  if (!NUMERIC_STEPS.includes(step)) return value.trim().length > 0;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return true;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return false;
+  const bounds = NUMERIC_BOUNDS[step];
+  if (bounds !== undefined) return parsed >= bounds.min && parsed <= bounds.max;
+  return true;
 }
 
 /**
@@ -117,6 +147,18 @@ function settledValue(
       : values.name;
   }
   if (step === "baseURL") return values.baseURL;
+  if (step === "contextWindow") {
+    return values.contextWindow.trim().length > 0 ? values.contextWindow : "—";
+  }
+  if (step === "maxTokens") {
+    return values.maxTokens.trim().length > 0 ? values.maxTokens : "—";
+  }
+  if (step === "temperature") {
+    return values.temperature.trim().length > 0 ? values.temperature : "—";
+  }
+  if (step === "topP") {
+    return values.topP.trim().length > 0 ? values.topP : "—";
+  }
   return values.model;
 }
 

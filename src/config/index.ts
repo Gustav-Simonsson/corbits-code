@@ -272,12 +272,17 @@ export function buildOpenAISource(fields: {
   apiKey?: string;
   model: string;
   reasoningEffort?: ReasoningEffort;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
   quirks?: Record<string, unknown>;
 }): InferenceSource {
-  const overrides =
-    fields.reasoningEffort !== undefined
-      ? { providerOptions: { reasoning_effort: fields.reasoningEffort } }
-      : {};
+  const providerOptions: Record<string, unknown> = {};
+  if (fields.reasoningEffort !== undefined)
+    providerOptions["reasoning_effort"] = fields.reasoningEffort;
+  if (fields.temperature !== undefined)
+    providerOptions["temperature"] = fields.temperature;
+  if (fields.topP !== undefined) providerOptions["top_p"] = fields.topP;
   registerSourceSecret(fields.id, fields.apiKey);
   return {
     id: fields.id,
@@ -287,7 +292,10 @@ export function buildOpenAISource(fields: {
       : normalizeOpenAICompatibleBaseURL(fields.baseURL),
     credentialId: fields.id,
     model: fields.model,
-    defaults: { maxTokens: SOURCE_MAX_TOKENS, ...overrides },
+    defaults: {
+      maxTokens: fields.maxTokens ?? SOURCE_MAX_TOKENS,
+      ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
+    },
     ...(fields.quirks !== undefined ? { quirks: fields.quirks } : {}),
   };
 }
@@ -1405,6 +1413,11 @@ export function catalogEntryAsProviderSettings(
       ? { defaultModel: entry.defaultModel }
       : {}),
     ...(entry.free !== undefined ? { free: entry.free } : {}),
+    ...(entry.maxTokens !== undefined ? { maxTokens: entry.maxTokens } : {}),
+    ...(entry.temperature !== undefined
+      ? { temperature: entry.temperature }
+      : {}),
+    ...(entry.topP !== undefined ? { topP: entry.topP } : {}),
     ...(entry.bifrostVirtualKey === true ? { bifrostVirtualKey: true } : {}),
     ...(entry.anthropic === true ? { anthropic: true } : {}),
     ...(go ? { opencodeGo: true } : {}),
@@ -1482,6 +1495,11 @@ export function buildProviderCatalog(
             ? { defaultModel: p.defaultModel }
             : {}),
           ...(p.free !== undefined ? { free: p.free } : {}),
+          ...(p.maxTokens !== undefined ? { maxTokens: p.maxTokens } : {}),
+          ...(p.temperature !== undefined
+            ? { temperature: p.temperature }
+            : {}),
+          ...(p.topP !== undefined ? { topP: p.topP } : {}),
           ...(p.bifrostVirtualKey === true ? { bifrostVirtualKey: true } : {}),
           ...(p.anthropic === true ? { anthropic: true } : {}),
           ...(go ? { opencodeGo: true } : {}),

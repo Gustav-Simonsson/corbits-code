@@ -44,6 +44,15 @@ export interface ProviderSettings {
   // config load into contextWindowFor. OAuth-projected Codex/xAI entries drop
   // this field, so a hand-edited value on those providers is ignored.
   contextWindow?: number;
+  // Per-call output cap for this provider, overriding the default
+  // SOURCE_MAX_TOKENS when set.
+  maxTokens?: number;
+  // Sampling temperature (0..2, OpenAI-compatible). Mutually exclusive with
+  // topP — never send both on the wire.
+  temperature?: number;
+  // Sampling top-p (0..1, OpenAI-compatible). Mutually exclusive with
+  // temperature — never send both on the wire.
+  topP?: number;
   // When true, this provider uses a Bifrost virtual key (sk-bf-...).
   // The marker causes the inference source to route through the Bifrost
   // adapter (which injects the x-bf-vk header) and enables model
@@ -242,6 +251,13 @@ function providerSelectionMetadata(
     ...(provider.contextWindow !== undefined
       ? { contextWindow: provider.contextWindow }
       : {}),
+    ...(provider.maxTokens !== undefined
+      ? { maxTokens: provider.maxTokens }
+      : {}),
+    ...(provider.temperature !== undefined
+      ? { temperature: provider.temperature }
+      : {}),
+    ...(provider.topP !== undefined ? { topP: provider.topP } : {}),
     ...(provider.bifrostVirtualKey === true ? { bifrostVirtualKey: true } : {}),
     ...(provider.anthropic === true ? { anthropic: true } : {}),
     ...(provider.opencodeGo === true ? { opencodeGo: true } : {}),
@@ -616,6 +632,9 @@ const ProviderSettingsSchema = type({
   "keyless?": "boolean",
   "free?": "boolean",
   "contextWindow?": "number",
+  "maxTokens?": "number",
+  "temperature?": "number",
+  "topP?": "number",
   "bifrostVirtualKey?": "boolean",
   "anthropic?": "boolean",
   "opencodeGo?": "boolean",
