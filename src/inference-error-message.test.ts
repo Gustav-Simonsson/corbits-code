@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { normalizeInferenceErrorForTerminal } from "./inference-gateway-error.js";
 import {
   CREDENTIAL_FAILURE_USER_MESSAGE,
+  createResolvedProviderFailureError,
   inferenceErrorMessage,
   terminalProviderFailureMessage,
 } from "./inference-error-message.js";
@@ -227,6 +228,18 @@ describe("terminalProviderFailureMessage", () => {
     expect(message).toContain("/connect");
     expect(message).toContain('"/connect xai default-2"');
     expect(message).toContain('reconnect profile "default-2"');
+  });
+
+  test("xAI worker failure line lifts nested 400 diagnostic over Bad Request", () => {
+    const error = createResolvedProviderFailureError("xai/default-2", {
+      category: "fatal",
+      message: "Bad Request",
+      statusCode: 400,
+      raw: { error: { message: "Invalid request: recursive JSON schema" } },
+    });
+    expect(error.message).toContain("Invalid request: recursive JSON schema");
+    expect(error.message).toContain("xai/default-2");
+    expect(error.message).not.toContain("Bad Request");
   });
 
   test("terminal Codex credential failure keeps branded wording plus the explicit command", () => {

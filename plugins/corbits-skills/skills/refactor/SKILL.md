@@ -8,6 +8,8 @@ description: Document a directory's design and plan improvements with the operat
 
 Analyze existing code, document its design, and agree an improvement plan with the operator. This skill does not change code: the plan is executed later through `/plan` and `/implement`.
 
+Dispatch owns scope clarification and the operator discussion. Spawn `explorer` for substantive directory mapping, then `planner` for design-analysis document and improvement-plan authorship. Each worker starts blank: give it the worktree, scoped paths, relevant context or preceding report, `success_criteria` covering its steps below, `do_not` forbidding product-code changes, and `report_focus` requesting evidence and open questions. Pass the document output path to planner. Resume planner with operator decisions instead of writing the analysis or plan yourself.
+
 ## Preflight
 
 Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and tell the operator to `git init` first. Work in a worktree from `origin/<default-branch>`, never in the main checkout: `use_skill("git-worktrees")` for the commands.
@@ -25,7 +27,7 @@ If the directory is broad, ask clarifying questions:
 
 ### Step 2: Examine the Code
 
-Explore the specified directory to understand:
+Have `spawn_agent(agent="explorer")` map the specified directory to understand:
 - What the code does (purpose and behavior)
 - Key components and their responsibilities
 - How data flows through the system
@@ -35,7 +37,7 @@ Explore the specified directory to understand:
 
 ### Step 3: Document Current Design
 
-Write a structured markdown document to the current working directory. Choose a filename that reflects what was analyzed.
+Have `spawn_agent(agent="planner")` write a structured markdown document to the worktree, using explorer's report and a filename that reflects what was analyzed.
 
 Document structure:
 
@@ -63,7 +65,7 @@ After documenting the current state:
 
 ### Step 5: Write the Plan
 
-Append an **Improvement Plan** section to the document with:
+Resume planner with the agreed decisions to append an **Improvement Plan** section to the document with:
 
 - Specific changes to make
 - Rationale for each change

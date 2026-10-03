@@ -1466,6 +1466,10 @@ async function runSubAgentInner(
           ...(error.retryAfterMs !== undefined
             ? { retryAfterMs: error.retryAfterMs }
             : {}),
+          ...("raw" in error && error.raw !== undefined
+            ? { raw: error.raw }
+            : {}),
+          providerId: params.provider.providerName,
         };
       }
       if (onTurnBoundary(event)) {

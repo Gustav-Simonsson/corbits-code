@@ -26,6 +26,21 @@ Re-carryable, "Kill candidate" = Droppable, and "Companion" entries are
 Re-carryable but ride their primary patch's disposition (they ship out or
 die with it).
 
+## providers-ts-openai-exclusive-cache-usage
+
+**Promotion candidate.** `providers/openai.ts` subtracts cache-read tokens
+from inclusive Chat Completions `prompt_tokens`, clamping the uncached
+remainder at zero. The shared conversion covers usage-only and
+choice-bearing SSE frames and non-streaming JSON responses, including
+builtin OpenAI and Corbits-compatible/Go adapters. Cache reads remain
+separate; no cache-write tokens are invented. This prevents double-counted
+occupancy and false post-fold nonconvergence.
+
+**Re-carry:** keep normalization in the shared usage conversion, not a
+second Corbits-only remap. Regression coverage lives in
+`src/provider/chat-completions-usage.test.ts`; drop the patch when the
+upstream conversion adopts exclusive input.
+
 ## harness-ts-auth-recovery
 
 **Promotion candidate.** `auth.ts`, `harness.ts`, and `reactor.ts` atomically
