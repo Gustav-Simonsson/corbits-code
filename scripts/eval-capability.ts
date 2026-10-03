@@ -862,7 +862,11 @@ async function runCase(
     const requireBehaviorCheck =
       caseDef.requireBehaviors !== undefined &&
       caseDef.requireBehaviors.length > 0
-        ? checkBehaviorRequirements(behaviors, caseDef.requireBehaviors)
+        ? checkBehaviorRequirements(
+            behaviors,
+            caseDef.requireBehaviors,
+            opts.director,
+          )
         : { ok: true, failures: [] as string[] };
     if (!requireBehaviorCheck.ok) {
       for (const failure of requireBehaviorCheck.failures) {
