@@ -1,5 +1,6 @@
 import { defined } from "../../testkit/defined.js";
 import { describe, expect, test } from "bun:test";
+import type { ToolDefinition } from "@intx/types/runtime";
 import { presentDefinition } from "./director.js";
 import { manageTasksDefinition } from "./tasks.js";
 import {
@@ -123,7 +124,6 @@ describe("normalizeToolDefinitionsForProvider", () => {
     for (const ctx of [
       { providerName: "anthropic", model: "claude-sonnet-4" },
       { providerName: "openai", model: "gpt-5.6" },
-      { providerName: "xai/default", model: "grok-4.5" },
       { providerName: "opencode-go", model: "gpt-5.1" },
     ] as const) {
       const out = normalizeToolDefinitionsForProvider(defs, ctx);
@@ -132,6 +132,66 @@ describe("normalizeToolDefinitionsForProvider", () => {
       expect(schemaHasRef(present.inputSchema)).toBe(true);
       expect(present.inputSchema).toBe(recursivePresent.inputSchema);
     }
+  });
+
+  test("grok sanitizes untyped properties and strips $schema", () => {
+    const untyped: ToolDefinition = {
+      name: "submit_result",
+      description: "test",
+      inputSchema: {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: {
+          turn_token: { type: "string" },
+          result: { description: "The structured result payload." },
+        },
+        required: ["turn_token", "result"],
+      },
+    };
+    const out = normalizeToolDefinitionsForProvider([untyped], {
+      providerName: "xai/default-2",
+      model: "grok-4.6",
+    });
+    const schema = defined(out[0]).inputSchema as {
+      $schema?: unknown;
+      properties?: {
+        result?: { type?: string; additionalProperties?: boolean };
+      };
+    };
+    expect(schema.$schema).toBeUndefined();
+    expect(schema.properties?.result?.type).toBe("object");
+    expect(schema.properties?.result?.additionalProperties).toBe(true);
+  });
+
+  test("grok sanitizer leaves anthropic identity and typed properties alone", () => {
+    const typed: ToolDefinition = {
+      name: "ask_director",
+      description: "test",
+      inputSchema: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "q" },
+        },
+        required: ["question"],
+      },
+    };
+    const input = [typed];
+    const grok = normalizeToolDefinitionsForProvider(input, {
+      providerName: "xai/default",
+      model: "grok-4.6",
+    });
+    const anthropic = normalizeToolDefinitionsForProvider(input, {
+      providerName: "anthropic",
+      model: "claude-sonnet-4",
+    });
+    expect(anthropic).toBe(input);
+    expect(grok).not.toBe(input);
+    const grokQuestion = (
+      defined(grok[0]).inputSchema as {
+        properties?: { question?: { type?: string } };
+      }
+    ).properties?.question;
+    expect(grokQuestion?.type).toBe("string");
   });
 
   test("kimi rewrite leaves non-present tools untouched", () => {

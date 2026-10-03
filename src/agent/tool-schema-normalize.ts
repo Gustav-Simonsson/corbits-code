@@ -1,5 +1,8 @@
 import type { ToolDefinition } from "@intx/types/runtime";
-import { isKimiLeafProvider } from "../subagent/provider-family.js";
+import {
+  isKimiLeafProvider,
+  isXaiGrokLeafProvider,
+} from "../subagent/provider-family.js";
 
 /** Context used to decide whether a provider needs wire-schema rewrites. */
 export interface NormalizeToolDefsContext {
@@ -190,10 +193,68 @@ function rewritePresentForKimi(def: ToolDefinition): ToolDefinition {
   };
 }
 
+const OPEN_OBJECT = {
+  type: "object",
+  additionalProperties: true,
+} as const;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function schemaDeclaresShape(node: Record<string, unknown>): boolean {
+  return (
+    node["type"] !== undefined ||
+    node["$ref"] !== undefined ||
+    node["oneOf"] !== undefined ||
+    node["anyOf"] !== undefined ||
+    node["allOf"] !== undefined
+  );
+}
+
+/**
+ * Grok's Responses proxy 400s the whole infer on one invalid tool schema
+ * (empty body, statusText "Bad Request"). Untyped properties and `$schema`
+ * are the shapes MCP tools and submit_result historically advertised.
+ */
+function sanitizeSchemaForGrok(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeSchemaForGrok);
+  if (!isPlainObject(value)) return value;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "$schema" || key === "$id") continue;
+    if (key === "properties" && isPlainObject(child)) {
+      const props: Record<string, unknown> = {};
+      for (const [name, prop] of Object.entries(child)) {
+        const sanitized = sanitizeSchemaForGrok(prop);
+        if (isPlainObject(sanitized) && !schemaDeclaresShape(sanitized)) {
+          props[name] = { ...sanitized, ...OPEN_OBJECT };
+        } else {
+          props[name] = sanitized;
+        }
+      }
+      next[key] = props;
+      continue;
+    }
+    next[key] = sanitizeSchemaForGrok(child);
+  }
+  return next;
+}
+
+function sanitizeToolDefForGrok(def: ToolDefinition): ToolDefinition {
+  return {
+    ...def,
+    inputSchema: sanitizeSchemaForGrok(
+      structuredClone(def.inputSchema),
+    ) as ToolDefinition["inputSchema"],
+  };
+}
+
 /**
  * Family-gated wire rewrite of tool definitions before they reach the director /
- * provider. Today only Moonshot/kimi get a non-recursive `present` schema;
- * other providers receive the definitions unchanged (identity).
+ * provider. Moonshot/kimi get a non-recursive `present` schema. Grok/xAI get
+ * schema sanitization so an untyped property or `$schema` cannot 400 the
+ * infer. Other providers receive the definitions unchanged (identity).
  *
  * Does not alter runtime validation or the canonical `presentDefinition` used
  * as the source of truth for non-kimi advertise paths.
@@ -206,10 +267,15 @@ export function normalizeToolDefinitionsForProvider(
   defs: readonly ToolDefinition[],
   ctx: NormalizeToolDefsContext,
 ): ToolDefinition[] {
-  if (!isKimiLeafProvider(ctx)) {
+  const kimi = isKimiLeafProvider(ctx);
+  const grok = isXaiGrokLeafProvider(ctx);
+  if (!kimi && !grok) {
     return defs as ToolDefinition[];
   }
-  return defs.map((def) =>
-    def.name === "present" ? rewritePresentForKimi(def) : def,
-  );
+  return defs.map((def) => {
+    let next = def;
+    if (kimi && def.name === "present") next = rewritePresentForKimi(next);
+    if (grok) next = sanitizeToolDefForGrok(next);
+    return next;
+  });
 }

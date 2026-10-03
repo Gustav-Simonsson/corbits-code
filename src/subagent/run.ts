@@ -568,7 +568,11 @@ const submitResultDefinition: ToolDefinition = {
         type: "string",
         description: "Turn token from the dispatch brief.",
       },
-      result: { description: "The structured result payload." },
+      result: {
+        type: "object",
+        additionalProperties: true,
+        description: "The structured result payload.",
+      },
     },
     required: ["turn_token", "result"],
   },
