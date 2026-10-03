@@ -1,5 +1,5 @@
 import type { DirectorPackage } from "../types.js";
-import { REVIEW_TOOLS } from "../tool-sets.js";
+import { READ_TOOLS } from "../tool-sets.js";
 
 /**
  * Explorer worker (CL-7020 / CL-7015 rename from explore).
@@ -33,7 +33,7 @@ FINDINGS SHAPE: Findings must be a scannable map — key paths, symbols, call fl
 FINISH BIAS: Prefer one thorough pass then report. Expand Findings, change approach, or write the final report — do not keep re-reading the same paths.
 
 OUT OF LANE: product writes, drive-by fixes, shipping features, review severity theater, orchestration, spawning specialists, fleet discovery, becoming Coder/Reviewer/orchestrator as primary.`,
-  tools: { allow: REVIEW_TOOLS },
+  tools: { allow: READ_TOOLS },
   spawn: { maySpawn: false },
   tier: "leaf",
   modelRole: "explore",

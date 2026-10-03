@@ -1129,6 +1129,9 @@ async function runSubAgentInner(
 
     const workerPrefix = advertisedToolNamesForWorker({
       orchestrator: params.orchestrator === true,
+      ...(params.capabilities?.mode === "allow"
+        ? { allow: params.capabilities.tools }
+        : {}),
     });
     const advertisedSet = createAdvertisedToolset({
       sessionMode: "orchestrator",
