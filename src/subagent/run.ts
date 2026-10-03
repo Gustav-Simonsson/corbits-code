@@ -1189,7 +1189,7 @@ async function runSubAgentInner(
     // modelFamilyPolicy is resolved above at the skill mount; reused here for
     // stall timing and wire-schema normalization.
 
-    // Family-gate wire schemas the same way main sessions do (kimi present rewrite).
+    // Family-gate wire schemas the same way main sessions do (kimi/muse present rewrite).
     // Sub-agent toolsets currently omit `present` (main-session only); normalize is
     // still applied so a future present on leaf tools cannot reintroduce $ref cycles.
     const directorDef = defineDirector({

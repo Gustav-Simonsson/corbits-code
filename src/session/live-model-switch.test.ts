@@ -19,6 +19,10 @@ const MODEL_B: LiveModelRef = {
   model: "claude-opus",
 };
 const MODEL_KIMI: LiveModelRef = { providerName: "moonshot", model: "kimi-k2" };
+const MODEL_MUSE: LiveModelRef = {
+  providerName: "opencode-go",
+  model: "muse-spark-1.3-contributor",
+};
 
 const canonicalDefs: readonly ToolDefinition[] = [presentDefinition];
 
@@ -172,6 +176,27 @@ describe("applyLiveModelSwitch", () => {
     session.switchTo(MODEL_KIMI);
 
     expect(session.inference()).toEqual(MODEL_KIMI);
+    expect(schemaHasRef(presentSchema(session.advertised()))).toBe(false);
+    expect(presentSchema(session.advertised())).not.toBe(
+      presentDefinition.inputSchema,
+    );
+
+    session.switchTo(MODEL_A);
+
+    expect(session.inference()).toEqual(MODEL_A);
+    expect(schemaHasRef(presentSchema(session.advertised()))).toBe(true);
+    expect(presentSchema(session.advertised())).toBe(
+      presentDefinition.inputSchema,
+    );
+  });
+
+  test("non-muse to muse rewrites advertised present; switching away restores canonical", () => {
+    const session = createProductionSwitch();
+    expect(schemaHasRef(presentSchema(session.advertised()))).toBe(true);
+
+    session.switchTo(MODEL_MUSE);
+
+    expect(session.inference()).toEqual(MODEL_MUSE);
     expect(schemaHasRef(presentSchema(session.advertised()))).toBe(false);
     expect(presentSchema(session.advertised())).not.toBe(
       presentDefinition.inputSchema,
