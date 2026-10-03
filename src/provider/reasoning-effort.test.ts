@@ -1,6 +1,7 @@
 import { afterEach, describe, test, expect } from "bun:test";
 import {
   isReasoningEffort,
+  normalizeProviderEfforts,
   supportedEfforts,
   validateEffort,
   cycleReasoningEffort,
@@ -453,6 +454,111 @@ describe("defaultEffortForModel", () => {
   test("unknown models with rungs have no family default", () => {
     expect(supportedEfforts("some-random-model").length).toBeGreaterThan(0);
     expect(defaultEffortForModel("some-random-model")).toBeUndefined();
+  });
+
+  test("normalizeProviderEfforts validates, dedupes, and keeps canonical order", () => {
+    expect(normalizeProviderEfforts(undefined)).toEqual([]);
+    expect(normalizeProviderEfforts([])).toEqual([]);
+    expect(normalizeProviderEfforts(["medium", "none"])).toEqual([
+      "none",
+      "medium",
+    ]);
+    expect(normalizeProviderEfforts(["medium", "medium", "bogus"])).toEqual([
+      "medium",
+    ]);
+    expect(normalizeProviderEfforts(["bogus"])).toEqual([]);
+  });
+
+  test("a provider-declared ladder overrides the family table", () => {
+    // An unknown model with a custom ladder offers exactly the operator's set.
+    const ladder = ["none", "low", "medium", "high", "xhigh", "max"] as const;
+    expect(supportedEfforts("fp-custom", undefined, false, ladder)).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    // A known model is also overridden: gpt-5 normally omits none/xhigh.
+    expect(
+      supportedEfforts("gpt-5", undefined, false, ["none", "xhigh"]),
+    ).toEqual(["none", "xhigh"]);
+  });
+
+  test("a provider default wins when it is on the operator ladder", () => {
+    expect(
+      defaultEffortForModel(
+        "fp-custom",
+        false,
+        ["low", "medium", "high", "xhigh"],
+        "xhigh",
+      ),
+    ).toBe("xhigh");
+  });
+
+  test("a provider default is ignored when not on the operator ladder", () => {
+    expect(
+      defaultEffortForModel("fp-custom", false, ["low", "medium"], "xhigh"),
+    ).toBeUndefined();
+  });
+
+  test("resolveSessionEffort uses the provider ladder and default", () => {
+    expect(
+      resolveSessionEffort(
+        "fp-custom",
+        undefined,
+        false,
+        ["low", "medium", "high", "xhigh"],
+        "xhigh",
+      ),
+    ).toBe("xhigh");
+    // A configured level outside the operator ladder falls back to the default.
+    expect(
+      resolveSessionEffort(
+        "fp-custom",
+        "none",
+        false,
+        ["low", "medium", "high", "xhigh"],
+        "high",
+      ),
+    ).toBe("high");
+  });
+
+  test("cycleReasoningEffort wraps within the operator ladder", () => {
+    expect(
+      cycleReasoningEffort("fp-custom", "high", false, [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ]),
+    ).toBe("xhigh");
+    expect(
+      cycleReasoningEffort("fp-custom", "xhigh", false, [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ]),
+    ).toBe("low");
+  });
+
+  test("validateEffort checks the operator ladder", () => {
+    const ok = validateEffort("fp-custom", "xhigh", false, [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(ok).toEqual({ ok: true });
+    const bad = validateEffort("fp-custom", "none", false, [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(bad.ok).toBe(false);
   });
 });
 

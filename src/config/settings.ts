@@ -64,6 +64,13 @@ export interface ProviderSettings {
   // already-working setup as unverified. Only paths that persist a
   // credential without testing it write `false` explicitly.
   verified?: boolean;
+  // Operator-declared reasoning-effort ladder for a custom OpenAI-compatible
+  // provider. When present, the runtime uses exactly these levels for cycling
+  // and validation instead of the family table. Absent means "family table".
+  reasoningEfforts?: ReasoningEffort[];
+  // The level new sessions start at for a custom provider, when the operator
+  // picked one. Only meaningful alongside `reasoningEfforts`.
+  defaultReasoningEffort?: ReasoningEffort;
 }
 
 // Provider+model identity used by the models-first picker (recent / favorites).
@@ -246,6 +253,12 @@ function providerSelectionMetadata(
     ...(provider.anthropic === true ? { anthropic: true } : {}),
     ...(provider.opencodeGo === true ? { opencodeGo: true } : {}),
     ...(provider.verified !== undefined ? { verified: provider.verified } : {}),
+    ...(provider.reasoningEfforts !== undefined
+      ? { reasoningEfforts: provider.reasoningEfforts }
+      : {}),
+    ...(provider.defaultReasoningEffort !== undefined
+      ? { defaultReasoningEffort: provider.defaultReasoningEffort }
+      : {}),
   };
 }
 
@@ -620,6 +633,8 @@ const ProviderSettingsSchema = type({
   "anthropic?": "boolean",
   "opencodeGo?": "boolean",
   "verified?": "boolean",
+  "reasoningEfforts?": "string[]",
+  "defaultReasoningEffort?": "string",
 });
 
 const ModelRefSchema = type({

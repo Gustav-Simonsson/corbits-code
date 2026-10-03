@@ -21,8 +21,13 @@ import {
   selectableZenModelIds,
 } from "../../provider/model-catalogs.js";
 import { isZenProviderId } from "../../../packages/zen/src/index.js";
+import { REASONING_EFFORTS } from "../../provider/reasoning-effort.js";
 import { buildModelsFirstCatalog, modelOptionRef } from "../model-catalog.js";
-import type { ResidualCatalogEntry } from "../residuals.js";
+import {
+  residualIdFromSelection,
+  residualListFromCatalog,
+  type ResidualCatalogEntry,
+} from "../residuals.js";
 import type { CliRenderer } from "@opentui/core";
 import { createOverlayList } from "../shell/overlay-list.js";
 import type {
@@ -410,4 +415,85 @@ export function enterProviderRows(
     items: providerListHeight(renderer),
     activeIndex: active,
   });
+}
+
+const EFFORT_CHECK = "✓";
+
+/**
+ * Pick-list rows for the custom "efforts" step: one row per canonical effort
+ * level, with a checkmark when the operator has enabled it. `enabled` empty
+ * means every level is on (the default for a fresh custom provider).
+ */
+export function effortChoiceRows(
+  enabled: readonly string[] = [],
+): readonly ResidualCatalogEntry[] {
+  return REASONING_EFFORTS.map((level) => ({
+    id: level,
+    label: enabled.includes(level) ? `${level} ${EFFORT_CHECK}` : level,
+  }));
+}
+
+/**
+ * Pick-list rows for the custom "default effort" step: the operator's enabled
+ * levels. When every level was disabled on the efforts step the set is treated
+ * as the family table (all six), so the default step still has something to
+ * pick.
+ */
+export function defaultEffortChoiceRows(
+  enabled: readonly string[] = [],
+): readonly ResidualCatalogEntry[] {
+  const levels =
+    enabled.length > 0
+      ? REASONING_EFFORTS.filter((level) => enabled.includes(level))
+      : REASONING_EFFORTS;
+  return levels.map((level) => ({ id: level, label: level }));
+}
+
+/** Rebuild the toggle rows for the custom "efforts" step. */
+export function enterEffortsRows(
+  state: SetupState,
+  renderer: CliRenderer,
+): void {
+  state.listRows = effortChoiceRows(state.values.reasoningEfforts);
+  state.list = createOverlayList(renderer, {
+    count: state.listRows.length,
+    items: providerListHeight(renderer),
+  });
+}
+
+/** Rebuild the select rows for the custom "default effort" step. */
+export function enterDefaultEffortRows(
+  state: SetupState,
+  renderer: CliRenderer,
+): void {
+  state.listRows = defaultEffortChoiceRows(state.values.reasoningEfforts);
+  state.list = createOverlayList(renderer, {
+    count: state.listRows.length,
+    items: providerListHeight(renderer),
+  });
+}
+
+/** Toggle the highlighted effort level on the custom "efforts" step. */
+export function toggleEffortRow(
+  state: SetupState,
+  renderer: CliRenderer,
+): void {
+  const { itemIds } = residualListFromCatalog(state.listRows);
+  const id = residualIdFromSelection(
+    { index: state.list.activeIndex },
+    itemIds,
+  );
+  if (id === undefined) return;
+  // An empty set means every level is on (the fresh-provider default), so the
+  // first toggle removes that level rather than enabling only it.
+  const enabled =
+    state.values.reasoningEfforts.length > 0
+      ? new Set(state.values.reasoningEfforts)
+      : new Set(REASONING_EFFORTS);
+  if (enabled.has(id)) enabled.delete(id);
+  else enabled.add(id);
+  state.values.reasoningEfforts = REASONING_EFFORTS.filter((level) =>
+    enabled.has(level),
+  );
+  enterEffortsRows(state, renderer);
 }

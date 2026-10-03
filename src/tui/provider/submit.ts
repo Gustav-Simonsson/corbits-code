@@ -8,6 +8,7 @@ import {
   mergeProviderIntoSettings,
   saveGlobalSettings,
   saveLocalSettings,
+  type ProviderSettings,
   type Settings,
 } from "../../config/settings.js";
 import { COMMAND_NAME } from "../../branding.js";
@@ -20,6 +21,10 @@ import type { ProviderSetupSubmit } from "./types.js";
 import { NOOP_TELEMETRY, type Telemetry } from "../../telemetry/index.js";
 import { classifyAuthProvider } from "../../telemetry/classify.js";
 import { captureAuthSuccess } from "../../telemetry/product-events.js";
+import {
+  isReasoningEffort,
+  normalizeProviderEfforts,
+} from "../../provider/reasoning-effort.js";
 
 /**
  * Persist the project-local provider/model selection after a successful
@@ -151,7 +156,13 @@ export function buildProviderSubmitHandler(
       preset !== undefined && preset.models.includes(selectedModel)
         ? [...preset.models]
         : [selectedModel];
-    const newProvider = {
+    // Custom provider effort declaration: the operator's enabled levels and
+    // picked default flow through to the catalog so /model cycling and
+    // session resolution use the operator set. Only the custom path carries
+    // these values (presets/OAuth never set them on the form).
+    const effortLevels = normalizeProviderEfforts(values.reasoningEfforts);
+    const trimmedDefaultEffort = values.defaultReasoningEffort.trim();
+    const newProvider: ProviderSettings = {
       baseURL: persistedBaseURL,
       models,
       defaultModel: selectedModel,
@@ -160,6 +171,12 @@ export function buildProviderSubmitHandler(
         : { keyless: true }),
       ...(preset?.anthropic === true ? { anthropic: true } : {}),
       ...(preset?.opencodeGo === true ? { opencodeGo: true } : {}),
+      ...(preset === undefined && effortLevels.length > 0
+        ? { reasoningEfforts: effortLevels }
+        : {}),
+      ...(preset === undefined && isReasoningEffort(trimmedDefaultEffort)
+        ? { defaultReasoningEffort: trimmedDefaultEffort }
+        : {}),
       // "Save anyway" (Ctrl+S) persists a credential the connection test
       // never passed. Mark it so the running session can warn on first use
       // instead of surfacing a bare adapter error.

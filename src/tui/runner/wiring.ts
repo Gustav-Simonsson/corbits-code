@@ -456,6 +456,8 @@ export function wirePostStartup(
       state.config.model,
       state.config.reasoningEffort,
       isCodexProviderName(state.config.providerName),
+      state.config.settings?.providers[state.config.providerName]
+        ?.reasoningEfforts,
     );
     if (next === undefined) {
       setStatusFlash(
@@ -586,6 +588,10 @@ export function wirePostStartup(
     state.config.model,
     state.config.reasoningEffort,
     isCodexProviderName(state.config.providerName),
+    state.config.settings?.providers[state.config.providerName]
+      ?.reasoningEfforts,
+    state.config.settings?.providers[state.config.providerName]
+      ?.defaultReasoningEffort,
   );
   surfaceSystemNotice(
     hostOf(state).shell,

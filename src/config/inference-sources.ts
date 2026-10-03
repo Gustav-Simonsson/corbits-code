@@ -87,6 +87,8 @@ export function buildInferenceSourceForRef(
           ref.model,
           configured,
           entry?.codexProfile !== undefined,
+          entry?.reasoningEfforts,
+          entry?.defaultReasoningEffort,
         )
       : undefined;
 

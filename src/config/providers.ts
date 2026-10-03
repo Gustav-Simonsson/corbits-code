@@ -4,6 +4,8 @@ import {
   isOpenCodeGoProviderId,
   isOpenCodeGoURL,
 } from "../../packages/opencode-go/src/index.js";
+import type { ReasoningEffort } from "../provider/reasoning-effort.js";
+import { normalizeProviderEfforts } from "../provider/reasoning-effort.js";
 import type { ProviderCatalogEntry } from "./index.js";
 
 export interface ProviderSubmission {
@@ -17,6 +19,8 @@ export interface ProviderSubmission {
   bifrostVirtualKey?: boolean;
   anthropic?: boolean;
   opencodeGo?: boolean;
+  reasoningEfforts?: ReasoningEffort[];
+  defaultReasoningEffort?: ReasoningEffort;
 }
 
 // Precedence for the active/backup model of a provider: defaultModel wins
@@ -100,6 +104,16 @@ export function buildProviderEntry(
       : {}),
     ...(anthropic ? { anthropic: true } : {}),
     ...(opencodeGo ? { opencodeGo: true } : {}),
+    ...(() => {
+      const efforts = normalizeProviderEfforts(submission.reasoningEfforts);
+      return {
+        ...(efforts.length > 0 ? { reasoningEfforts: efforts } : {}),
+        ...(submission.defaultReasoningEffort !== undefined &&
+        submission.defaultReasoningEffort.length > 0
+          ? { defaultReasoningEffort: submission.defaultReasoningEffort }
+          : {}),
+      };
+    })(),
   };
   const catalog = currentCatalog
     .filter(

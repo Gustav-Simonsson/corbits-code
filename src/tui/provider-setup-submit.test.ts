@@ -90,6 +90,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "gpt-5",
         oauthProfile: "",
+        reasoningEfforts: [],
+        defaultReasoningEffort: "",
       };
       const preset = {
         id: "openai",
@@ -121,6 +123,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
+        reasoningEfforts: [],
+        defaultReasoningEffort: "",
       };
 
       // skipValidation avoids the live connection probe in this unit test.
@@ -146,6 +150,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "sk-stale-secret",
         model: "qwen3",
         oauthProfile: "default",
+        reasoningEfforts: [],
+        defaultReasoningEffort: "",
       };
       const preset = {
         id: "ollama",
@@ -184,6 +190,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "qwen3",
         oauthProfile: "default",
+        reasoningEfforts: [],
+        defaultReasoningEffort: "",
       };
       const preset = {
         id: "ollama",
@@ -236,6 +244,8 @@ describe("buildProviderSubmitHandler", () => {
           apiKey: "",
           model: "llama3",
           oauthProfile: "",
+          reasoningEfforts: [],
+          defaultReasoningEffort: "",
         },
         noopSetPhase,
         { skipValidation: true },
@@ -264,6 +274,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "sk-test-fake",
         model: "gpt-5",
         oauthProfile: "",
+        reasoningEfforts: [],
+        defaultReasoningEffort: "",
       };
       const preset = {
         id: "openai",
@@ -288,6 +300,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "sk-test-fake",
         model: "gpt-5",
         oauthProfile: "",
+        reasoningEfforts: [] as string[],
+        defaultReasoningEffort: "",
       },
       options: {
         skipValidation: true,
@@ -308,6 +322,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
+        reasoningEfforts: [] as string[],
+        defaultReasoningEffort: "",
       },
       options: { skipValidation: true },
       provider: "ollama",
@@ -320,6 +336,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "gpt-5",
         oauthProfile: "work",
+        reasoningEfforts: [] as string[],
+        defaultReasoningEffort: "",
       },
       options: {
         skipValidation: true,
@@ -379,6 +397,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "sk-test-fake",
         model: "gpt-5",
         oauthProfile: "",
+        reasoningEfforts: [] as string[],
+        defaultReasoningEffort: "",
       },
       options: {
         skipValidation: true,
@@ -400,6 +420,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "llama3",
         oauthProfile: "",
+        reasoningEfforts: [] as string[],
+        defaultReasoningEffort: "",
       },
       options: { skipValidation: true },
       provider: "ollama",
@@ -413,6 +435,8 @@ describe("buildProviderSubmitHandler", () => {
         apiKey: "",
         model: "gpt-5",
         oauthProfile: "work",
+        reasoningEfforts: [] as string[],
+        defaultReasoningEffort: "",
       },
       options: { skipValidation: true, oauth: stagedCodexOAuth() },
       provider: "codex/work",
@@ -461,6 +485,8 @@ describe("buildProviderSubmitHandler", () => {
             apiKey: "",
             model: "gpt-5",
             oauthProfile: "work",
+            reasoningEfforts: [],
+            defaultReasoningEffort: "",
           },
           noopSetPhase,
           {
@@ -502,6 +528,8 @@ describe("buildProviderSubmitHandler", () => {
               apiKey: "",
               model: "gpt-5",
               oauthProfile: "work",
+              reasoningEfforts: [],
+              defaultReasoningEffort: "",
             },
             noopSetPhase,
             {
@@ -546,6 +574,8 @@ describe("buildProviderSubmitHandler", () => {
               apiKey: "",
               model: "gpt-5",
               oauthProfile: "work",
+              reasoningEfforts: [],
+              defaultReasoningEffort: "",
             },
             noopSetPhase,
             {
@@ -586,6 +616,8 @@ describe("buildProviderSubmitHandler", () => {
             apiKey: "",
             model: "gpt-5",
             oauthProfile: "work",
+            reasoningEfforts: [],
+            defaultReasoningEffort: "",
           },
           noopSetPhase,
           {
@@ -625,6 +657,8 @@ describe("buildProviderSubmitHandler", () => {
             apiKey: "",
             model: "gpt-5",
             oauthProfile: "work",
+            reasoningEfforts: [],
+            defaultReasoningEffort: "",
           },
           noopSetPhase,
           {
@@ -688,6 +722,8 @@ describe("buildProviderSubmitHandler", () => {
             apiKey: "",
             model: "gpt-5",
             oauthProfile: "work",
+            reasoningEfforts: [],
+            defaultReasoningEffort: "",
           },
           noopSetPhase,
           { skipValidation: true, oauth: stagedCodexOAuth() },
@@ -715,6 +751,8 @@ describe("buildProviderSubmitHandler", () => {
           apiKey: "sk-test-fake",
           model: "gpt-5",
           oauthProfile: "",
+          reasoningEfforts: [],
+          defaultReasoningEffort: "",
         };
 
         await submit(values, noopSetPhase, {
@@ -752,6 +790,8 @@ describe("buildProviderSubmitHandler", () => {
               apiKey: "",
               model: "gpt-5",
               oauthProfile: "",
+              reasoningEfforts: [],
+              defaultReasoningEffort: "",
             },
             noopSetPhase,
             {

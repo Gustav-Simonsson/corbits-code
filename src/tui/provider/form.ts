@@ -116,6 +116,16 @@ function settledValue(
       ? values.oauthProfile
       : values.name;
   }
+  if (step === "efforts") {
+    return values.reasoningEfforts.length > 0
+      ? values.reasoningEfforts.join(", ")
+      : "all";
+  }
+  if (step === "defaultEffort") {
+    return values.defaultReasoningEffort.length > 0
+      ? values.defaultReasoningEffort
+      : "—";
+  }
   if (step === "baseURL") return values.baseURL;
   return values.model;
 }

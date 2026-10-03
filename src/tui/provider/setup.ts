@@ -37,12 +37,15 @@ import {
 import { createOverlayList } from "../shell/overlay-list.js";
 import {
   chooseProviderRow,
+  enterDefaultEffortRows,
+  enterEffortsRows,
   enterModelListRows,
   enterProviderRows,
   modelFromRowId,
   providerChoiceRows,
   providerChoices,
   providerListHeight,
+  toggleEffortRow,
   TYPE_MODEL_ID,
 } from "./choices.js";
 import { createDiscoveryFlows } from "./discovery.js";
@@ -110,6 +113,8 @@ export async function runProviderSetup(
       apiKey: "",
       model: "",
       oauthProfile: "",
+      reasoningEfforts: [],
+      defaultReasoningEffort: "",
     },
     margin: resolveSideMargin(renderer.width || 80),
     choice: null,
@@ -180,6 +185,14 @@ export async function runProviderSetup(
   const isListStep = (): boolean => {
     const step = currentStep();
     if (step === "provider") return true;
+    // Custom effort steps are pick-lists (toggle rows / select rows).
+    if (
+      state.choice !== null &&
+      state.choice.custom &&
+      (step === "efforts" || step === "defaultEffort")
+    ) {
+      return true;
+    }
     if (isOllamaModelStep()) {
       return (
         typeof state.ollamaDiscovery === "object" &&
@@ -337,6 +350,17 @@ export async function runProviderSetup(
   };
 
   function enterModelList(): void {
+    const step = currentStep();
+    if (state.choice !== null && state.choice.custom) {
+      if (step === "efforts") {
+        enterEffortsRows(state, renderer);
+        return;
+      }
+      if (step === "defaultEffort") {
+        enterDefaultEffortRows(state, renderer);
+        return;
+      }
+    }
     enterModelListRows(state, renderer, discovery);
   }
 
@@ -362,6 +386,23 @@ export async function runProviderSetup(
       state.values.model = "";
       showStep();
       return;
+    }
+    // Custom effort steps: Enter accepts the list — "efforts" continues to the
+    // default-effort pick, "defaultEffort" selects the level and submits.
+    if (state.choice !== null && state.choice.custom) {
+      const step = currentStep();
+      if (step === "efforts") {
+        state.stepIndex += 1;
+        clearError();
+        enterModelList();
+        showStep();
+        return;
+      }
+      if (step === "defaultEffort") {
+        state.values.defaultReasoningEffort = id;
+        submit(false);
+        return;
+      }
     }
     state.values.model = modelFromRowId(state.choice?.id ?? "", id);
     submit(false);
@@ -503,6 +544,12 @@ export async function runProviderSetup(
     }
     if (!isListStep()) return;
 
+    if (key.name === "space" && currentStep() === "efforts") {
+      key.preventDefault();
+      toggleEffortRow(state, renderer);
+      surface.paint();
+      return;
+    }
     if (key.name === "up" || key.name === "k") {
       key.preventDefault();
       state.list.move(-1);

@@ -1409,6 +1409,13 @@ export function catalogEntryAsProviderSettings(
     ...(entry.anthropic === true ? { anthropic: true } : {}),
     ...(go ? { opencodeGo: true } : {}),
     ...(entry.verified === false ? { verified: false } : {}),
+    ...(entry.reasoningEfforts !== undefined &&
+    entry.reasoningEfforts.length > 0
+      ? { reasoningEfforts: entry.reasoningEfforts }
+      : {}),
+    ...(entry.defaultReasoningEffort !== undefined
+      ? { defaultReasoningEffort: entry.defaultReasoningEffort }
+      : {}),
   };
 }
 
@@ -1486,6 +1493,12 @@ export function buildProviderCatalog(
           ...(p.anthropic === true ? { anthropic: true } : {}),
           ...(go ? { opencodeGo: true } : {}),
           ...(p.verified === false ? { verified: false } : {}),
+          ...(p.reasoningEfforts !== undefined && p.reasoningEfforts.length > 0
+            ? { reasoningEfforts: p.reasoningEfforts }
+            : {}),
+          ...(p.defaultReasoningEffort !== undefined
+            ? { defaultReasoningEffort: p.defaultReasoningEffort }
+            : {}),
         };
       },
     );

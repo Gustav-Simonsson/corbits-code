@@ -18,6 +18,26 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
   );
 }
 
+/**
+ * Validate/dedupe a raw provider-declared effort set (from settings) against the
+ * canonical ladder. Invalid entries are dropped, duplicates collapsed, preserving
+ * canonical order. Returns [] for an empty/absent input.
+ */
+export function normalizeProviderEfforts(
+  raw: readonly string[] | undefined,
+): ReasoningEffort[] {
+  if (raw === undefined || raw.length === 0) return [];
+  const seen = new Set<string>();
+  const out: ReasoningEffort[] = [];
+  for (const level of REASONING_EFFORTS) {
+    if (raw.includes(level) && !seen.has(level)) {
+      seen.add(level);
+      out.push(level);
+    }
+  }
+  return out;
+}
+
 // The effort levels common OpenAI reasoning models (gpt-5, o-series) accept.
 // `none` and `xhigh` are not here — they are gpt-5.1-family-only (see below).
 const DEFAULT_EFFORTS: readonly ReasoningEffort[] = [
@@ -135,9 +155,16 @@ export function supportedEfforts(
   model: string,
   reasoningCapable: boolean | undefined = modelReasoningCapability(model),
   isCodex = false,
+  providerEfforts: readonly ReasoningEffort[] = [],
 ): ReasoningEffort[] {
   if (reasoningCapable === false) {
     return [];
+  }
+  // An operator-declared effort set (custom provider) is the authoritative
+  // ladder — it overrides the family table entirely, so a custom endpoint whose
+  // models accept none/xhigh/max can expose them.
+  if (providerEfforts.length > 0) {
+    return [...providerEfforts];
   }
   if (model === "gpt-6-astra") {
     return [...GPT6_ASTRA_EFFORTS];
@@ -169,8 +196,14 @@ export function validateEffort(
   model: string,
   effort: ReasoningEffort,
   isCodex = false,
+  providerEfforts: readonly ReasoningEffort[] = [],
 ): { ok: true } | { ok: false; error: string } {
-  const supported = supportedEfforts(model, undefined, isCodex);
+  const supported = supportedEfforts(
+    model,
+    undefined,
+    isCodex,
+    providerEfforts,
+  );
   if (supported.includes(effort)) {
     return { ok: true };
   }
@@ -199,10 +232,21 @@ export function cycleReasoningEffort(
   model: string,
   current: ReasoningEffort | undefined,
   isCodex = false,
+  providerEfforts: readonly ReasoningEffort[] = [],
 ): ReasoningEffort | undefined {
-  const supported = supportedEfforts(model, undefined, isCodex);
+  const supported = supportedEfforts(
+    model,
+    undefined,
+    isCodex,
+    providerEfforts,
+  );
   if (supported.length === 0) return undefined;
-  const implicit = resolveSessionEffort(model, current, isCodex);
+  const implicit = resolveSessionEffort(
+    model,
+    current,
+    isCodex,
+    providerEfforts,
+  );
   if (implicit === undefined || !supported.includes(implicit)) {
     return supported[0];
   }
@@ -222,11 +266,23 @@ export function cycleReasoningEffort(
 export function defaultEffortForModel(
   model: string,
   isCodex = false,
+  providerEfforts: readonly ReasoningEffort[] = [],
+  providerDefault?: ReasoningEffort,
 ): ReasoningEffort | undefined {
-  const supported = supportedEfforts(model, undefined, isCodex);
+  const supported = supportedEfforts(
+    model,
+    undefined,
+    isCodex,
+    providerEfforts,
+  );
   if (supported.length === 0) return undefined;
   const pick = (desired: ReasoningEffort): ReasoningEffort | undefined =>
     supported.includes(desired) ? desired : undefined;
+  // The operator-declared default (custom provider) wins over the family
+  // default when the level is on the operator's ladder.
+  if (providerEfforts.length > 0 && providerDefault !== undefined) {
+    return pick(providerDefault);
+  }
   if (model.startsWith("grok")) return pick("high");
   if (GLM_53_MODELS.includes(model)) return pick("max");
   if (isMuseSparkModel(model)) return pick("low");
@@ -244,12 +300,24 @@ export function resolveSessionEffort(
   model: string,
   configured: ReasoningEffort | undefined,
   isCodex = false,
+  providerEfforts: readonly ReasoningEffort[] = [],
+  providerDefault?: ReasoningEffort,
 ): ReasoningEffort | undefined {
-  const supported = supportedEfforts(model, undefined, isCodex);
+  const supported = supportedEfforts(
+    model,
+    undefined,
+    isCodex,
+    providerEfforts,
+  );
   if (supported.length === 0) return undefined;
   if (configured !== undefined && supported.includes(configured))
     return configured;
-  return defaultEffortForModel(model, isCodex);
+  return defaultEffortForModel(
+    model,
+    isCodex,
+    providerEfforts,
+    providerDefault,
+  );
 }
 
 // ---------------------------------------------------------------------------

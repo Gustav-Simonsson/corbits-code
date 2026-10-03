@@ -60,6 +60,8 @@ const EMPTY: ProviderFormValues = {
   apiKey: "",
   model: "",
   oauthProfile: "",
+  reasoningEfforts: [],
+  defaultReasoningEffort: "",
 };
 
 type LoginCompletion = Awaited<OAuthLoginStart["completed"]>;
@@ -235,6 +237,8 @@ describe("provider setup pure helpers", () => {
       "baseURL",
       "apiKey",
       "model",
+      "efforts",
+      "defaultEffort",
     ]);
   });
 
@@ -496,6 +500,12 @@ async function connectCustom(harness: Harness): Promise<void> {
   type(harness, "sk-key");
   harness.pressKey("Enter");
   type(harness, "fp-small");
+  harness.pressKey("Enter");
+  await harness.renderOnce();
+  // Accept the efforts toggle list (all levels on by default).
+  harness.pressKey("Enter");
+  await harness.renderOnce();
+  // Pick the highlighted default effort (first enabled level) and submit.
   harness.pressKey("Enter");
   await harness.renderOnce();
 }
@@ -1168,6 +1178,8 @@ describe("runProviderSetup", () => {
       baseURL: "https://api.openai.com/v1",
       apiKey: "sk-key",
       model: openai?.defaultModel ?? "",
+      reasoningEfforts: [],
+      defaultReasoningEffort: "",
       oauthProfile: "default",
     });
     expect(opts[0]?.preset?.id).toBe("openai");
@@ -1182,7 +1194,43 @@ describe("runProviderSetup", () => {
       opts.push(o);
     });
     await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
-    expect(harness.captureCharFrame()).toContain("step 2 of 5");
+    expect(harness.captureCharFrame()).toContain("step 2 of 7");
+    type(harness, "firepass");
+    harness.pressKey("Enter");
+    type(harness, "https://api.example.com");
+    harness.pressKey("Enter");
+    type(harness, "sk-key");
+    harness.pressKey("Enter");
+    type(harness, "fp-small");
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+    // The efforts list step: Enter accepts the default (all levels on).
+    expect(harness.captureCharFrame()).toContain("reasoning efforts");
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+    // The default-effort pick: Enter selects the highlighted level and submits.
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+
+    expect(await done).toBe(true);
+    expect(seen[0]).toEqual({
+      name: "firepass",
+      baseURL: "https://api.example.com",
+      apiKey: "sk-key",
+      model: "fp-small",
+      reasoningEfforts: [],
+      defaultReasoningEffort: "none",
+      oauthProfile: "",
+    });
+    expect(opts[0]?.preset).toBeUndefined();
+  });
+
+  test("the custom path persists toggled effort levels and a picked default", async () => {
+    const seen: ProviderFormValues[] = [];
+    const { done, harness } = await mountSetup(async (values) => {
+      seen.push({ ...values });
+    });
+    await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
     type(harness, "firepass");
     harness.pressKey("Enter");
     type(harness, "https://api.example.com");
@@ -1193,15 +1241,31 @@ describe("runProviderSetup", () => {
     harness.pressKey("Enter");
     await harness.renderOnce();
 
+    // Efforts list starts on "none" (first row). Space toggles it off.
+    expect(harness.captureCharFrame()).toContain("reasoning efforts");
+    harness.pressKey(" ");
+    await harness.renderOnce();
+    // Move to the next row ("minimal") and toggle it off too.
+    harness.pressKey("ARROW_DOWN");
+    harness.pressKey(" ");
+    await harness.renderOnce();
+    // Accept the remaining ladder, then pick "xhigh" as the default and submit.
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+    // Enabled rows after toggles: low, medium, high, xhigh, max, ultra.
+    harness.pressKey("ARROW_DOWN");
+    harness.pressKey("ARROW_DOWN");
+    harness.pressKey("ARROW_DOWN");
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+
     expect(await done).toBe(true);
-    expect(seen[0]).toEqual({
-      name: "firepass",
-      baseURL: "https://api.example.com",
-      apiKey: "sk-key",
-      model: "fp-small",
-      oauthProfile: "",
-    });
-    expect(opts[0]?.preset).toBeUndefined();
+    const seenValue = seen[0];
+    expect(seenValue).toBeDefined();
+    expect(seenValue?.reasoningEfforts).not.toContain("none");
+    expect(seenValue?.reasoningEfforts).not.toContain("minimal");
+    expect(seenValue?.reasoningEfforts).toContain("medium");
+    expect(seenValue?.defaultReasoningEffort).toBe("xhigh");
   });
 
   test("the model pick-list can escape to a typed model id", async () => {
@@ -1248,7 +1312,7 @@ describe("runProviderSetup", () => {
     await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
     harness.pressKey("Enter");
     await harness.renderOnce();
-    expect(harness.captureCharFrame()).toContain("step 2 of 5");
+    expect(harness.captureCharFrame()).toContain("step 2 of 7");
     harness.pressKey("Ctrl+C");
     await done;
   });

@@ -15,6 +15,8 @@ export type SetupStep =
   | "baseURL"
   | "apiKey"
   | "model"
+  | "efforts"
+  | "defaultEffort"
   | "login";
 
 /** Known-provider path: pick, name the instance, paste key, pick model. */
@@ -52,6 +54,8 @@ export const CUSTOM_STEPS: readonly SetupStep[] = [
   "baseURL",
   "apiKey",
   "model",
+  "efforts",
+  "defaultEffort",
 ];
 
 export const STEP_LABELS: Record<SetupStep, string> = {
@@ -60,6 +64,8 @@ export const STEP_LABELS: Record<SetupStep, string> = {
   baseURL: "base url",
   apiKey: "api key",
   model: "model",
+  efforts: "reasoning efforts",
+  defaultEffort: "default effort",
   login: "sign in",
 };
 
@@ -70,6 +76,9 @@ export const STEP_PROMPTS: Record<SetupStep, string> = {
     "paste the provider url — Ollama uses the server root; others may include /v1",
   apiKey: "paste the api key — leave blank for a keyless local endpoint",
   model: "pick the model to start with",
+  efforts:
+    "toggle the reasoning effort levels this provider accepts — space toggles, enter continues",
+  defaultEffort: "pick the default reasoning effort for new sessions",
   login: "authorize in the browser — this window waits for you",
 };
 

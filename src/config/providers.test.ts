@@ -298,3 +298,42 @@ describe("buildProviderEntry protocol flag preservation", () => {
     expect(result.entry.opencodeGo).toBe(true);
   });
 });
+
+describe("buildProviderEntry reasoning effort forwarding", () => {
+  test("forwards a normalized effort ladder and default", () => {
+    const entry = expectBuiltEntry({
+      name: "fp",
+      baseURL: "https://fp/v1",
+      apiKey: "sk-fp",
+      models: ["fp-large"],
+      reasoningEfforts: ["xhigh", "low", "medium"],
+      defaultReasoningEffort: "xhigh",
+    });
+    expect(entry.reasoningEfforts).toEqual(["low", "medium", "xhigh"]);
+    expect(entry.defaultReasoningEffort).toBe("xhigh");
+  });
+
+  test("omits both fields when the submission leaves them blank", () => {
+    const entry = expectBuiltEntry({
+      name: "fp",
+      baseURL: "https://fp/v1",
+      apiKey: "sk-fp",
+      models: ["fp-large"],
+    });
+    expect(entry.reasoningEfforts).toBeUndefined();
+    expect(entry.defaultReasoningEffort).toBeUndefined();
+  });
+
+  test("normalizes the ladder to canonical order and keeps the default", () => {
+    const entry = expectBuiltEntry({
+      name: "fp",
+      baseURL: "https://fp/v1",
+      apiKey: "sk-fp",
+      models: ["fp-large"],
+      reasoningEfforts: ["xhigh", "high", "high", "none"],
+      defaultReasoningEffort: "high",
+    });
+    expect(entry.reasoningEfforts).toEqual(["none", "high", "xhigh"]);
+    expect(entry.defaultReasoningEffort).toBe("high");
+  });
+});

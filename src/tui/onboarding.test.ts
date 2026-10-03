@@ -85,6 +85,8 @@ const CUSTOM_PROVIDER: ProviderFormValues = {
   apiKey: "test-key",
   model: "test-model",
   oauthProfile: "",
+  reasoningEfforts: [],
+  defaultReasoningEffort: "",
 };
 
 const ISOLATED_PROVIDER: ProviderFormValues = {
@@ -93,6 +95,8 @@ const ISOLATED_PROVIDER: ProviderFormValues = {
   apiKey: "isolated-key",
   model: "isolated-model",
   oauthProfile: "",
+  reasoningEfforts: [],
+  defaultReasoningEffort: "",
 };
 
 /** Stub the setup flow to submit one provider form, validation skipped. */
@@ -237,6 +241,8 @@ describe("runOnboarding settings source", () => {
           apiKey: "",
           model: "grok-4",
           oauthProfile: "work",
+          reasoningEfforts: [],
+          defaultReasoningEffort: "",
         },
         {
           skipValidation: true,

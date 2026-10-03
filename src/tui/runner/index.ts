@@ -139,6 +139,10 @@ export async function runTUI(initialConfig: Config): Promise<number> {
           state.config.model,
           state.config.reasoningEffort,
           isCodexProviderName(state.config.providerName),
+          state.config.settings?.providers[state.config.providerName]
+            ?.reasoningEfforts,
+          state.config.settings?.providers[state.config.providerName]
+            ?.defaultReasoningEffort,
         );
         return {
           profile: state.config.providerName,
