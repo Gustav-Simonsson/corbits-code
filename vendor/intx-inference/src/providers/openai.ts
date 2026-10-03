@@ -571,10 +571,14 @@ function getOrAssignToolCallIndex(
 // choice-bearing chunk) and the non-streaming parseJSONResponse, whose usage
 // objects carry the same field names.
 function toInferenceUsage(usage: typeof OpenAIChunkUsage.infer): TokenUsage {
+  // Locally patched — see vendor/intx-inference/PATCHES.md#providers-ts-openai-exclusive-cache-usage.
+  // Chat Completions includes cache hits in prompt_tokens; internal input
+  // excludes them so occupancy and cached-token pricing count each token once.
+  const cacheRead = usage.prompt_tokens_details?.cached_tokens ?? 0;
   return {
-    input: usage.prompt_tokens ?? 0,
+    input: Math.max(0, (usage.prompt_tokens ?? 0) - cacheRead),
     output: usage.completion_tokens ?? 0,
-    cacheRead: usage.prompt_tokens_details?.cached_tokens ?? 0,
+    cacheRead,
     cacheWrite: 0,
     thinking: usage.completion_tokens_details?.reasoning_tokens ?? 0,
   };

@@ -249,6 +249,52 @@ describe("createTurnObserver", () => {
 });
 
 describe("emitAiObservability", () => {
+  for (const provider of [
+    "openai",
+    "openai-compatible",
+    "opencode-go",
+    "bifrost",
+  ]) {
+    test(`reports exclusive Chat Completions cache accounting for ${provider}`, () => {
+      const { telemetry, captured } = fakeTelemetry();
+      emitAiObservability(
+        telemetry,
+        fakeTurnContext({
+          source: { sourceId: "test-provider", provider, model: "model-x" },
+          usage: {
+            input: 800,
+            output: 20,
+            cacheRead: 200,
+            cacheWrite: 0,
+            thinking: 0,
+          },
+        }),
+        emitOptions,
+      );
+      expect(captured[0]?.properties.$ai_input_tokens).toBe(800);
+      expect(captured[0]?.properties.$ai_cache_read_input_tokens).toBe(200);
+      expect(captured[0]?.properties.$ai_cache_reporting_exclusive).toBe(true);
+    });
+  }
+
+  test("does not assert exclusive usage for other provider adapters", () => {
+    const { telemetry, captured } = fakeTelemetry();
+    emitAiObservability(
+      telemetry,
+      fakeTurnContext({
+        source: {
+          sourceId: "test-provider",
+          provider: "google",
+          model: "model-x",
+        },
+      }),
+      emitOptions,
+    );
+    expect(captured[0]?.properties).not.toHaveProperty(
+      "$ai_cache_reporting_exclusive",
+    );
+  });
+
   test("emits one $ai_generation with aggregates and zero $ai_span by default", () => {
     const { telemetry, captured } = fakeTelemetry();
 
