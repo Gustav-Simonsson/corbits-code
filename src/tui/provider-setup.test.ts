@@ -204,6 +204,18 @@ describe("provider setup pure helpers", () => {
     expect(stepReady("temperature", "nan")).toBe(false);
   });
 
+  test.each(["contextWindow", "maxTokens"] as const)(
+    "%s rejects nonpositive and fractional token counts",
+    (field) => {
+      for (const value of ["0", "-1", "12.5", "Infinity", "NaN"]) {
+        expect(stepReady(field, value)).toBe(false);
+      }
+      expect(stepReady(field, "1")).toBe(true);
+      expect(stepReady(field, " 8192 ")).toBe(true);
+      expect(stepReady(field, " ")).toBe(true);
+    },
+  );
+
   test("secrets render as capped bullets", () => {
     const masked = maskSecret("sk-abc");
     expect(masked).toHaveLength(6);
@@ -1255,6 +1267,74 @@ describe("runProviderSetup", () => {
     });
     expect(opts[0]?.preset).toBeUndefined();
   });
+
+  test.each(["openai", CUSTOM_CHOICE_ID])(
+    "changing provider choices to %s clears custom numeric fields",
+    async (target) => {
+      const seen: ProviderFormValues[] = [];
+      const { done, harness } = await mountSetup(async (values) => {
+        seen.push({ ...values });
+      });
+      try {
+        await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
+        for (const value of [
+          "custom",
+          "https://custom.example/v1",
+          "test-key",
+          "test-model",
+          "32000",
+          "8192",
+          "0.7",
+        ]) {
+          type(harness, value);
+          harness.pressKey("Enter");
+          await harness.renderOnce();
+        }
+        type(harness, "0.9");
+        for (let index = 0; index < 8; index++) await pressEscape(harness);
+        const distance =
+          PROVIDER_IDS.indexOf(target) - PROVIDER_IDS.indexOf(CUSTOM_CHOICE_ID);
+        for (let index = 0; index < Math.abs(distance); index++) {
+          harness.pressKey(distance < 0 ? "ARROW_UP" : "ARROW_DOWN");
+        }
+        harness.pressKey("Enter");
+        await flush(harness);
+        if (target === "openai") {
+          harness.pressKey("Enter");
+          await harness.renderOnce();
+          type(harness, "new-key");
+          harness.pressKey("Enter");
+          await harness.renderOnce();
+          harness.pressKey("Enter");
+        } else {
+          for (const value of [
+            "new-custom",
+            "https://new.example/v1",
+            "new-key",
+            "new-model",
+          ]) {
+            type(harness, value);
+            harness.pressKey("Enter");
+            await harness.renderOnce();
+          }
+          for (let index = 0; index < 4; index++) {
+            harness.pressKey("Enter");
+            await harness.renderOnce();
+          }
+        }
+        await done;
+        expect(seen[0]).toMatchObject({
+          contextWindow: "",
+          maxTokens: "",
+          temperature: "",
+          topP: "",
+        });
+      } finally {
+        harness.pressKey("Ctrl+C");
+        await done;
+      }
+    },
+  );
 
   test("the model pick-list can escape to a typed model id", async () => {
     const seen: ProviderFormValues[] = [];

@@ -351,6 +351,10 @@ export function chooseProviderRow(
   state.ollamaDiscovery = "idle";
   state.choice = picked;
   state.values.apiKey = "";
+  state.values.contextWindow = "";
+  state.values.maxTokens = "";
+  state.values.temperature = "";
+  state.values.topP = "";
   state.typedModel = false;
   state.oauthProfileError = null;
   state.oauthProfileConfirmPending = false;

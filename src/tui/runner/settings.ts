@@ -362,6 +362,7 @@ export async function wireSettings(
       const providers = await refreshLiveProviderCatalog(
         onDisk,
         resolvedForCatalog,
+        () => state.config,
       );
       state.config = {
         ...state.config,
@@ -393,6 +394,7 @@ export async function wireSettings(
             const nextProviders = await refreshLiveProviderCatalog(
               nextDisk,
               resolvedForCatalog,
+              () => state.config,
             );
             state.config = {
               ...state.config,
@@ -419,6 +421,7 @@ export async function wireSettings(
             const nextProviders = await refreshLiveProviderCatalog(
               nextDisk,
               resolvedForCatalog,
+              () => state.config,
             );
             state.config = {
               ...state.config,
@@ -738,6 +741,7 @@ export async function wireSettings(
       const providers = await refreshLiveProviderCatalog(
         onDisk,
         resolvedForCatalog,
+        () => state.config,
       );
       state.config = {
         ...state.config,

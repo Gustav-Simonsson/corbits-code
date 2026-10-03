@@ -1,5 +1,8 @@
 import type { ToolDefinition } from "@intx/types/runtime";
-import { isKimiLeafProvider } from "../subagent/provider-family.js";
+import {
+  isKimiLeafProvider,
+  isMuseSparkLeafProvider,
+} from "../subagent/provider-family.js";
 
 /** Context used to decide whether a provider needs wire-schema rewrites. */
 export interface NormalizeToolDefsContext {
@@ -9,7 +12,7 @@ export interface NormalizeToolDefsContext {
 
 /**
  * Shared primitives / view guidance for `present`. Used by both the canonical
- * `presentDefinition.description` and the kimi wire `view.description` so the
+ * `presentDefinition.description` and the acyclic wire `view.description` so the
  * two never drift.
  */
 export const PRESENT_VIEW_PRIMITIVES_GUIDANCE =
@@ -114,10 +117,11 @@ const COLUMNS_PROP = {
 } as const;
 
 /**
- * Non-recursive `present` parameters for Moonshot/kimi-class backends.
- * Those providers reject JSON Schema `$ref` cycles on `tools.function.parameters`
- * (recursive ViewNode). This shape inlines depth-capped oneOf primitives so the
- * model still sees type/children/text fields — not a bare freeform object.
+ * Non-recursive `present` parameters for backends that reject JSON Schema `$ref`
+ * cycles on `tools.function.parameters` (recursive ViewNode). Moonshot/Kimi and
+ * Meta Muse Spark both fail the turn before inference when the cycle is on the
+ * wire. This shape inlines depth-capped oneOf primitives so the model still
+ * sees type/children/text fields — not a bare freeform object.
  * Runtime still validates full nested trees via `validateView`.
  */
 export const KIMI_PRESENT_INPUT_SCHEMA = {
@@ -180,7 +184,7 @@ export const KIMI_PRESENT_INPUT_SCHEMA = {
   required: ["view"],
 } as const;
 
-function rewritePresentForKimi(def: ToolDefinition): ToolDefinition {
+function rewritePresentAcyclic(def: ToolDefinition): ToolDefinition {
   return {
     ...def,
     // structuredClone so callers cannot mutate the shared const via the tool def.
@@ -190,13 +194,17 @@ function rewritePresentForKimi(def: ToolDefinition): ToolDefinition {
   };
 }
 
+function needsAcyclicPresentSchema(ctx: NormalizeToolDefsContext): boolean {
+  return isKimiLeafProvider(ctx) || isMuseSparkLeafProvider(ctx);
+}
+
 /**
  * Family-gated wire rewrite of tool definitions before they reach the director /
- * provider. Today only Moonshot/kimi get a non-recursive `present` schema;
+ * provider. Moonshot/kimi and Muse Spark get a non-recursive `present` schema;
  * other providers receive the definitions unchanged (identity).
  *
  * Does not alter runtime validation or the canonical `presentDefinition` used
- * as the source of truth for non-kimi advertise paths.
+ * as the source of truth for providers that accept `$ref` cycles.
  *
  * Call this at every advertise path that may include `present` (main TUI/exec
  * sessions). Sub-agent toolsets currently omit `present` (main-session only);
@@ -206,10 +214,10 @@ export function normalizeToolDefinitionsForProvider(
   defs: readonly ToolDefinition[],
   ctx: NormalizeToolDefsContext,
 ): ToolDefinition[] {
-  if (!isKimiLeafProvider(ctx)) {
+  if (!needsAcyclicPresentSchema(ctx)) {
     return defs as ToolDefinition[];
   }
   return defs.map((def) =>
-    def.name === "present" ? rewritePresentForKimi(def) : def,
+    def.name === "present" ? rewritePresentAcyclic(def) : def,
   );
 }

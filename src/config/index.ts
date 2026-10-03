@@ -1382,12 +1382,55 @@ export function mergeOAuthCatalog(
 export async function refreshLiveProviderCatalog(
   settings: Settings | null,
   resolved: ResolvedProvider,
+  liveSelection?: () => Pick<ResolvedProvider, "providerName" | "model">,
 ): Promise<ProviderCatalogEntry[]> {
   const [codexProfiles, xaiProfiles] = await Promise.all([
     listCodexProfiles(),
     listXaiProfiles(),
   ]);
-  return mergeOAuthCatalog(settings, resolved, codexProfiles, xaiProfiles);
+  const catalog = mergeOAuthCatalog(
+    settings,
+    resolved,
+    codexProfiles,
+    xaiProfiles,
+  );
+  // Discovery can finish after a model switch; never restore its old bare-model slot.
+  const active = liveSelection?.() ?? resolved;
+  refreshProviderContextWindows(
+    settings ?? undefined,
+    catalog,
+    active.providerName,
+    active.model,
+  );
+  return catalog;
+}
+
+export function refreshProviderContextWindows(
+  settings: Settings | undefined,
+  catalog: readonly ProviderCatalogEntry[],
+  activeProvider: string,
+  activeModel: string,
+): void {
+  // Catalog models can expand during discovery. OAuth projections deliberately
+  // omit settings-only window overrides, just as startup resolution does.
+  const providers = Object.fromEntries(
+    catalog.map((entry) => {
+      const window =
+        entry.codexProfile === undefined && entry.xaiProfile === undefined
+          ? settings?.providers[entry.name]?.contextWindow
+          : undefined;
+      return [
+        entry.name,
+        {
+          models: entry.models,
+          ...(window !== undefined ? { contextWindow: window } : {}),
+        },
+      ];
+    }),
+  );
+  setProviderContextWindowOverrides(
+    buildProviderContextWindowOverrides(providers, activeProvider, activeModel),
+  );
 }
 
 export function catalogEntryAsProviderSettings(

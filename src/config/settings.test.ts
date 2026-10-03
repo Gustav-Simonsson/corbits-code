@@ -13,6 +13,78 @@ import { loadConfig } from "./index.js";
 import { resetPricingMetadataRefreshForTests } from "../cost/pricing-metadata.js";
 import { setProviderContextWindowOverrides } from "../provider/context-window.js";
 import { withMockedHomedir } from "../../testkit/mock-module.js";
+import { isSettings, loadSettings, saveGlobalSettings } from "./settings.js";
+
+test.each([
+  ["contextWindow", 0],
+  ["contextWindow", -1],
+  ["contextWindow", 12.5],
+  ["maxTokens", 0],
+  ["maxTokens", -1],
+  ["maxTokens", 12.5],
+  ["maxTokens", Infinity],
+  ["temperature", -0.1],
+  ["temperature", 2.1],
+  ["topP", -0.1],
+  ["topP", 1.1],
+] as const)("provider settings reject invalid %s=%p", (field, value) => {
+  expect(
+    isSettings({
+      providers: {
+        custom: {
+          baseURL: "https://custom.example/v1",
+          keyless: true,
+          models: ["test-model"],
+          [field]: value,
+        },
+      },
+    }),
+  ).toBe(false);
+});
+
+test("invalid token settings cannot be loaded or overwrite a saved provider", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "invalid-provider-tokens-"));
+  const path = join(cwd, "settings.json");
+  const valid = {
+    providers: {
+      custom: {
+        baseURL: "https://custom.example/v1",
+        keyless: true,
+        models: ["test-model"],
+        maxTokens: 8192,
+      },
+    },
+  };
+  const invalid = {
+    providers: {
+      custom: { ...valid.providers.custom, maxTokens: 12.5 },
+    },
+  };
+  try {
+    await saveGlobalSettings(path, valid);
+    await expect(saveGlobalSettings(path, invalid)).rejects.toThrow();
+    expect(await loadSettings(path)).toEqual(valid);
+    await writeFile(path, JSON.stringify(invalid));
+    await expect(loadSettings(path)).rejects.toThrow();
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("provider settings reject simultaneous sampling fields but preserve zero", () => {
+  const provider = {
+    baseURL: "https://custom.example/v1",
+    keyless: true,
+    models: ["test-model"],
+    contextWindow: 1,
+    maxTokens: 8192,
+    temperature: 0,
+  };
+  expect(isSettings({ providers: { custom: provider } })).toBe(true);
+  expect(isSettings({ providers: { custom: { ...provider, topP: 0 } } })).toBe(
+    false,
+  );
+});
 
 afterEach(() => {
   setProviderContextWindowOverrides(undefined);

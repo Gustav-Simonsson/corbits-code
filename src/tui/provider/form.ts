@@ -4,6 +4,7 @@
  */
 
 import { UI } from "../theme.js";
+import { ProviderInferenceOptionSchemas } from "../../config/provider-inference-options.js";
 import { type ProviderField, stepLabel, type SetupStep } from "./steps.js";
 import type {
   ProviderChoice,
@@ -47,35 +48,20 @@ export function maskEcho(value: string): string {
   return MASK_CHAR.repeat([...value].length);
 }
 
-/** apiKey is optional — blank means a keyless local provider (e.g. Ollama). */
-const NUMERIC_STEPS: readonly SetupStep[] = [
-  "contextWindow",
-  "maxTokens",
-  "temperature",
-  "topP",
-];
-
-/** Range bounds for the numeric sampling/token steps; blank is always allowed. */
-const NUMERIC_BOUNDS: Partial<Record<SetupStep, { min: number; max: number }>> =
-  {
-    temperature: { min: 0, max: 2 },
-    topP: { min: 0, max: 1 },
-  };
-
 /**
  * The four optional token/sampling steps accept a blank (leave unset) or a
  * finite number in range. Everything else is ready once it is non-blank.
  */
 export function stepReady(step: SetupStep, value: string): boolean {
   if (step === "apiKey") return true;
-  if (!NUMERIC_STEPS.includes(step)) return value.trim().length > 0;
+  if (!(step in ProviderInferenceOptionSchemas)) return value.trim().length > 0;
   const trimmed = value.trim();
   if (trimmed.length === 0) return true;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed)) return false;
-  const bounds = NUMERIC_BOUNDS[step];
-  if (bounds !== undefined) return parsed >= bounds.min && parsed <= bounds.max;
-  return true;
+  const schema =
+    ProviderInferenceOptionSchemas[
+      step as keyof typeof ProviderInferenceOptionSchemas
+    ];
+  return schema.allows(Number(trimmed));
 }
 
 /**

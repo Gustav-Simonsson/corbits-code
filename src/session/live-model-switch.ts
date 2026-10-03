@@ -1,7 +1,7 @@
 /**
  * One cutover for every model-scoped runtime fact a live session reads.
  * `/model` (and tests) must go through this rather than refreshing inference
- * alone — a missed step is how provider-model grants and kimi wire schemas
+ * alone — a missed step is how provider-model grants and kimi/muse wire schemas
  * went stale after a switch.
  */
 
@@ -24,7 +24,7 @@ export interface LiveModelSwitchHandles {
   /**
    * Re-advertise family-gated tool schemas from canonical definitions.
    * Must not re-normalize an already-rewritten advertise set — switching
-   * away from kimi would then keep the non-recursive present schema.
+   * away from kimi/muse would then keep the non-recursive present schema.
    */
   refreshAdvertisedSchemas: (next: LiveModelRef) => void;
 }

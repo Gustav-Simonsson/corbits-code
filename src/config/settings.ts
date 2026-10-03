@@ -16,6 +16,7 @@ import {
 import type { OtelSettings } from "../perf/otel-config.js";
 import type { SessionMode } from "./session-mode.js";
 import { resolveDefaultModel } from "./providers.js";
+import { ProviderInferenceOptionsSchema } from "./provider-inference-options.js";
 import {
   OPENCODE_GO_BASE_URL,
   isOpenCodeGoProvider,
@@ -631,15 +632,11 @@ const ProviderSettingsSchema = type({
   "defaultModel?": "string",
   "keyless?": "boolean",
   "free?": "boolean",
-  "contextWindow?": "number",
-  "maxTokens?": "number",
-  "temperature?": "number",
-  "topP?": "number",
   "bifrostVirtualKey?": "boolean",
   "anthropic?": "boolean",
   "opencodeGo?": "boolean",
   "verified?": "boolean",
-});
+}).and(ProviderInferenceOptionsSchema);
 
 const ModelRefSchema = type({
   provider: "string",
