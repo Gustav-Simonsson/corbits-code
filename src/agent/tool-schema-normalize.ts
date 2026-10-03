@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "@intx/types/runtime";
 import {
   isKimiLeafProvider,
+  isMuseSparkLeafProvider,
   isXaiGrokLeafProvider,
 } from "../subagent/provider-family.js";
 
@@ -12,7 +13,7 @@ export interface NormalizeToolDefsContext {
 
 /**
  * Shared primitives / view guidance for `present`. Used by both the canonical
- * `presentDefinition.description` and the kimi wire `view.description` so the
+ * `presentDefinition.description` and the acyclic wire `view.description` so the
  * two never drift.
  */
 export const PRESENT_VIEW_PRIMITIVES_GUIDANCE =
@@ -117,10 +118,11 @@ const COLUMNS_PROP = {
 } as const;
 
 /**
- * Non-recursive `present` parameters for Moonshot/kimi-class backends.
- * Those providers reject JSON Schema `$ref` cycles on `tools.function.parameters`
- * (recursive ViewNode). This shape inlines depth-capped oneOf primitives so the
- * model still sees type/children/text fields — not a bare freeform object.
+ * Non-recursive `present` parameters for backends that reject JSON Schema `$ref`
+ * cycles on `tools.function.parameters` (recursive ViewNode). Moonshot/Kimi and
+ * Meta Muse Spark both fail the turn before inference when the cycle is on the
+ * wire. This shape inlines depth-capped oneOf primitives so the model still
+ * sees type/children/text fields — not a bare freeform object.
  * Runtime still validates full nested trees via `validateView`.
  */
 export const KIMI_PRESENT_INPUT_SCHEMA = {
@@ -183,7 +185,7 @@ export const KIMI_PRESENT_INPUT_SCHEMA = {
   required: ["view"],
 } as const;
 
-function rewritePresentForKimi(def: ToolDefinition): ToolDefinition {
+function rewritePresentAcyclic(def: ToolDefinition): ToolDefinition {
   return {
     ...def,
     // structuredClone so callers cannot mutate the shared const via the tool def.
@@ -212,6 +214,66 @@ function schemaDeclaresShape(node: Record<string, unknown>): boolean {
   );
 }
 
+function literalType(value: unknown): string | undefined {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+    case "object":
+      return typeof value;
+    default:
+      return undefined;
+  }
+}
+
+function withLiteralShape(
+  node: Record<string, unknown>,
+): Record<string, unknown> {
+  if (schemaDeclaresShape(node)) return node;
+  const values =
+    "const" in node
+      ? [node["const"]]
+      : Array.isArray(node["enum"])
+        ? node["enum"]
+        : [];
+  const types = [...new Set(values.map(literalType))].filter(
+    (value): value is string => value !== undefined,
+  );
+  if (types.length === 0) return node;
+  return types.length === 1
+    ? { ...node, type: types[0] }
+    : { ...node, anyOf: types.map((type) => ({ type })) };
+}
+
+const SCHEMA_MAP_KEYS = new Set([
+  "properties",
+  "patternProperties",
+  "$defs",
+  "definitions",
+  "dependentSchemas",
+  "dependencies",
+]);
+const SCHEMA_CHILD_KEYS = new Set([
+  "items",
+  "prefixItems",
+  "additionalItems",
+  "contains",
+  "additionalProperties",
+  "unevaluatedProperties",
+  "unevaluatedItems",
+  "propertyNames",
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "not",
+  "if",
+  "then",
+  "else",
+  "contentSchema",
+]);
+
 /**
  * Grok's Responses proxy 400s the whole infer on one invalid tool schema
  * (empty body, statusText "Bad Request"). Untyped properties and `$schema`
@@ -223,11 +285,15 @@ function sanitizeSchemaForGrok(value: unknown): unknown {
   const next: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
     if (key === "$schema" || key === "$id") continue;
-    if (key === "properties" && isPlainObject(child)) {
+    if (SCHEMA_MAP_KEYS.has(key) && isPlainObject(child)) {
       const props: Record<string, unknown> = {};
       for (const [name, prop] of Object.entries(child)) {
         const sanitized = sanitizeSchemaForGrok(prop);
-        if (isPlainObject(sanitized) && !schemaDeclaresShape(sanitized)) {
+        if (
+          key === "properties" &&
+          isPlainObject(sanitized) &&
+          !schemaDeclaresShape(sanitized)
+        ) {
           props[name] = { ...sanitized, ...OPEN_OBJECT };
         } else {
           props[name] = sanitized;
@@ -236,9 +302,13 @@ function sanitizeSchemaForGrok(value: unknown): unknown {
       next[key] = props;
       continue;
     }
-    next[key] = sanitizeSchemaForGrok(child);
+    // Literal enum/const/default/example documents can themselves look like
+    // schemas; only schema-valued keywords may interpret their children.
+    next[key] = SCHEMA_CHILD_KEYS.has(key)
+      ? sanitizeSchemaForGrok(child)
+      : child;
   }
-  return next;
+  return withLiteralShape(next);
 }
 
 function sanitizeToolDefForGrok(def: ToolDefinition): ToolDefinition {
@@ -250,14 +320,18 @@ function sanitizeToolDefForGrok(def: ToolDefinition): ToolDefinition {
   };
 }
 
+function needsAcyclicPresentSchema(ctx: NormalizeToolDefsContext): boolean {
+  return isKimiLeafProvider(ctx) || isMuseSparkLeafProvider(ctx);
+}
+
 /**
  * Family-gated wire rewrite of tool definitions before they reach the director /
- * provider. Moonshot/kimi get a non-recursive `present` schema. Grok/xAI get
- * schema sanitization so an untyped property or `$schema` cannot 400 the
+ * provider. Moonshot/kimi and Muse Spark get a non-recursive `present` schema.
+ * Grok/xAI get schema sanitization so an untyped property or `$schema` cannot 400 the
  * infer. Other providers receive the definitions unchanged (identity).
  *
  * Does not alter runtime validation or the canonical `presentDefinition` used
- * as the source of truth for non-kimi advertise paths.
+ * as the source of truth for providers that accept `$ref` cycles.
  *
  * Call this at every advertise path that may include `present` (main TUI/exec
  * sessions). Sub-agent toolsets currently omit `present` (main-session only);
@@ -267,14 +341,15 @@ export function normalizeToolDefinitionsForProvider(
   defs: readonly ToolDefinition[],
   ctx: NormalizeToolDefsContext,
 ): ToolDefinition[] {
-  const kimi = isKimiLeafProvider(ctx);
+  const acyclicPresent = needsAcyclicPresentSchema(ctx);
   const grok = isXaiGrokLeafProvider(ctx);
-  if (!kimi && !grok) {
+  if (!acyclicPresent && !grok) {
     return defs as ToolDefinition[];
   }
   return defs.map((def) => {
     let next = def;
-    if (kimi && def.name === "present") next = rewritePresentForKimi(next);
+    if (acyclicPresent && def.name === "present")
+      next = rewritePresentAcyclic(next);
     if (grok) next = sanitizeToolDefForGrok(next);
     return next;
   });

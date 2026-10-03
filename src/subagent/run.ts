@@ -1252,7 +1252,7 @@ async function runSubAgentInner(
 
     // Family-gate wire schemas the same way main sessions do. Worker advertise
     // uses a smaller prefix plus tool_search; computeAdvertised already
-    // normalizes for kimi/grok.
+    // normalizes for kimi/muse/grok.
     const directorDef = defineDirector({
       id: `${ID_PREFIX}/subagent`,
       configSchema: type({}),

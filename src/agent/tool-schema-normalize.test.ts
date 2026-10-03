@@ -120,7 +120,36 @@ describe("normalizeToolDefinitionsForProvider", () => {
     ).toBe(false);
   });
 
-  test("non-kimi providers get identity schemas (recursive present kept)", () => {
+  // Meta Muse Spark (OpenCode Go / Zen) rejects recursive $ref cycles with
+  // "Recursive JSON schemas are not currently supported". Same wire rewrite
+  // as Kimi — model-id gate via isMuseSparkLeafProvider.
+  test.each([
+    {
+      providerName: "opencode-go",
+      model: "muse-spark-1.3-contributor",
+    },
+    {
+      providerName: "opencode-go",
+      model: "muse-spark-1.2-contributor",
+    },
+    { providerName: "opencode-go", model: "muse-spark-1.3" },
+    { providerName: "zen", model: "muse-spark-1.3-contributor-free" },
+  ] as const)(
+    "$providerName + $model rewrites present (muse schema gate)",
+    (ctx) => {
+      const out = normalizeToolDefinitionsForProvider(defs, ctx);
+      const present = defined(out.find((d) => d.name === "present"));
+      expect(schemaHasRef(present.inputSchema)).toBe(false);
+      expect(schemaHasDefs(present.inputSchema)).toBe(false);
+      expect(present.inputSchema).toEqual(
+        structuredClone(
+          KIMI_PRESENT_INPUT_SCHEMA,
+        ) as typeof present.inputSchema,
+      );
+    },
+  );
+
+  test("providers that accept recursive schemas get identity present", () => {
     for (const ctx of [
       { providerName: "anthropic", model: "claude-sonnet-4" },
       { providerName: "openai", model: "gpt-5.6" },
@@ -192,6 +221,173 @@ describe("normalizeToolDefinitionsForProvider", () => {
       }
     ).properties?.question;
     expect(grokQuestion?.type).toBe("string");
+  });
+
+  test.each([
+    { values: ["open", "closed"], types: ["string"] },
+    { values: [1, 2.5], types: ["number"] },
+    { values: [true, false], types: ["boolean"] },
+    { values: [null], types: ["null"] },
+    { values: [[1], [2]], types: ["array"] },
+    { values: [{ state: "open" }], types: ["object"] },
+    {
+      values: ["open", null, 1, true, [], {}],
+      types: ["string", "null", "number", "boolean", "array", "object"],
+    },
+  ])("grok preserves enum values with types $types", ({ values, types }) => {
+    const def: ToolDefinition = {
+      name: "mcp__tracker__set_state",
+      description: "Set state",
+      inputSchema: {
+        type: "object",
+        properties: { state: { enum: values } },
+        required: ["state"],
+      },
+    };
+    const before = structuredClone(def);
+    const normalized = defined(
+      normalizeToolDefinitionsForProvider([def], {
+        providerName: "xai/default",
+        model: "grok-4.6",
+      })[0],
+    );
+    const schema = normalized.inputSchema as {
+      properties: {
+        state: {
+          enum: unknown[];
+          type?: string;
+          anyOf?: { type: string }[];
+        };
+      };
+    };
+    const state = schema.properties.state;
+    expect(state.enum).toEqual([...values]);
+    expect(state.anyOf?.map((branch) => branch.type) ?? [state.type]).toEqual([
+      ...types,
+    ]);
+    expect(def).toEqual(before);
+    expect(
+      normalizeToolDefinitionsForProvider([def], {
+        providerName: "anthropic",
+        model: "claude-sonnet-4",
+      })[0],
+    ).toBe(def);
+  });
+
+  test.each([
+    { value: "open", expectedType: "string" },
+    { value: 1.5, expectedType: "number" },
+    { value: true, expectedType: "boolean" },
+    { value: null, expectedType: "null" },
+    { value: ["open"], expectedType: "array" },
+    { value: { state: "open" }, expectedType: "object" },
+  ])(
+    "grok preserves $expectedType const payloads",
+    ({ value, expectedType }) => {
+      const def: ToolDefinition = {
+        name: "mcp__tracker__set_state",
+        description: "Set state",
+        inputSchema: {
+          type: "object",
+          properties: { state: { const: value } },
+          required: ["state"],
+        },
+      };
+      const before = structuredClone(def);
+      const normalized = defined(
+        normalizeToolDefinitionsForProvider([def], {
+          providerName: "xai/default",
+          model: "grok-4.6",
+        })[0],
+      );
+      expect(normalized.inputSchema).toMatchObject({
+        properties: { state: { const: value, type: expectedType } },
+      });
+      expect(def).toEqual(before);
+    },
+  );
+
+  test("grok sanitizes schema nodes without rewriting literal payloads or property names", () => {
+    const literal = {
+      $schema: "literal schema value",
+      $id: "literal id value",
+      properties: { payload: { description: "literal, not a schema" } },
+    };
+    const def: ToolDefinition = {
+      name: "mcp__schema__save",
+      description: "Save a schema document",
+      inputSchema: {
+        type: "object",
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        $id: "https://example.invalid/tool",
+        properties: {
+          $schema: { type: "string" },
+          $id: { type: "string" },
+          document: {
+            enum: [literal],
+            const: literal,
+            default: literal,
+            examples: [literal],
+          },
+          entries: {
+            type: "array",
+            items: {
+              $id: "https://example.invalid/entry",
+              type: "object",
+              properties: { payload: { description: "untyped payload" } },
+            },
+          },
+        },
+        $defs: {
+          $schema: {
+            type: "object",
+            properties: { payload: { description: "untyped definition" } },
+          },
+        },
+      },
+    };
+    const before = structuredClone(def);
+    const normalized = defined(
+      normalizeToolDefinitionsForProvider([def], {
+        providerName: "xai/default",
+        model: "grok-4.6",
+      })[0],
+    );
+    expect(normalized.inputSchema).toMatchObject({
+      properties: {
+        $schema: { type: "string" },
+        $id: { type: "string" },
+        document: {
+          enum: [literal],
+          const: literal,
+          default: literal,
+          examples: [literal],
+        },
+        entries: {
+          items: {
+            properties: {
+              payload: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      },
+      $defs: {
+        $schema: {
+          properties: {
+            payload: { type: "object", additionalProperties: true },
+          },
+        },
+      },
+    });
+    const schema = normalized.inputSchema as {
+      $schema?: unknown;
+      $id?: unknown;
+      properties: { entries: { items: { $id?: unknown } } };
+    };
+    expect(schema.$schema).toBeUndefined();
+    expect(schema.$id).toBeUndefined();
+    expect(schema.properties.entries.items.$id).toBeUndefined();
+    expect(def).toEqual(before);
   });
 
   test("kimi rewrite leaves non-present tools untouched", () => {

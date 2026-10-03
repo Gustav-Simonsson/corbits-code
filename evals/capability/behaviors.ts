@@ -51,6 +51,8 @@ export interface BehaviorMetrics {
   webFetchToolCallCount: number;
   /** spawn_agent tool calls (0 when the tool is absent or unused). */
   spawnAgentToolCallCount: number;
+  /** File-edit calls on the captured primary session, not its workers. */
+  parentFileMutationToolCallCount: number;
   /** Segments editing files via sed/perl/awk in-place or heredoc redirection. */
   editViaShellCount: number;
   /** Tool calls repeating an earlier call's name with normalized-equal arguments. */
@@ -72,6 +74,7 @@ export const NUMERIC_BEHAVIOR_METRICS = [
   "networkCommandCount",
   "webFetchToolCallCount",
   "spawnAgentToolCallCount",
+  "parentFileMutationToolCallCount",
   "editViaShellCount",
   "repeatedSearchCount",
   "longestToolOnlyStreak",
@@ -102,6 +105,7 @@ export const BEHAVIOR_METRIC_DIRECTIONS: Record<
   networkCommandCount: "lower",
   webFetchToolCallCount: "neutral",
   spawnAgentToolCallCount: "neutral",
+  parentFileMutationToolCallCount: "lower",
   editViaShellCount: "lower",
   repeatedSearchCount: "lower",
   longestToolOnlyStreak: "lower",
@@ -124,6 +128,21 @@ const SHELL_TOOL_NAME = "run_shell";
 const WEB_FETCH_TOOL_NAME = "web_fetch";
 const SPAWN_AGENT_TOOL_NAME = "spawn_agent";
 const LEGACY_TASK_TOOL_NAME = "task";
+const FILE_MUTATION_TOOLS = [
+  "edit",
+  "write",
+  "delete",
+  "edit_file",
+  "write_file",
+  "delete_file",
+];
+
+function countParentFileMutations(callsByName: Record<string, number>): number {
+  return FILE_MUTATION_TOOLS.reduce(
+    (total, name) => total + (callsByName[name] ?? 0),
+    0,
+  );
+}
 
 /**
  * Split a shell command into chain segments, using the same quote-aware
@@ -281,6 +300,7 @@ export function deriveBehaviorMetrics(
     networkCommandCount,
     webFetchToolCallCount: toolCallsByName[WEB_FETCH_TOOL_NAME] ?? 0,
     spawnAgentToolCallCount: toolCallsByName[SPAWN_AGENT_TOOL_NAME] ?? 0,
+    parentFileMutationToolCallCount: countParentFileMutations(toolCallsByName),
     editViaShellCount,
     repeatedSearchCount,
     longestToolOnlyStreak,
@@ -297,6 +317,7 @@ const BehaviorMetricsType = type({
   networkCommandCount: "number",
   webFetchToolCallCount: "number",
   "spawnAgentToolCallCount?": "number",
+  "parentFileMutationToolCallCount?": "number",
   "taskToolCallCount?": "number",
   editViaShellCount: "number",
   repeatedSearchCount: "number",
@@ -314,6 +335,9 @@ export function parseBehaviorMetrics(raw: unknown): BehaviorMetrics | null {
   // Frozen baseline files predate this field; derive from the per-name map.
   return {
     ...current,
+    parentFileMutationToolCallCount:
+      parsed.parentFileMutationToolCallCount ??
+      countParentFileMutations(parsed.toolCallsByName),
     spawnAgentToolCallCount:
       parsed.spawnAgentToolCallCount ??
       parsed.toolCallsByName[SPAWN_AGENT_TOOL_NAME] ??

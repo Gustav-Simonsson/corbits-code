@@ -431,7 +431,9 @@ describe("createToolSearchTool", () => {
       await call(tool, { query: "linear issue", limit: 100 }),
     );
     expect(listed).toHaveLength(TOOL_SEARCH_LIMIT_MAX);
-    expect(toolSearchDefinition.inputSchema).toMatchObject({
+    // Bun's nested asymmetric matcher mutates its received object; keep the
+    // canonical definition JSON-serializable for later worker tests.
+    expect(structuredClone(toolSearchDefinition.inputSchema)).toMatchObject({
       properties: {
         limit: {
           description: expect.stringContaining("hard cap 20"),
