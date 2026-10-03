@@ -120,6 +120,52 @@ export function advertisedToolNamesForSessionMode(
   ];
 }
 
+const WORKER_LEAF_EXTRA: readonly string[] = [
+  "ask_director",
+  "submit_result",
+  "skill_search",
+];
+
+const WORKER_ORCH_EXTRA: readonly string[] = [
+  "spawn_agent",
+  "list_agents",
+  "close_agent",
+  "resume_agent",
+  "interrupt_agent",
+  "send_input",
+];
+
+/**
+ * Advertised wire prefix for a spawned worker. Smaller than dispatch: no
+ * `ask_operator`, no `search_agents`, no fleet verbs on leaves. Nested
+ * orchestrators add the fleet verbs they actually mount. MCP stays off this
+ * list until tool_search / promote-on-execute.
+ */
+export function advertisedToolNamesForWorker(opts: {
+  orchestrator: boolean;
+  languageServerAvailable?: boolean;
+}): readonly string[] {
+  const core = CORE_TOOL_NAMES.filter((name) => {
+    if (name === "ask_operator") return false;
+    if (name === "search_agents") return false;
+    if (name === "wait_agents") return false;
+    if (name === "lsp") return opts.languageServerAvailable === true;
+    if (ORCHESTRATOR_ONLY_TOOL_NAMES.includes(name)) return opts.orchestrator;
+    return true;
+  });
+  const extra = opts.orchestrator
+    ? [...WORKER_LEAF_EXTRA, ...WORKER_ORCH_EXTRA]
+    : WORKER_LEAF_EXTRA;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of [...core, ...CATALOG_TOOL_NAMES, ...extra]) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
 // Built-in file/search/web tools advertised alongside the core set. They carry full
 // schemas on the wire so the model can call them directly; MCP tools are not
 // listed at all — they are discovered blind via tool_search.

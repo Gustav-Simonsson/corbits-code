@@ -9,6 +9,7 @@ import {
   createActivatedToolTracker,
   advertisedTools,
   advertisedToolNamesForSessionMode,
+  advertisedToolNamesForWorker,
   coreToolNamesForSessionMode,
   CORE_TOOL_NAMES,
   CATALOG_TOOL_NAMES,
@@ -950,6 +951,37 @@ describe("promote-on-execute", () => {
     expect(promoted).toEqual([]);
     expect(advertisedNames(advertised, runner)).toEqual(before);
     expect(advertisedNames(advertised, runner)).not.toContain("list_dir");
+  });
+});
+
+describe("advertisedToolNamesForWorker", () => {
+  test("leaf prefix is smaller than dispatch and includes tool_search", () => {
+    const leaf = advertisedToolNamesForWorker({ orchestrator: false });
+    const dispatch = advertisedToolNamesForSessionMode(
+      "orchestrator",
+      FULL_AVAILABILITY,
+    );
+    expect(leaf).toContain("tool_search");
+    expect(leaf).toContain("ask_director");
+    expect(leaf).toContain("submit_result");
+    expect(leaf).toContain("skill_search");
+    expect(leaf).toContain("read");
+    expect(leaf).toContain("bash");
+    expect(leaf).not.toContain("spawn_agent");
+    expect(leaf).not.toContain("search_agents");
+    expect(leaf).not.toContain("ask_operator");
+    expect(leaf).not.toContain("wait_agents");
+    expect(leaf.every((name) => !name.startsWith("mcp__"))).toBe(true);
+    expect(leaf.length).toBeLessThan(dispatch.length);
+  });
+
+  test("nested orchestrator adds fleet verbs but not search_agents", () => {
+    const orch = advertisedToolNamesForWorker({ orchestrator: true });
+    expect(orch).toContain("spawn_agent");
+    expect(orch).toContain("send_input");
+    expect(orch).toContain("tool_search");
+    expect(orch).not.toContain("search_agents");
+    expect(orch).not.toContain("ask_operator");
   });
 });
 
