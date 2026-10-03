@@ -7,6 +7,8 @@ description: Maintain product, architecture, and implementation docs and detect 
 
 Route what the operator tells you into the right document, then find the gaps it leaves and ask about them. This is not a filing system: recording the input is half the job.
 
+Dispatch owns classification, operator questions, and synthesis. `spawn_agent(agent="shakespeare")` owns substantive documentation authorship and cross-document consistency; only obvious mechanical corrections may be DIY. Give shakespeare the input, relevant document paths and context, `success_criteria` covering the steps below, `do_not` forbidding product-code changes or unapproved document creation, and `report_focus` requesting contradictions and gaps. Workers start blank; include the applicable instructions. After operator answers, resume shakespeare with those decisions rather than taking over its edits.
+
 ## Documents
 
 Look for `PRODUCT.md`, `ARCHITECTURE.md`, and `IMPLEMENTATION.md` (case-insensitive) in the repo root and `docs/`. Prefer the root when both exist. Create missing ones in the root after confirming with `ask_operator`.
@@ -17,7 +19,7 @@ Look for `PRODUCT.md`, `ARCHITECTURE.md`, and `IMPLEMENTATION.md` (case-insensit
 | Architecture   | Structure: components, interfaces, data and control flow, technology-agnostic decisions | parts and how they interact                |
 | Implementation | Concrete choices: technologies, protocols, formats, config, deployment                  | "uses", "built on", named libraries        |
 
-Read the existing documents first. Their vocabulary beats the general signals above: a term the architecture doc already owns routes to architecture.
+Have shakespeare read the existing documents first. Their vocabulary beats the general signals above: a term the architecture doc already owns routes to architecture.
 
 ## Steps
 

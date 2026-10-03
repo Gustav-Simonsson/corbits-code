@@ -18,6 +18,8 @@ Requires a git repo. Run `git rev-parse --show-toplevel`; if it fails, stop and 
 
 The primary dispatches with `spawn_agent`, one target per wave: `reviewer` always, `planner` when architecture, API, or approach is at stake, `designer` or `warden` only when the touched files warrant that lens (UI surface, security-sensitive code). Do not fan out a default wide fleet.
 
+Reviewer owns the code-defect analysis and code verdict. Dispatch owns target resolution, the metadata checks below, findings dispositions, and synthesis; it does not redo the file-by-file review. Workers start blank: supply the worktree, scoped diff, intent, relevant context, `success_criteria`, `do_not` forbidding product fixes, and `report_focus` requiring concrete findings and verification evidence.
+
 ## 2. Resolve the target and base
 
 For a PR (number, URL, or branch), review from a worktree, never the local checkout:
@@ -38,7 +40,7 @@ When delegating, give the sub-agent `git diff <base>...HEAD -- <file>`, not whol
 
 ## 4. Reviewer-of-record checks
 
-The agent whose verdict ships runs these itself and reads the raw output. They are not delegable; a delegate collapses `Bin 0 -> 8181 bytes` on a `.ts` file into noise.
+Dispatch runs these metadata checks itself and reads the raw output. They are not delegable; a delegate collapses `Bin 0 -> 8181 bytes` on a `.ts` file into noise. These checks complement reviewer's code verdict; they do not authorize Dispatch to take over behavioral review.
 
 - `git diff <base>...HEAD --stat`: look for `Bin` markers on files that should be text, and files outside the stated scope.
 - `git log --oneline <base>..HEAD`: commits must match the ticket's scope.

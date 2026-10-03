@@ -627,6 +627,34 @@ describe("normalizeInferenceErrorForRetry", () => {
     expect(normalizeInferenceErrorForRetry(error)).toBe(error);
   });
 
+  test("lifts an xAI fatal 400 nested diagnostic over Bad Request", () => {
+    const raw = {
+      error: { message: "Invalid request: recursive JSON schema" },
+    };
+    const normalized = normalizeInferenceErrorForRetry({
+      category: "fatal",
+      message: "Bad Request",
+      statusCode: 400,
+      providerId: "xai/default-2",
+      raw,
+    });
+    expect(normalized.category).toBe("fatal");
+    expect(normalized.message).toBe("Invalid request: recursive JSON schema");
+    expect(normalized.statusCode).toBe(400);
+    expect(normalized.raw).toBe(raw);
+  });
+
+  test("lifts a grok-responses fatal 400 nested diagnostic", () => {
+    const normalized = normalizeInferenceErrorForRetry({
+      category: "fatal",
+      message: "Bad Request",
+      statusCode: 400,
+      providerId: "grok-responses",
+      raw: { error: { message: "tools.0.parameters is invalid" } },
+    });
+    expect(normalized.message).toBe("tools.0.parameters is invalid");
+  });
+
   test("does not lift a Codex-shaped fatal 400 without a providerId", () => {
     const error = {
       category: "fatal" as const,

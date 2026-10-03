@@ -176,6 +176,7 @@ test("capture strips properties not in $ai_generation's allowlist", async () => 
     $ai_is_error: false,
     $ai_cache_read_input_tokens: 1,
     $ai_cache_creation_input_tokens: 2,
+    $ai_cache_reporting_exclusive: true,
     $ai_reasoning_tokens: 3,
     prompt: "should-not-appear",
     completion: "should-not-appear",
@@ -188,6 +189,7 @@ test("capture strips properties not in $ai_generation's allowlist", async () => 
   expect(body.properties.$ai_provider).toBe("openai-compatible");
   expect(body.properties.$ai_model).toBe("model-x");
   expect(body.properties.$ai_latency).toBe(0.4);
+  expect(body.properties.$ai_cache_reporting_exclusive).toBe(true);
   expect(body.properties.prompt).toBeUndefined();
   expect(body.properties.completion).toBeUndefined();
 });

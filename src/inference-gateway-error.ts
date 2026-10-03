@@ -638,17 +638,24 @@ function normalizeCodexCredential404Error(
 }
 
 /**
- * Codex 400s arrive as fatal with HTTP statusText ("Bad Request") while the
- * real diagnostic sits on nested `detail.error`. Lift the nested copy so the
- * transcript is actionable; keep category fatal — this is not overflow,
- * rate-limit, or quota.
+ * Fatal 400s arrive with HTTP statusText ("Bad Request") while the real
+ * diagnostic sits on nested `detail.error` / `error.message`. Lift the nested
+ * copy so the transcript is actionable; keep category fatal — this is not
+ * overflow, rate-limit, or quota. Codex and xAI/Grok both do this; other
+ * providers keep statusText until their body shape is characterized.
  */
-function normalizeCodexFatal400Message(
+function normalizeFatal400NestedMessage(
   error: InferenceErrorWithGoContext,
 ): InferenceError {
-  if (!isKnownCodexProviderId(error.providerId)) return error;
   if (error.category !== "fatal") return error;
   if (error.statusCode !== 400) return error;
+  const providerId = error.providerId;
+  if (
+    !isKnownCodexProviderId(providerId) &&
+    !isKnownXaiProviderId(providerId)
+  ) {
+    return error;
+  }
 
   const current = error.message ?? "";
   if (current.length > 0 && current.toLowerCase() !== "bad request") {
@@ -815,9 +822,9 @@ function normalizeOAuthUpgradeRequiredError(
  * 429s, attributable xAI capacity protocol_mismatch, Codex usage limits
  * (nested detail.error with resets_in_seconds), known-Codex short 429s that
  * are not usage_limit_reached, known-Codex 404s carrying an
- * auth-rejection signal (expired/revoked credential), known-Codex fatal
- * 400s whose message is empty or "Bad Request" (nested diagnostic on raw), and
- * known-OAuth fatal 426s (unauthenticated-provider upgrade rejection).
+ * auth-rejection signal (expired/revoked credential), known-Codex and known-xAI
+ * fatal 400s whose message is empty or "Bad Request" (nested diagnostic on raw),
+ * and known-OAuth fatal 426s (unauthenticated-provider upgrade rejection).
  */
 export function normalizeInferenceErrorForRetry(
   error: InferenceErrorWithGoContext,
@@ -840,8 +847,8 @@ export function normalizeInferenceErrorForRetry(
   const codexCredential = normalizeCodexCredential404Error(error);
   if (codexCredential !== error) return codexCredential;
 
-  const codexFatal400 = normalizeCodexFatal400Message(error);
-  if (codexFatal400 !== error) return codexFatal400;
+  const fatal400 = normalizeFatal400NestedMessage(error);
+  if (fatal400 !== error) return fatal400;
 
   const oauthUpgrade = normalizeOAuthUpgradeRequiredError(error);
   if (oauthUpgrade !== error) return oauthUpgrade;

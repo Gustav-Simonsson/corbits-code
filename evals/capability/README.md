@@ -55,6 +55,15 @@ comparison a bait whose baseline no longer exceeds its threshold is flagged
 (`BAIT FLAG ... no longer reproduces its misbehavior`) rather than silently
 passing.
 
+The med/hard/xhard cases also check primary Dispatch ownership:
+`spawnAgentToolCallCount >= 1` and `parentFileMutationToolCallCount == 0`.
+These cover substantive single-file fixes and multi-file implementation.
+The mutation metric counts primary file-edit calls (wire and engine names),
+not worker edits. These routing bounds apply to default and explicit Dispatch
+runs via `directors: ["dispatch"]`; leaf-director overlays skip them but retain
+the general discipline bounds. An easy
+case is not forced to spawn merely to raise a count.
+
 ### Graders are deterministic and cheat-resistant
 
 No LLM judging. Every tier's `verify.sh` is shell plus `bun`, and each one was
@@ -100,20 +109,21 @@ turn stream — tool calls with arguments plus assistant content. Derivation is
 pure (`behaviors.ts`); command analysis is a quote-aware token scan, not a full
 shell parser.
 
-| Metric                       | Meaning                                                                     | Baseline direction |
-| ---------------------------- | --------------------------------------------------------------------------- | ------------------ |
-| `shellCommandCount`          | `run_shell` calls                                                           | informational      |
-| `envAssignmentCommandCount`  | commands with a `FOO=bar cmd` prefix or `export`                            | lower is better    |
-| `chainSegmentCount`          | total chain segments (`&&`, `\|\|`, `;`, `\|`, newline)                     | informational      |
-| `maxChainSegmentsPerCommand` | largest chain in one command                                                | lower is better    |
-| `networkCommandCount`        | segments invoking curl/wget/nc/...                                          | lower is better    |
-| `webFetchToolCallCount`      | `web_fetch` tool calls (0 when the tool is absent or unused)                | informational      |
-| `spawnAgentToolCallCount`    | `spawn_agent` tool calls (0 when the tool is absent or unused)              | informational      |
-| `editViaShellCount`          | sed/perl/awk `-i` edits or heredoc writes                                   | lower is better    |
-| `repeatedSearchCount`        | tool calls repeating an earlier call's name with normalized-equal arguments | lower is better    |
-| `longestToolOnlyStreak`      | longest run of assistant turns with tool calls and no text                  | lower is better    |
-| `maxTurnDurationMs`          | slowest single turn (stall gap on slow commands)                            | lower is better    |
-| `toolCallsByName`            | per-tool-name call counts                                                   | informational      |
+| Metric                            | Meaning                                                                     | Baseline direction |
+| --------------------------------- | --------------------------------------------------------------------------- | ------------------ |
+| `shellCommandCount`               | `run_shell` calls                                                           | informational      |
+| `envAssignmentCommandCount`       | commands with a `FOO=bar cmd` prefix or `export`                            | lower is better    |
+| `chainSegmentCount`               | total chain segments (`&&`, `\|\|`, `;`, `\|`, newline)                     | informational      |
+| `maxChainSegmentsPerCommand`      | largest chain in one command                                                | lower is better    |
+| `networkCommandCount`             | segments invoking curl/wget/nc/...                                          | lower is better    |
+| `webFetchToolCallCount`           | `web_fetch` tool calls (0 when the tool is absent or unused)                | informational      |
+| `spawnAgentToolCallCount`         | `spawn_agent` tool calls (0 when the tool is absent or unused)              | informational      |
+| `parentFileMutationToolCallCount` | primary file edit/write/delete calls, excluding worker edits                | lower is better    |
+| `editViaShellCount`               | sed/perl/awk `-i` edits or heredoc writes                                   | lower is better    |
+| `repeatedSearchCount`             | tool calls repeating an earlier call's name with normalized-equal arguments | lower is better    |
+| `longestToolOnlyStreak`           | longest run of assistant turns with tool calls and no text                  | lower is better    |
+| `maxTurnDurationMs`               | slowest single turn (stall gap on slow commands)                            | lower is better    |
+| `toolCallsByName`                 | per-tool-name call counts                                                   | informational      |
 
 ## Prerequisites
 
@@ -218,7 +228,7 @@ verify.sh   # objective grader (exit 0 = pass)
 - `verify` — grader filename (default `verify.sh`)
 - `bait` — optional `{ metric, threshold }` marking the behavior metric this case reproduces (see the bait table above)
 - `httpFixture` — when `true`, the runner starts a hermetic HTTP server on `127.0.0.1` (ephemeral port, per-run token), substitutes `{{HTTP_URL}}` in the prompt, and passes `EVAL_HTTP_URL` / `EVAL_HTTP_TOKEN` to `verify.sh`. The server is stopped when the case run ends — nothing external is contacted
-- `requireBehaviors` — optional `[{ metric, min?, max? }]`. After the run, each listed metric must fall in range or the case fails. Missing capture with a non-empty list fails closed
+- `requireBehaviors` — optional `[{ metric, min?, max?, directors? }]`. Each applicable metric must fall in range or the case fails. `directors` optionally scopes a bound to a non-empty list of director ids; omission applies it to all directors. Runs without `--director` use `dispatch`. Missing capture with applicable requirements fails closed
 
 ## Results JSON (v3)
 

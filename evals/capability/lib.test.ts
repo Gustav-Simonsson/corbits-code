@@ -89,6 +89,7 @@ function sampleBehaviors(over: Partial<BehaviorMetrics> = {}): BehaviorMetrics {
     networkCommandCount: 0,
     webFetchToolCallCount: 0,
     spawnAgentToolCallCount: 0,
+    parentFileMutationToolCallCount: 0,
     editViaShellCount: 0,
     repeatedSearchCount: 0,
     longestToolOnlyStreak: 0,
@@ -196,6 +197,46 @@ describe("parseCaseJson", () => {
     ]);
   });
 
+  test("preserves a director-scoped behavior requirement", () => {
+    const requirement = {
+      metric: "spawnAgentToolCallCount" as const,
+      min: 1,
+      directors: ["dispatch"],
+    };
+    const c = parseCaseJson(
+      {
+        id: "x",
+        tier: "med",
+        title: "t",
+        fixture: "f",
+        prompt: "p",
+        requireBehaviors: [requirement],
+      },
+      "/c",
+    );
+    expect(c.requireBehaviors).toEqual([requirement]);
+  });
+
+  for (const directors of [[], ["dispatch", 1], "dispatch"]) {
+    test(`rejects invalid behavior directors ${JSON.stringify(directors)}`, () => {
+      expect(() =>
+        parseCaseJson(
+          {
+            id: "x",
+            tier: "med",
+            title: "t",
+            fixture: "f",
+            prompt: "p",
+            requireBehaviors: [
+              { metric: "spawnAgentToolCallCount", min: 1, directors },
+            ],
+          },
+          "/c",
+        ),
+      ).toThrow(/directors/);
+    });
+  }
+
   test("rejects unknown requireBehaviors metric", () => {
     expect(() =>
       parseCaseJson(
@@ -248,6 +289,60 @@ describe("parseCaseJson", () => {
 });
 
 describe("checkBehaviorRequirements", () => {
+  const delegationRequirements = [
+    {
+      metric: "spawnAgentToolCallCount" as const,
+      min: 1,
+      directors: ["dispatch"],
+    },
+    {
+      metric: "parentFileMutationToolCallCount" as const,
+      max: 0,
+      directors: ["dispatch"],
+    },
+  ];
+
+  test("enforces delegation on default and explicit Dispatch", () => {
+    const directEdits = sampleBehaviors({
+      spawnAgentToolCallCount: 0,
+      parentFileMutationToolCallCount: 1,
+    });
+    expect(
+      checkBehaviorRequirements(directEdits, delegationRequirements).ok,
+    ).toBe(false);
+    expect(
+      checkBehaviorRequirements(directEdits, delegationRequirements, "dispatch")
+        .ok,
+    ).toBe(false);
+  });
+
+  test("accepts leaf implementation without relaxing general discipline bounds", () => {
+    const leafEdits = sampleBehaviors({
+      spawnAgentToolCallCount: 0,
+      parentFileMutationToolCallCount: 2,
+    });
+    const requirements = [
+      ...delegationRequirements,
+      { metric: "editViaShellCount" as const, max: 0 },
+    ];
+    expect(checkBehaviorRequirements(leafEdits, requirements, "coder").ok).toBe(
+      true,
+    );
+    const shellEdits = { ...leafEdits, editViaShellCount: 1 };
+    expect(
+      checkBehaviorRequirements(shellEdits, requirements, "coder").ok,
+    ).toBe(false);
+  });
+
+  test("requires capture only when requirements apply to the selected director", () => {
+    expect(
+      checkBehaviorRequirements(null, delegationRequirements, "coder").ok,
+    ).toBe(true);
+    expect(
+      checkBehaviorRequirements(null, delegationRequirements, "dispatch").ok,
+    ).toBe(false);
+  });
+
   test("passes when reqs empty", () => {
     expect(checkBehaviorRequirements(null, [])).toEqual({
       ok: true,

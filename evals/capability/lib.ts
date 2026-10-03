@@ -5,6 +5,7 @@
 
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { type } from "arktype";
 import {
   runWithEvalHttpEnv,
   evalHttpEnvGet,
@@ -57,6 +58,8 @@ export interface BehaviorRequirement {
   metric: NumericBehaviorMetric;
   min?: number;
   max?: number;
+  /** Omitted means all directors; default runs use Dispatch. */
+  directors?: string[];
 }
 
 export interface EvalCase {
@@ -384,10 +387,19 @@ function parseBehaviorRequirement(
   if (min !== undefined && max !== undefined && min > max) {
     throw new Error(`${label}: min (${min}) must be <= max (${max})`);
   }
+  let directors: string[] | undefined;
+  if (raw.directors !== undefined) {
+    const parsed = type("string[]")(raw.directors);
+    if (parsed instanceof type.errors || parsed.length === 0) {
+      throw new Error(`${label}.directors must be a non-empty string array`);
+    }
+    directors = parsed;
+  }
   return {
     metric,
     ...(min !== undefined ? { min } : {}),
     ...(max !== undefined ? { max } : {}),
+    ...(directors !== undefined ? { directors } : {}),
   };
 }
 
@@ -398,8 +410,12 @@ function parseBehaviorRequirement(
 export function checkBehaviorRequirements(
   behaviors: BehaviorMetrics | null,
   reqs: readonly BehaviorRequirement[],
+  director = "dispatch",
 ): { ok: boolean; failures: string[] } {
-  if (reqs.length === 0) return { ok: true, failures: [] };
+  const applicable = reqs.filter(
+    (req) => req.directors === undefined || req.directors.includes(director),
+  );
+  if (applicable.length === 0) return { ok: true, failures: [] };
   if (behaviors === null) {
     return {
       ok: false,
@@ -409,7 +425,7 @@ export function checkBehaviorRequirements(
     };
   }
   const failures: string[] = [];
-  for (const req of reqs) {
+  for (const req of applicable) {
     const value = behaviors[req.metric];
     if (req.min !== undefined && value < req.min) {
       failures.push(`${req.metric}=${value} below min ${req.min}`);

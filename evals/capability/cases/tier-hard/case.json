@@ -7,6 +7,16 @@
   "verify": "verify.sh",
   "requireBehaviors": [
     { "metric": "editViaShellCount", "max": 0 },
-    { "metric": "repeatedSearchCount", "max": 6 }
+    { "metric": "repeatedSearchCount", "max": 6 },
+    {
+      "metric": "spawnAgentToolCallCount",
+      "min": 1,
+      "directors": ["dispatch"]
+    },
+    {
+      "metric": "parentFileMutationToolCallCount",
+      "max": 0,
+      "directors": ["dispatch"]
+    }
   ]
 }

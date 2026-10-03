@@ -32,8 +32,9 @@ import {
 const OPAQUE_SECRET = "opaque credential with spaces?!";
 const RAW_DIAGNOSTIC = `\u001b[31mPOST https://provider.invalid returned\n credential ${OPAQUE_SECRET} in response body\u001b[0m`;
 const NORMALIZED_DIAGNOSTIC = `POST https://provider.invalid returned credential ${OPAQUE_SECRET} in response body`;
-const SAFE_MESSAGE =
-  'test-provider Provider failed (fatal). Try again or switch models with "/model".';
+const SCRUBBED_DIAGNOSTIC =
+  "POST https://provider.invalid returned credential [redacted: configured credential] in response body";
+const SAFE_MESSAGE = `test-provider Provider failed (fatal): ${SCRUBBED_DIAGNOSTIC}. Try again or switch models with "/model".`;
 const provider = {
   providerName: "test-provider",
   baseURL: "http://localhost",
@@ -282,6 +283,35 @@ describe("resolved sub-agent provider failures", () => {
     expect(JSON.stringify(observed)).not.toContain(RAW_DIAGNOSTIC);
   });
 
+  test("xAI 400 mailbox line lifts the nested diagnostic from raw", async () => {
+    const caught = await withResolvedProviderRun(
+      async (run, cwd) => {
+        try {
+          await run({
+            ...runParams(cwd),
+            provider: { ...provider, providerName: "xai/default-2" },
+          });
+        } catch (error) {
+          return error;
+        }
+        throw new Error("expected runSubAgent to reject");
+      },
+      {
+        category: "fatal",
+        message: "Bad Request",
+        statusCode: 400,
+        raw: { error: { message: "Invalid request: recursive JSON schema" } },
+      },
+    );
+    expect(isResolvedProviderFailureError(caught)).toBe(true);
+    expect((caught as ResolvedProviderFailureError).message).toContain(
+      "Invalid request: recursive JSON schema",
+    );
+    expect((caught as ResolvedProviderFailureError).message).not.toContain(
+      "Bad Request",
+    );
+  });
+
   test("split spawn_agent and wait_agents return only the safe message", async () => {
     await withResolvedProviderRun(async (run, cwd) => {
       const { sessions, agentId, waitResult } = await spawnAndWait(
@@ -326,8 +356,7 @@ describe("resolved sub-agent provider failures", () => {
           cwd,
           "rejected provider failure",
         );
-        const safeFailure =
-          "test-provider Provider failed (retryable). Try again.";
+        const safeFailure = `test-provider Provider failed (retryable): ${SCRUBBED_DIAGNOSTIC}. Try again.`;
 
         const serialized = JSON.stringify(waitResult);
         expect(serialized).toContain(safeFailure);
@@ -351,15 +380,14 @@ describe("resolved sub-agent provider failures", () => {
         message: RAW_DIAGNOSTIC,
         statusCode: 500,
       },
-      expected: "test-provider Provider failed (retryable). Try again.",
+      expected: `test-provider Provider failed (retryable): ${SCRUBBED_DIAGNOSTIC}. Try again.`,
     },
     {
       error: { category: "protocol_mismatch", message: RAW_DIAGNOSTIC },
-      expected:
-        'test-provider Provider failed (protocol_mismatch). Switch models with "/model".',
+      expected: `test-provider Provider failed (protocol_mismatch): ${SCRUBBED_DIAGNOSTIC}. Switch models with "/model".`,
     },
   ] satisfies { error: InferenceErrorLike; expected: string }[])(
-    "preserves $error.category guidance without exposing its diagnostic",
+    "preserves $error.category guidance and the scrubbed diagnostic",
     async ({ error, expected }) => {
       const caught = await withResolvedProviderRun(async (run, cwd) => {
         try {
@@ -434,7 +462,7 @@ describe("resolved sub-agent provider failures", () => {
     expect(resolved.category).toBe("retryable");
     expect(resolved.statusCode).toBe(503);
     expect(resolved.message).toBe(
-      "test-provider Provider failed (retryable). Try again.",
+      `test-provider Provider failed (retryable): still failing. Try again.`,
     );
   });
 

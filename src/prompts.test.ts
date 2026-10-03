@@ -8,7 +8,12 @@ test("chat system prompt keeps the routing, spawn-brief, and rules sections", ()
   for (const heading of ["# Role", "# Route", "# Rules", "# Spawn"]) {
     expect(prompt).toContain(heading);
   }
-  for (const field of ["goal", "success_criteria", "do_not", "report_focus"]) {
+  for (const field of [
+    "prompt",
+    "success_criteria",
+    "do_not",
+    "report_focus",
+  ]) {
     expect(prompt).toContain(field);
   }
   expect(prompt).toContain("manage_tasks");

@@ -77,7 +77,7 @@ export function buildHarnessFacts(
           "- Change and remove files with the file-edit tools; shell file-writes and deletions are blocked.",
         ]
       : [
-          "- Change and remove files with the file-edit tools for tiny/single-file/one-route bounded edits. Spawn coder for substantial/multi-file/parallel/specialist work. Docs/design still spawn shakespeare/designer except one-line fixes.",
+          "- Delegate substantive implementation to coder, including single-file bug fixes. DIY file edits are only obvious mechanical corrections needing no diagnosis, design, new behavior, or new tests. Existing exploration is not an exemption. Docs/design spawn shakespeare/designer except mechanical corrections.",
           "- Shell file-writes and deletions are blocked; never use echo/heredoc/sed/rm as a substitute for product tools. Path tools are the DIY surface.",
         ]),
     "- Use the provided tools for file reads/searches instead of shelling out as a substitute.",
@@ -158,7 +158,7 @@ const GUIDELINE_SUB_BLOCKS: Record<
     "- read for file contents; grep or glob to locate code; lsp for symbols, types, references, or call flow before opening large files.",
     ctx.subAgent
       ? "- edit for targeted changes; write for new files or full rewrites; delete to remove files — never echo, heredoc, sed, or rm in the shell for those jobs."
-      : "- edit for targeted DIY tiny/single-file/one-route edits; write for new files or full rewrites; delete to remove files — never shell-write (echo/heredoc/sed/rm). Spawn coder (or a docs director) for substantial/multi-file/parallel/specialist work.",
+      : "- edit/write/delete are the DIY surface only for obvious mechanical corrections needing no diagnosis, design, new behavior, or new tests — never shell-write (echo/heredoc/sed/rm). Delegate substantive work to coder or the relevant docs/design specialist, regardless of file count.",
     "- bash for builds, tests, git, and one-off commands — not for shell find, head-position rg, or recursive grep -r (OOM risk), cat, or messaging the user.",
     ...(ctx.subAgent
       ? []
