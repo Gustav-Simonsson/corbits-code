@@ -714,6 +714,7 @@ describe("exec tool call gate and promoter", () => {
         createToolIndex(() => runner.currentDefinitions()).search(query),
       lookup: (name) =>
         runner.currentDefinitions().find((d) => d.name === name),
+      promote,
     });
     return {
       runner,
@@ -734,7 +735,7 @@ describe("exec tool call gate and promoter", () => {
     );
   }
 
-  test("search does not change the advertised set", async () => {
+  test("search loads the top ranked MCP name onto the advertised tail", async () => {
     const { runner, search, persistCount, computeAdvertised } =
       wireExecDiscovery();
     const before = computeAdvertised(runner.currentDefinitions()).map(
@@ -744,13 +745,13 @@ describe("exec tool call gate and promoter", () => {
 
     if (search.kind !== "string") throw new Error("expected string tool");
     await search.handler({ query: "linear" }, new AbortController().signal);
-    expect(persistCount()).toBe(0);
+    expect(persistCount()).toBeGreaterThan(0);
     expect(
       computeAdvertised(runner.currentDefinitions()).map((d) => d.name),
-    ).toEqual(before);
+    ).toContain("mcp__linear__save_issue");
   });
 
-  test("a subsequent call to a searched-but-not-yet-declared name promotes only that name", async () => {
+  test("search loads matching names onto the advertised tail without loading unrelated tools", async () => {
     const { runner, search, computeAdvertised } = wireExecDiscovery();
     if (search.kind !== "string") throw new Error("expected string tool");
     await search.handler({ query: "linear" }, new AbortController().signal);
@@ -761,18 +762,9 @@ describe("exec tool call gate and promoter", () => {
     const afterSearch = computeAdvertised(runner.currentDefinitions()).map(
       (d) => d.name,
     );
-    expect(afterSearch).not.toContain("mcp__linear__save_issue");
-    expect(afterSearch).not.toContain("present");
-
-    const allowed = await dispatch(runner, "mcp__linear__save_issue");
-    expect(allowed.content).toBe("saved");
-    expect(allowed.isError).toBeUndefined();
-    const names = computeAdvertised(runner.currentDefinitions()).map(
-      (d) => d.name,
-    );
-    expect(names).toContain("mcp__linear__save_issue");
-    expect(names).not.toContain("present");
-    expect(names).not.toContain("plugin__notes__save");
+    expect(afterSearch).toContain("mcp__linear__save_issue");
+    expect(afterSearch).toContain("present");
+    expect(afterSearch).not.toContain("plugin__notes__save");
   });
 
   test("present and plugin names promote only the called name", async () => {

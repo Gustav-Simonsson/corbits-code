@@ -786,10 +786,11 @@ export async function createAgentToolset(
     }),
   ];
 
-  // tool_search ranks over the live runner (set just below). Matches stay
-  // cards-only; the session promoter (wired once advertise/reload exists)
-  // declares a name when the model actually calls it.
+  // tool_search ranks over the live runner (set just below). The top ranked
+  // hits load onto the next infer via the session promoter (wired once
+  // advertise/reload exists); remaining cards stay name+description until call.
   const runnerHolder: { current?: DynamicToolRunner } = {};
+  const promoterHolder: { current?: (names: string[]) => void } = {};
   const toolIndex = createToolIndex(
     () => runnerHolder.current?.currentDefinitions() ?? [],
     advertisedBuiltIns,
@@ -810,6 +811,7 @@ export async function createAgentToolset(
           runnerHolder.current
             ?.currentDefinitions()
             .find((d) => d.name === name),
+        promote: (names) => promoterHolder.current?.(names),
         // Misses wait briefly for in-flight MCP handshakes (bounded, so hung
         // OAuth cannot hang the call) and re-search before answering. Reads the
         // connection map live — declared below, populated by the time any
@@ -1610,6 +1612,7 @@ export async function createAgentToolset(
       mcpServersSource = source;
     },
     setToolPromoter: (promote) => {
+      promoterHolder.current = promote;
       dynamicRunner.setOnUndeclaredCall((name) => promote([name]));
     },
     skills,

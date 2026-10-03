@@ -50,9 +50,9 @@ export type DynamicToolRunner = AgentToolRunner & {
   ): void;
   /**
    * Session promoter used when a known-but-unadvertised call arrives.
-   * Declare that one name (activate + flush), then dispatch. Search must
-   * not pre-promote the match set; this is the only path that grows the
-   * advertised tail mid-session besides director-side triggers.
+   * Declare that one name (activate + flush), then dispatch. Search loads
+   * only the top ranked hits onto the tail; this path covers a called name
+   * that was not in that prefix, plus director-side triggers.
    */
   setOnUndeclaredCall(handler: (name: string) => void): void;
 };
@@ -154,9 +154,10 @@ export function createDynamicToolRunner(
       }
       // A registered tool off the advertised wire: declare that one name
       // (strict providers see it on the session tool list before dispatch),
-      // then run the call. Search does not pre-promote the match set. If the
-      // promoter cannot admit the name (closed overlay, denied family), the
-      // gate still fails and the model is pointed at tool_search.
+      // then run the call. Search already loaded the top ranked hits; this
+      // covers a called name that was not in that prefix. If the promoter
+      // cannot admit the name (closed overlay, denied family), the gate still
+      // fails and the model is pointed at tool_search.
       // Unadvertised mounted builtins (list_dir) stay off the wire — search
       // hides them in favor of glob — so intercept dispatches without
       // flushPromotions rather than advertising until fold.

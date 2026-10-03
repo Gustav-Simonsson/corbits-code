@@ -95,7 +95,7 @@ export function buildHarnessFacts(
     "- Attached images are native multimodal input; inspect them directly unless file-level forensics are requested.",
     ...(dynamicTools
       ? [
-          "- Core tools plus the advertised catalog are resident. Use tool_search to find MCP/plugin tools; the top two cards include the input schema. Call a listed name and it joins the tool list — unused matches stay off it.",
+          "- Core tools plus the advertised catalog are resident. Use tool_search to find MCP/plugin tools; the top two cards include the input schema and join the tool list next turn. Unused matches stay off it.",
           "- Use search_agents before dispatching named specialists or teams (ids and descriptions by default; include_body=true for the loaded system prompt).",
           "- The user may send follow-up messages while workers run; they are queued. Enter delivers at the next parent tool.boundary; Alt+Enter on session-idle. A long parent tool holds that boundary. Update your plan, spawn or adjust workers, and keep the operator informed.",
         ]
@@ -163,7 +163,7 @@ const GUIDELINE_SUB_BLOCKS: Record<
     ...(ctx.subAgent
       ? []
       : [
-          "- tool_search before assuming a plugin or MCP tool exists (top cards include the schema; call a listed name). use_skill to load a skill body.",
+          "- tool_search before assuming a plugin or MCP tool exists (top two join the list next turn). use_skill to load a skill body.",
         ]),
   ],
   askVsProceed: (ctx) => [
@@ -329,7 +329,7 @@ export function buildEnvironmentContext(env: EnvironmentInfo): string {
   if (env.topLevel) lines.push(`Top level: ${env.topLevel}`);
   if (env.mcpServers !== undefined && env.mcpServers.length > 0) {
     lines.push(
-      `MCP: ${env.mcpServers.join(", ")} — tool_search finds their tools (top hits include schema); call a listed name to use it.`,
+      `MCP: ${env.mcpServers.join(", ")} — tool_search finds their tools (top two join the list next turn); call a listed name to use it.`,
     );
   }
   lines.push(`Memory file: ${env.cwd}/${SETTINGS_DIR_NAME}/MEMORY.md`);

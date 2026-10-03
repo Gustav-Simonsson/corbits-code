@@ -392,9 +392,9 @@ export interface AdvertisedToolset {
  * Activation and advertisement are split on purpose. Activating a name opens
  * the call gate at once (isAdvertised flips). flushPromotions copies those
  * names onto the wire array the next infer sends. Promote-on-execute flushes
- * the one called name so strict providers see it declared; tool_search must
- * not flush the match set. Fold is a free cache break — pruneIdlePromotions
- * drops the advertised tail back to the frozen prefix.
+ * the one called name so strict providers see it declared; tool_search flushes
+ * only the top ranked hits (not the whole match set). Fold is a free cache
+ * break — pruneIdlePromotions drops the advertised tail back to the frozen prefix.
  *
  * `pinnedTools` (local settings) merge into the prefix — advertised from the
  * first turn and exempt from activation state, so a resume needs no

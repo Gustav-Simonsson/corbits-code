@@ -19,9 +19,10 @@ import {
 import { canonicalToolName } from "./canonical-tool-name.js";
 
 // Tools whose full schema is always advertised to the model. Everything else is
-// registered but discovered on demand via tool_search, which returns name +
-// description cards only. A found tool's schema joins the wire when the model
-// actually calls it (promote-on-execute). Shared by the system prompt
+// registered but discovered on demand via tool_search, which returns ranked
+// cards and loads the top TOOL_SEARCH_SCHEMA_CARDS onto the next infer's
+// advertised tail (Codex/Pi deferred). Remaining hits stay name + description
+// until the model calls them (promote-on-execute). Shared by the system prompt
 // and the advertised-set gate so the two never drift.
 //
 // `present` is deliberately absent: most sessions never render a view, and at
@@ -252,7 +253,7 @@ export function createActivatedToolTracker(): ActivatedToolTracker {
 export const toolSearchDefinition: ToolDefinition = {
   name: "tool_search",
   description:
-    "Find tools (MCP servers, integrations) and skills by capability. Top two matches include input schema — call a listed name to use it (it then joins the tool list). Unused matches stay off the list. Load a skill body with use_skill.",
+    "Find tools (MCP servers, integrations) and skills by capability. Top two matches include input schema and join the tool list on the next turn. Unused matches stay off the list. Load a skill body with use_skill.",
   inputSchema: {
     type: "object",
     properties: {
@@ -283,7 +284,7 @@ export const TOOL_SEARCH_LIMIT_MAX = 20;
 export const TOOL_SEARCH_SCORE_RATIO = 0.75;
 export const TOOL_SEARCH_DESC_MAX = 160;
 export const TOOL_SEARCH_SCHEMA_MAX = 600;
-const TOOL_SEARCH_SCHEMA_CARDS = 2;
+export const TOOL_SEARCH_SCHEMA_CARDS = 2;
 
 export function createToolIndex(
   getDefs: () => readonly ToolDefinition[],
@@ -335,6 +336,9 @@ export interface ToolSearchDeps {
   // Skill matches as "- name: description" lines; rendered beside tool matches.
   searchSkills?: (query: string) => string[];
   lookup: (name: string) => ToolDefinition | undefined;
+  // Load the top ranked names onto the next infer's advertised tail.
+  // Omitted in unit tests that only assert card text.
+  promote?: (names: string[]) => void;
   // Resolves to the remaining in-flight MCP handshake count after waiting up
   // to `timeoutMs`. The toolset bounds its own wait; the handler re-races
   // below so even a stuck dependency can never hang the call. Omitted callers
@@ -521,9 +525,11 @@ export function createToolSearchTool(deps: ToolSearchDeps): AgentTool {
         return `No tools or skills matched "${query}". Try different keywords describing the capability.`;
       }
       // Ranked cards: top TOOL_SEARCH_SCHEMA_CARDS include a compact input
-      // schema so the first call is formable; the rest are name + description.
-      // Search does not open the call gate or grow the tools array;
-      // promote-on-execute declares a name when the model actually calls it.
+      // schema and are flushed onto the next infer's advertised tail
+      // (Codex/Pi deferred). The rest are name + description; promote-on-execute
+      // still declares a called name that was not in that prefix.
+      const load = names.slice(0, TOOL_SEARCH_SCHEMA_CARDS);
+      if (load.length > 0) deps.promote?.(load);
       const blocks = names.map((name, i) =>
         renderToolCard(deps.lookup(name), name, i < TOOL_SEARCH_SCHEMA_CARDS),
       );
