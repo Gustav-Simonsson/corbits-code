@@ -1,5 +1,6 @@
 import { defined } from "../../testkit/defined.js";
 import { describe, expect, test } from "bun:test";
+import type { ToolDefinition } from "@intx/types/runtime";
 import { presentDefinition } from "./director.js";
 import { manageTasksDefinition } from "./tasks.js";
 import {
@@ -152,7 +153,6 @@ describe("normalizeToolDefinitionsForProvider", () => {
     for (const ctx of [
       { providerName: "anthropic", model: "claude-sonnet-4" },
       { providerName: "openai", model: "gpt-5.6" },
-      { providerName: "xai/default", model: "grok-4.5" },
       { providerName: "opencode-go", model: "gpt-5.1" },
     ] as const) {
       const out = normalizeToolDefinitionsForProvider(defs, ctx);
@@ -161,6 +161,233 @@ describe("normalizeToolDefinitionsForProvider", () => {
       expect(schemaHasRef(present.inputSchema)).toBe(true);
       expect(present.inputSchema).toBe(recursivePresent.inputSchema);
     }
+  });
+
+  test("grok sanitizes untyped properties and strips $schema", () => {
+    const untyped: ToolDefinition = {
+      name: "submit_result",
+      description: "test",
+      inputSchema: {
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: {
+          turn_token: { type: "string" },
+          result: { description: "The structured result payload." },
+        },
+        required: ["turn_token", "result"],
+      },
+    };
+    const out = normalizeToolDefinitionsForProvider([untyped], {
+      providerName: "xai/default-2",
+      model: "grok-4.6",
+    });
+    const schema = defined(out[0]).inputSchema as {
+      $schema?: unknown;
+      properties?: {
+        result?: { type?: string; additionalProperties?: boolean };
+      };
+    };
+    expect(schema.$schema).toBeUndefined();
+    expect(schema.properties?.result?.type).toBe("object");
+    expect(schema.properties?.result?.additionalProperties).toBe(true);
+  });
+
+  test("grok sanitizer leaves anthropic identity and typed properties alone", () => {
+    const typed: ToolDefinition = {
+      name: "ask_director",
+      description: "test",
+      inputSchema: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "q" },
+        },
+        required: ["question"],
+      },
+    };
+    const input = [typed];
+    const grok = normalizeToolDefinitionsForProvider(input, {
+      providerName: "xai/default",
+      model: "grok-4.6",
+    });
+    const anthropic = normalizeToolDefinitionsForProvider(input, {
+      providerName: "anthropic",
+      model: "claude-sonnet-4",
+    });
+    expect(anthropic).toBe(input);
+    expect(grok).not.toBe(input);
+    const grokQuestion = (
+      defined(grok[0]).inputSchema as {
+        properties?: { question?: { type?: string } };
+      }
+    ).properties?.question;
+    expect(grokQuestion?.type).toBe("string");
+  });
+
+  test.each([
+    { values: ["open", "closed"], types: ["string"] },
+    { values: [1, 2.5], types: ["number"] },
+    { values: [true, false], types: ["boolean"] },
+    { values: [null], types: ["null"] },
+    { values: [[1], [2]], types: ["array"] },
+    { values: [{ state: "open" }], types: ["object"] },
+    {
+      values: ["open", null, 1, true, [], {}],
+      types: ["string", "null", "number", "boolean", "array", "object"],
+    },
+  ])("grok preserves enum values with types $types", ({ values, types }) => {
+    const def: ToolDefinition = {
+      name: "mcp__tracker__set_state",
+      description: "Set state",
+      inputSchema: {
+        type: "object",
+        properties: { state: { enum: values } },
+        required: ["state"],
+      },
+    };
+    const before = structuredClone(def);
+    const normalized = defined(
+      normalizeToolDefinitionsForProvider([def], {
+        providerName: "xai/default",
+        model: "grok-4.6",
+      })[0],
+    );
+    const schema = normalized.inputSchema as {
+      properties: {
+        state: {
+          enum: unknown[];
+          type?: string;
+          anyOf?: { type: string }[];
+        };
+      };
+    };
+    const state = schema.properties.state;
+    expect(state.enum).toEqual([...values]);
+    expect(state.anyOf?.map((branch) => branch.type) ?? [state.type]).toEqual([
+      ...types,
+    ]);
+    expect(def).toEqual(before);
+    expect(
+      normalizeToolDefinitionsForProvider([def], {
+        providerName: "anthropic",
+        model: "claude-sonnet-4",
+      })[0],
+    ).toBe(def);
+  });
+
+  test.each([
+    { value: "open", expectedType: "string" },
+    { value: 1.5, expectedType: "number" },
+    { value: true, expectedType: "boolean" },
+    { value: null, expectedType: "null" },
+    { value: ["open"], expectedType: "array" },
+    { value: { state: "open" }, expectedType: "object" },
+  ])(
+    "grok preserves $expectedType const payloads",
+    ({ value, expectedType }) => {
+      const def: ToolDefinition = {
+        name: "mcp__tracker__set_state",
+        description: "Set state",
+        inputSchema: {
+          type: "object",
+          properties: { state: { const: value } },
+          required: ["state"],
+        },
+      };
+      const before = structuredClone(def);
+      const normalized = defined(
+        normalizeToolDefinitionsForProvider([def], {
+          providerName: "xai/default",
+          model: "grok-4.6",
+        })[0],
+      );
+      expect(normalized.inputSchema).toMatchObject({
+        properties: { state: { const: value, type: expectedType } },
+      });
+      expect(def).toEqual(before);
+    },
+  );
+
+  test("grok sanitizes schema nodes without rewriting literal payloads or property names", () => {
+    const literal = {
+      $schema: "literal schema value",
+      $id: "literal id value",
+      properties: { payload: { description: "literal, not a schema" } },
+    };
+    const def: ToolDefinition = {
+      name: "mcp__schema__save",
+      description: "Save a schema document",
+      inputSchema: {
+        type: "object",
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        $id: "https://example.invalid/tool",
+        properties: {
+          $schema: { type: "string" },
+          $id: { type: "string" },
+          document: {
+            enum: [literal],
+            const: literal,
+            default: literal,
+            examples: [literal],
+          },
+          entries: {
+            type: "array",
+            items: {
+              $id: "https://example.invalid/entry",
+              type: "object",
+              properties: { payload: { description: "untyped payload" } },
+            },
+          },
+        },
+        $defs: {
+          $schema: {
+            type: "object",
+            properties: { payload: { description: "untyped definition" } },
+          },
+        },
+      },
+    };
+    const before = structuredClone(def);
+    const normalized = defined(
+      normalizeToolDefinitionsForProvider([def], {
+        providerName: "xai/default",
+        model: "grok-4.6",
+      })[0],
+    );
+    expect(normalized.inputSchema).toMatchObject({
+      properties: {
+        $schema: { type: "string" },
+        $id: { type: "string" },
+        document: {
+          enum: [literal],
+          const: literal,
+          default: literal,
+          examples: [literal],
+        },
+        entries: {
+          items: {
+            properties: {
+              payload: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      },
+      $defs: {
+        $schema: {
+          properties: {
+            payload: { type: "object", additionalProperties: true },
+          },
+        },
+      },
+    });
+    const schema = normalized.inputSchema as {
+      $schema?: unknown;
+      $id?: unknown;
+      properties: { entries: { items: { $id?: unknown } } };
+    };
+    expect(schema.$schema).toBeUndefined();
+    expect(schema.$id).toBeUndefined();
+    expect(schema.properties.entries.items.$id).toBeUndefined();
+    expect(def).toEqual(before);
   });
 
   test("kimi rewrite leaves non-present tools untouched", () => {

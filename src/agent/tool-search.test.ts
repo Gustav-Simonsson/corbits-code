@@ -9,6 +9,7 @@ import {
   createActivatedToolTracker,
   advertisedTools,
   advertisedToolNamesForSessionMode,
+  advertisedToolNamesForWorker,
   coreToolNamesForSessionMode,
   CORE_TOOL_NAMES,
   CATALOG_TOOL_NAMES,
@@ -22,6 +23,12 @@ import {
   toolSearchDefinition,
   type ToolAvailability,
 } from "./tool-search.js";
+import {
+  BUILD_TOOLS,
+  DOCS_TOOLS,
+  ORCHESTRATOR_TOOLS,
+  READ_TOOLS,
+} from "./directors/tool-sets.js";
 
 const FULL_AVAILABILITY: ToolAvailability = {
   languageServerAvailable: true,
@@ -430,7 +437,9 @@ describe("createToolSearchTool", () => {
       await call(tool, { query: "linear issue", limit: 100 }),
     );
     expect(listed).toHaveLength(TOOL_SEARCH_LIMIT_MAX);
-    expect(toolSearchDefinition.inputSchema).toMatchObject({
+    // Bun's nested asymmetric matcher mutates its received object; keep the
+    // canonical definition JSON-serializable for later worker tests.
+    expect(structuredClone(toolSearchDefinition.inputSchema)).toMatchObject({
       properties: {
         limit: {
           description: expect.stringContaining("hard cap 20"),
@@ -950,6 +959,64 @@ describe("promote-on-execute", () => {
     expect(promoted).toEqual([]);
     expect(advertisedNames(advertised, runner)).toEqual(before);
     expect(advertisedNames(advertised, runner)).not.toContain("list_dir");
+  });
+});
+
+describe("advertisedToolNamesForWorker", () => {
+  test("a custom nested orchestrator without an allowlist advertises its mounted fleet verbs", () => {
+    const nested = advertisedToolNamesForWorker({ orchestrator: true });
+    expect(nested).toContain("spawn_agent");
+    expect(nested).toContain("send_input");
+    expect(nested).not.toContain("search_agents");
+    expect(nested).not.toContain("ask_operator");
+    const restricted = advertisedToolNamesForWorker({
+      orchestrator: true,
+      allow: READ_TOOLS,
+    });
+    expect(restricted).not.toContain("spawn_agent");
+  });
+
+  test("explorer/read allowlist has no writes and includes tool_search", () => {
+    const leaf = advertisedToolNamesForWorker({ allow: READ_TOOLS });
+    const dispatch = advertisedToolNamesForSessionMode(
+      "orchestrator",
+      FULL_AVAILABILITY,
+    );
+    expect(leaf).toContain("tool_search");
+    expect(leaf).toContain("ask_director");
+    expect(leaf).toContain("submit_result");
+    expect(leaf).toContain("read_file");
+    expect(leaf).toContain("run_shell");
+    expect(leaf).not.toContain("write_file");
+    expect(leaf).not.toContain("spawn_agent");
+    expect(leaf).not.toContain("search_agents");
+    expect(leaf).not.toContain("ask_operator");
+    expect(leaf.every((name) => !name.startsWith("mcp__"))).toBe(true);
+    expect(leaf.length).toBeLessThan(dispatch.length);
+  });
+
+  test("coder/build allowlist includes path writes, not fleet verbs", () => {
+    const coder = advertisedToolNamesForWorker({ allow: BUILD_TOOLS });
+    expect(coder).toContain("write_file");
+    expect(coder).toContain("edit_file");
+    expect(coder).toContain("tool_search");
+    expect(coder).not.toContain("spawn_agent");
+  });
+
+  test("docs allowlist omits run_shell", () => {
+    const docs = advertisedToolNamesForWorker({ allow: DOCS_TOOLS });
+    expect(docs).toContain("write_file");
+    expect(docs).not.toContain("run_shell");
+    expect(docs).toContain("tool_search");
+  });
+
+  test("nested orchestrator allowlist adds fleet verbs but not search_agents", () => {
+    const orch = advertisedToolNamesForWorker({ allow: ORCHESTRATOR_TOOLS });
+    expect(orch).toContain("spawn_agent");
+    expect(orch).toContain("send_input");
+    expect(orch).toContain("tool_search");
+    expect(orch).not.toContain("search_agents");
+    expect(orch).not.toContain("ask_operator");
   });
 });
 

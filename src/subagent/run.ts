@@ -42,7 +42,10 @@ import {
 } from "../config/inference-sources.js";
 import { readSourceCredentialMaterial } from "../config/source-credentials.js";
 import { sanitizeDiagnosticValue } from "../diagnostic-sanitize.js";
-import { assembleInferenceBase } from "../session/assemble-runtime.js";
+import {
+  assembleInferenceBase,
+  createAdvertisedToolset,
+} from "../session/assemble-runtime.js";
 import { advertiseShellGuardTimeout } from "../plugins/shell-guard-plugin.js";
 import { advertiseEditFileLineRange } from "../plugins/edit-file-line-range.js";
 import { createWebFetchTool } from "../tools/web-fetch.js";
@@ -65,7 +68,6 @@ import {
   NOOP_INTERVENTION_SINK,
   type InterventionSink,
 } from "./intervention-log.js";
-import { normalizeToolDefinitionsForProvider } from "../agent/tool-schema-normalize.js";
 import { canonicalToolName } from "../agent/canonical-tool-name.js";
 import { isMcpToolName } from "../mcp/tool-name.js";
 import { createApplyPatchTool } from "../agent/apply-patch-tool.js";
@@ -82,6 +84,11 @@ import {
   toolProfileForModel,
   withAuthzParityDefinitions,
 } from "../agent/tool-aliases.js";
+import {
+  advertisedToolNamesForWorker,
+  createToolIndex,
+  createToolSearchTool,
+} from "../agent/tool-search.js";
 
 import {
   buildCompactionContinuationMessage,
@@ -568,7 +575,11 @@ const submitResultDefinition: ToolDefinition = {
         type: "string",
         description: "Turn token from the dispatch brief.",
       },
-      result: { description: "The structured result payload." },
+      result: {
+        type: "object",
+        additionalProperties: true,
+        description: "The structured result payload.",
+      },
     },
     required: ["turn_token", "result"],
   },
@@ -1116,6 +1127,56 @@ async function runSubAgentInner(
       }
     }
 
+    const workerPrefix = advertisedToolNamesForWorker({
+      orchestrator: params.orchestrator === true,
+      ...(params.capabilities?.mode === "allow"
+        ? { allow: params.capabilities.tools }
+        : {}),
+    });
+    const advertisedSet = createAdvertisedToolset({
+      sessionMode: "orchestrator",
+      toolAvailability: {
+        languageServerAvailable: false,
+        operatorAvailable: false,
+      },
+      getProvider: () => ({
+        providerName: params.provider.providerName,
+        model: params.provider.model,
+      }),
+      builtInPrefix: workerPrefix,
+      ...(params.requiresTools !== undefined && params.requiresTools.length > 0
+        ? { pinnedTools: params.requiresTools }
+        : {}),
+    });
+    const runnerHolder: {
+      current?: ReturnType<typeof createDynamicToolRunner>;
+    } = {};
+    let workerDirector: SubAgentDirector | undefined;
+    const allMountedDefs = (): ToolDefinition[] =>
+      runnerHolder.current?.currentDefinitions() ??
+      tools.map((tool) => tool.definition);
+    const refreshAdvertised = (): void => {
+      advertisedSet.flushPromotions();
+      workerDirector?.updateToolDefinitions(
+        advertisedSet.computeAdvertised(allMountedDefs()),
+      );
+    };
+    const toolIndex = createToolIndex(allMountedDefs, [
+      ...workerPrefix,
+      ...(params.requiresTools ?? []),
+    ]);
+    tools = [
+      ...tools,
+      createToolSearchTool({
+        search: (query, limit) => toolIndex.search(query, limit),
+        lookup: (name) => allMountedDefs().find((def) => def.name === name),
+        promote: (names) => {
+          advertisedSet.activated.activate(names);
+          refreshAdvertised();
+        },
+      }),
+    ];
+
     tools = wrapAgentToolsWithResultTruncation(tools, {
       getBlobWriter: () => childBlobWriter,
       getContextDir: () => childContextDir,
@@ -1139,12 +1200,15 @@ async function runSubAgentInner(
       ...(attachedSection !== undefined ? [attachedSection] : []),
     ];
     const toolProfile = toolProfileForModel(params.provider);
+    const advertisedDefs = advertisedSet.computeAdvertised(
+      tools.map((t) => t.definition),
+    );
     // The prompt lists what the wire carries: on gpt the file tools fold into
     // apply_patch, which is already mounted, so names can repeat.
     const toolNames = [
       ...new Set(
         foldFileToolNames(
-          tools.map((t) => t.definition.name),
+          advertisedDefs.map((d) => d.name),
           toolProfile,
         ).map((name) => advertisedToolName(name, toolProfile)),
       ),
@@ -1189,24 +1253,20 @@ async function runSubAgentInner(
     // modelFamilyPolicy is resolved above at the skill mount; reused here for
     // stall timing and wire-schema normalization.
 
-    // Family-gate wire schemas the same way main sessions do (kimi/muse present rewrite).
-    // Sub-agent toolsets currently omit `present` (main-session only); normalize is
-    // still applied so a future present on leaf tools cannot reintroduce $ref cycles.
+    // Family-gate wire schemas the same way main sessions do. Worker advertise
+    // uses a smaller prefix plus tool_search; computeAdvertised already
+    // normalizes for kimi/muse/grok.
     const directorDef = defineDirector({
       id: `${ID_PREFIX}/subagent`,
       configSchema: type({}),
       factory: (_config, _env, agentCtx) => {
         const director = new SubAgentDirector(
           agentCtx.systemPrompt,
-          normalizeToolDefinitionsForProvider(
+          advertisedSet.computeAdvertised(
             projectToolDefinitions(
               foldFileToolDefinitions(agentCtx.toolDefinitions, toolProfile),
               toolProfile,
             ),
-            {
-              providerName: params.provider.providerName,
-              model: params.provider.model,
-            },
           ),
           requestContinuation,
           modelFamilyPolicy.subAgentStallTimeoutMs,
@@ -1223,6 +1283,7 @@ async function runSubAgentInner(
         director.observeForcedStop((reason) => {
           directorForcedStopReason = reason;
         });
+        workerDirector = director;
         director.observeAskPending(() => askDirectorState.pending);
         director.observeInterventions((event) => {
           interventions(event);
@@ -1271,6 +1332,14 @@ async function runSubAgentInner(
           tools,
           toolWatchdogFromSettings(params.settings),
         );
+        runnerHolder.current = runner;
+        runner.setCallGate(advertisedSet.isAdvertised, {
+          isActivated: (name) => advertisedSet.activated.has(name),
+        });
+        runner.setOnUndeclaredCall((name) => {
+          advertisedSet.activated.activate([name]);
+          refreshAdvertised();
+        });
         return withAuthzParityDefinitions({
           ...runner,
           run: (call, signal) =>
