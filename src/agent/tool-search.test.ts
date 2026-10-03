@@ -23,6 +23,12 @@ import {
   toolSearchDefinition,
   type ToolAvailability,
 } from "./tool-search.js";
+import {
+  BUILD_TOOLS,
+  DOCS_TOOLS,
+  ORCHESTRATOR_TOOLS,
+  READ_TOOLS,
+} from "./directors/tool-sets.js";
 
 const FULL_AVAILABILITY: ToolAvailability = {
   languageServerAvailable: true,
@@ -955,8 +961,8 @@ describe("promote-on-execute", () => {
 });
 
 describe("advertisedToolNamesForWorker", () => {
-  test("leaf prefix is smaller than dispatch and includes tool_search", () => {
-    const leaf = advertisedToolNamesForWorker({ orchestrator: false });
+  test("explorer/read allowlist has no writes and includes tool_search", () => {
+    const leaf = advertisedToolNamesForWorker({ allow: READ_TOOLS });
     const dispatch = advertisedToolNamesForSessionMode(
       "orchestrator",
       FULL_AVAILABILITY,
@@ -964,19 +970,33 @@ describe("advertisedToolNamesForWorker", () => {
     expect(leaf).toContain("tool_search");
     expect(leaf).toContain("ask_director");
     expect(leaf).toContain("submit_result");
-    expect(leaf).toContain("skill_search");
-    expect(leaf).toContain("read");
-    expect(leaf).toContain("bash");
+    expect(leaf).toContain("read_file");
+    expect(leaf).toContain("run_shell");
+    expect(leaf).not.toContain("write_file");
     expect(leaf).not.toContain("spawn_agent");
     expect(leaf).not.toContain("search_agents");
     expect(leaf).not.toContain("ask_operator");
-    expect(leaf).not.toContain("wait_agents");
     expect(leaf.every((name) => !name.startsWith("mcp__"))).toBe(true);
     expect(leaf.length).toBeLessThan(dispatch.length);
   });
 
-  test("nested orchestrator adds fleet verbs but not search_agents", () => {
-    const orch = advertisedToolNamesForWorker({ orchestrator: true });
+  test("coder/build allowlist includes path writes, not fleet verbs", () => {
+    const coder = advertisedToolNamesForWorker({ allow: BUILD_TOOLS });
+    expect(coder).toContain("write_file");
+    expect(coder).toContain("edit_file");
+    expect(coder).toContain("tool_search");
+    expect(coder).not.toContain("spawn_agent");
+  });
+
+  test("docs allowlist omits run_shell", () => {
+    const docs = advertisedToolNamesForWorker({ allow: DOCS_TOOLS });
+    expect(docs).toContain("write_file");
+    expect(docs).not.toContain("run_shell");
+    expect(docs).toContain("tool_search");
+  });
+
+  test("nested orchestrator allowlist adds fleet verbs but not search_agents", () => {
+    const orch = advertisedToolNamesForWorker({ allow: ORCHESTRATOR_TOOLS });
     expect(orch).toContain("spawn_agent");
     expect(orch).toContain("send_input");
     expect(orch).toContain("tool_search");

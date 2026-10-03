@@ -17,6 +17,7 @@ import {
   type ToolProfile,
 } from "./tool-aliases.js";
 import { canonicalToolName } from "./canonical-tool-name.js";
+import { READ_TOOLS } from "./directors/tool-sets.js";
 
 // Tools whose full schema is always advertised to the model. Everything else is
 // registered but discovered on demand via tool_search, which returns ranked
@@ -120,45 +121,31 @@ export function advertisedToolNamesForSessionMode(
   ];
 }
 
-const WORKER_LEAF_EXTRA: readonly string[] = [
+const WORKER_WIRE_ALWAYS: readonly string[] = [
+  "tool_search",
   "ask_director",
   "submit_result",
-  "skill_search",
-];
-
-const WORKER_ORCH_EXTRA: readonly string[] = [
-  "spawn_agent",
-  "list_agents",
-  "close_agent",
-  "resume_agent",
-  "interrupt_agent",
-  "send_input",
 ];
 
 /**
- * Advertised wire prefix for a spawned worker. Smaller than dispatch: no
- * `ask_operator`, no `search_agents`, no fleet verbs on leaves. Nested
- * orchestrators add the fleet verbs they actually mount. MCP stays off this
- * list until tool_search / promote-on-execute.
+ * Advertised wire prefix for a spawned worker: the director's tool allowlist
+ * plus `tool_search` and the leaf reporting channel. No shared preset across
+ * roles. MCP stays off this list until tool_search / promote-on-execute.
+ * Model-specific names (apply_patch) fold later via tool profile.
  */
 export function advertisedToolNamesForWorker(opts: {
-  orchestrator: boolean;
+  allow?: readonly string[];
   languageServerAvailable?: boolean;
 }): readonly string[] {
-  const core = CORE_TOOL_NAMES.filter((name) => {
-    if (name === "ask_operator") return false;
-    if (name === "search_agents") return false;
-    if (name === "wait_agents") return false;
-    if (name === "lsp") return opts.languageServerAvailable === true;
-    if (ORCHESTRATOR_ONLY_TOOL_NAMES.includes(name)) return opts.orchestrator;
-    return true;
-  });
-  const extra = opts.orchestrator
-    ? [...WORKER_LEAF_EXTRA, ...WORKER_ORCH_EXTRA]
-    : WORKER_LEAF_EXTRA;
+  const base =
+    opts.allow !== undefined && opts.allow.length > 0 ? opts.allow : READ_TOOLS;
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const name of [...core, ...CATALOG_TOOL_NAMES, ...extra]) {
+  for (const name of [...base, ...WORKER_WIRE_ALWAYS]) {
+    if (name === "ask_operator" || name === "search_agents") continue;
+    if (name === "wait_agents") continue;
+    if (name === "lsp" && opts.languageServerAvailable !== true) continue;
+    if (name.startsWith("mcp__")) continue;
     if (seen.has(name)) continue;
     seen.add(name);
     out.push(name);

@@ -101,9 +101,9 @@ describe("director registry", () => {
     expect(explorer.description).toContain("agent id: explorer");
     expect(explorer.capabilities?.mode).toBe("allow");
     expect(explorer.capabilities?.tools).toContain("read_file");
-    expect(explorer.capabilities?.tools).toContain("write_file");
-    expect(explorer.capabilities?.tools).toContain("edit_file");
-    expect(explorer.capabilities?.tools).toContain("delete_file");
+    expect(explorer.capabilities?.tools).not.toContain("write_file");
+    expect(explorer.capabilities?.tools).not.toContain("edit_file");
+    expect(explorer.capabilities?.tools).not.toContain("delete_file");
     expect(explorer.orchestrator).toBe(false);
 
     const reviewer = packageToProfile(DIRECTOR_REGISTRY.reviewer);
@@ -135,8 +135,13 @@ describe("director registry", () => {
     expect(spawners).toEqual(["dispatch"]);
   });
 
-  test("closed directors mount product write tools", () => {
+  test("explorer is read-only; other closed directors mount product writes", () => {
+    const explorerAllow = DIRECTOR_REGISTRY.explorer.tools?.allow ?? [];
+    expect(explorerAllow).not.toContain("write_file");
+    expect(explorerAllow).not.toContain("edit_file");
+    expect(explorerAllow).not.toContain("delete_file");
     for (const id of DIRECTOR_IDS) {
+      if (id === "explorer") continue;
       const allow = DIRECTOR_REGISTRY[id].tools?.allow ?? [];
       expect(allow).toContain("write_file");
       expect(allow).toContain("edit_file");
