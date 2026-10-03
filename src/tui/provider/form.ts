@@ -4,6 +4,7 @@
  */
 
 import { UI } from "../theme.js";
+import { ProviderInferenceOptionSchemas } from "../../config/provider-inference-options.js";
 import { type ProviderField, stepLabel, type SetupStep } from "./steps.js";
 import type {
   ProviderChoice,
@@ -17,6 +18,10 @@ export const PROVIDER_FIELD_HINTS: Record<ProviderField, string> = {
   baseURL: "https://api.openai.com/v1",
   apiKey: "sk-… (blank for keyless/local)",
   model: "gpt-4o",
+  contextWindow: "128000 (optional)",
+  maxTokens: "8192 (optional)",
+  temperature: "0.7 (optional)",
+  topP: "0.9 (optional)",
 };
 
 /** Placeholder for the OAuth account-name step, which edits `oauthProfile`. */
@@ -43,9 +48,20 @@ export function maskEcho(value: string): string {
   return MASK_CHAR.repeat([...value].length);
 }
 
-/** apiKey is optional — blank means a keyless local provider (e.g. Ollama). */
+/**
+ * The four optional token/sampling steps accept a blank (leave unset) or a
+ * finite number in range. Everything else is ready once it is non-blank.
+ */
 export function stepReady(step: SetupStep, value: string): boolean {
-  return step === "apiKey" || value.trim().length > 0;
+  if (step === "apiKey") return true;
+  if (!(step in ProviderInferenceOptionSchemas)) return value.trim().length > 0;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return true;
+  const schema =
+    ProviderInferenceOptionSchemas[
+      step as keyof typeof ProviderInferenceOptionSchemas
+    ];
+  return schema.allows(Number(trimmed));
 }
 
 /**
@@ -117,6 +133,18 @@ function settledValue(
       : values.name;
   }
   if (step === "baseURL") return values.baseURL;
+  if (step === "contextWindow") {
+    return values.contextWindow.trim().length > 0 ? values.contextWindow : "—";
+  }
+  if (step === "maxTokens") {
+    return values.maxTokens.trim().length > 0 ? values.maxTokens : "—";
+  }
+  if (step === "temperature") {
+    return values.temperature.trim().length > 0 ? values.temperature : "—";
+  }
+  if (step === "topP") {
+    return values.topP.trim().length > 0 ? values.topP : "—";
+  }
   return values.model;
 }
 

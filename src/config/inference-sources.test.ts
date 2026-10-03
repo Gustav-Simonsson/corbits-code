@@ -205,6 +205,67 @@ describe("contextWindow / maxTokens split (CL-7784)", () => {
   });
 });
 
+describe("custom provider token/sampling knobs flow into the source", () => {
+  test("maxTokens/temperature/topP from provider settings reach defaults", () => {
+    const entryCatalog: ProviderCatalogEntry[] = [
+      {
+        name: "custom",
+        baseURL: "https://api.example.com/v1",
+        apiKey: "sk-key",
+        models: ["m"],
+      },
+    ];
+    const settings: Settings = {
+      providers: {
+        custom: {
+          baseURL: "https://api.example.com/v1",
+          apiKey: "sk-key",
+          models: ["m"],
+          maxTokens: 4096,
+          temperature: 0.7,
+        },
+      },
+    };
+    const source = buildInferenceSourceForRef(
+      { provider: "custom", model: "m" },
+      { sessionId: "sess-1", catalog: entryCatalog },
+      settings,
+    );
+    expect(source).not.toBeNull();
+    expect(source?.defaults?.maxTokens).toBe(4096);
+    expect(source?.defaults?.providerOptions).toEqual({ temperature: 0.7 });
+  });
+
+  test("topP flows as top_p and overrides nothing else", () => {
+    const entryCatalog: ProviderCatalogEntry[] = [
+      {
+        name: "custom",
+        baseURL: "https://api.example.com/v1",
+        apiKey: "sk-key",
+        models: ["m"],
+        topP: 0.9,
+      },
+    ];
+    const source = buildInferenceSourceForRef(
+      { provider: "custom", model: "m" },
+      { sessionId: "sess-1", catalog: entryCatalog },
+      undefined,
+    );
+    expect(source?.defaults?.maxTokens).toBe(SOURCE_MAX_TOKENS);
+    expect(source?.defaults?.providerOptions).toEqual({ top_p: 0.9 });
+  });
+
+  test("unset knobs leave the default maxTokens and no providerOptions", () => {
+    const source = buildInferenceSourceForRef(
+      { provider: "fp", model: "fp-large" },
+      ctx(),
+      undefined,
+    );
+    expect(source?.defaults?.maxTokens).toBe(SOURCE_MAX_TOKENS);
+    expect(source?.defaults?.providerOptions).toBeUndefined();
+  });
+});
+
 describe("OpenAI reasoning max_completion_tokens quirk (CL-7785)", () => {
   const openaiApi = firstClassProviderById("openai")?.paths?.find(
     (p) => p.id === "api",

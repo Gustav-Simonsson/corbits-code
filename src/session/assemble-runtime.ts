@@ -40,6 +40,7 @@ import {
   resolveLocalSettingsPath,
   type LocalSettings,
 } from "../config/settings.js";
+import { refreshProviderContextWindows } from "../config/index.js";
 import type { SessionMode } from "../config/session-mode.js";
 import { readSourceCredentialMaterial } from "../config/source-credentials.js";
 import {
@@ -358,6 +359,14 @@ export function resolveLiveSessionSources(
   if (selected === undefined) {
     throw new Error("Selected inference source was not assembled");
   }
+  // Candidate sources and workers must not steal the primary's bare-model
+  // overrides; only the actual live-session rebuild updates that precedence.
+  refreshProviderContextWindows(
+    config.settings,
+    config.providers,
+    config.providerName,
+    config.model,
+  );
   return { sources, defaultSource, selected };
 }
 
