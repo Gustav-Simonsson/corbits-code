@@ -20,6 +20,96 @@ release that deserves narration. Passing `--notes <file>` overrides both for
 the GitHub body. Sections below this line predate generation and were written
 by hand.
 
+## [0.3.33] - 2026-10-03
+
+### What's Changed
+* fix(inference): surface Codex nested 400 diagnostics by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1228
+* feat(subagent): verify requires_tools pre-spawn with fail-closed preflight by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1224
+* fix(permissions): resolve advertised tool aliases in approval snapshots by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1223
+* feat(permission): add harness-owned worker grant envelope by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1222
+* refactor(tui): use native fenced-code highlighting by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1219
+* build(bin): embed sourcemaps in the compiled binary by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1213
+* fix(resume): cap history hydrate to the newest retained rows by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1211
+* chore(deps): bump OpenTUI packages to 0.5.12 by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1209
+* CL-8988: refresh OAuth credential before continuation infers by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1208
+* fix(tui): route leading-slash lines by registered command id by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1205
+* CL-9341: fingerprint hidden-shell declines through the canonical coercion by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1204
+* fix(permission): deny dot-dot walk-out from directory grants by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1200
+* Keep stored session model on resume unless flags override by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1198
+* feat(telemetry): emit session_end for exec and surface on cli_start by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1197
+* feat(agent): add astra-only tool-evasion residual by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1195
+* fix(auth): recover stale credential file locks via PID liveness by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1194
+* feat(cli): add --version and -V flags by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1230
+* feat(mcp): project Linear write and list results by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1231
+* feat(read): diagnose blocked file inspection with a next action by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1232
+* fix(subagent): digest mailbox reports instead of pasting them whole by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1233
+* CL-8991: grant path trust before importing add-by-path plugin code by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1199
+* fix(session): surface compaction summarizer stub fallback by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1235
+* fix(compaction): keep standing output-format tokens whole on the spine by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1236
+* feat(tools): promote discovered tools only on execute by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1226
+* fix(read): treat utf-8 pdf names as text and quote pdftotext by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1238
+* fix(mcp): keep empty list envelopes and array structured content by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1239
+* feat(compaction): fold to a token-capped tail, not recent turns by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1227
+* fix(subagent): name mailbox digest blobs for parent fetch by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1240
+* fix(tools): persist idle promotion prune after fold by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1241
+* fix(compaction): keep standing output tokens whole across goal caps by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1242
+* fix(subagent): count mailbox spill remaining as omitted body by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1243
+* fix(session): defer stub fallback notice until the fold commits by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1244
+* fix(compaction): keep operator ellipsis and harvest substring tokens by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1246
+* fix(session): defer stub notice until after the completeness gate by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1247
+* fix(compaction): strip glued spine sentinel from long standing tokens by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1248
+* fix(compaction): strip glued sentinel even when the token ends with dots by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1249
+* fix(session): skip handoff record when abort discards a stub by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1250
+* fix(session): latch abort across compaction controller reset by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1251
+* fix(resume): hydrate only the retained transcript tail by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1256
+* fix(resume): cap transcript hydration in rows after fold by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1257
+* fix(resume): paint truncated history without faking the log base by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1258
+* fix(secret-guard): fail closed on dollar-prefixed secret paths by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1286
+* feat(telemetry): report auth success and MCP connection outcomes by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1288
+* fix(exec): prompt on stdin TTY even with stdout piped by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1289
+* perf(tui): avoid reparsing frozen streaming markdown by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1290
+* feat(tui): add automatic light theme selection by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1287
+* fix(mcp): keep PKCE verifier in provider memory instead of disk by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1285
+* perf(subagent): reuse parent setup across spawns by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1291
+* test(evals): add director-graded cases on the dir-shop fixture by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1245
+* fix(subagent): keep fleet-dry parent mail to a digest plus blob by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1237
+* feat(agent): project wire tool names per model family by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1253
+* feat(agent): mount apply_patch tool for the gpt family by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1254
+* feat(agent): streamline prompts, merge skill search, and consolidate director fleet by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1255
+* fix(agent): guard apply_patch with secret-guard and realpath bound by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1259
+* refactor(shell): remove the unused background shell collect and waiter API by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1261
+* fix(permission): follow dangling symlinks when judging sensitive paths by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1262
+* docs(skills): shorten skill descriptions to one-line labels by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1264
+* fix(agent): canonicalize wire tool names across director and tui tracking by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1252
+* docs(skills): drop the GaaS translation layer from native-integration by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1265
+* refactor(skills): drop opsh, ast-grep, lexicon, git-rebase, and the baked-only skills by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1267
+* refactor(skills): rename scribe to docs and trim it by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1268
+* feat(skills): add issue and pull-request commands that find or create the artifact by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1269
+* feat(skills): require git and default to worktrees in the workflow skills by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1270
+* refactor(skills): fold the ship loop and integration rules into implement and review by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1271
+* refactor(skills): cut style, philosophy, and typescript to five rules each by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1272
+* refactor(skills): trim review to a single classify-to-report flow by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1274
+* docs(skills): tidy plan, refactor, interview, and worktree guidance by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1275
+* docs: describe the ten-director fleet in ARCHITECTURE and PRODUCT by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1276
+* refactor(agent): finish renaming the primary director from skywalker to dispatch by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1278
+* refactor(tools): shorten web_fetch and web_search descriptions by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1280
+* refactor(agent): tighten dispatch spawn and review rules by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1281
+* feat(skills): add an interchange skill chain by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1282
+* feat(skills): add a corbits skill chain by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1283
+* refactor(agent): compare tool names through a single helper by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1292
+* fix(subagent): narrow late send_input redirect by terminal status by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1293
+* fix(subagent): pass inherited MCP tools through to workers by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1296
+* feat(providers): remove connected provider from model picker by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1297
+* feat(providers): offer reconnect for auth-class inference failures by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1298
+* fix(providers): suppress stale reconnect replay by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1300
+* fix(providers): use catalog provenance for OAuth removal by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1301
+* fix(xai): use provider client header constants by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1299
+* fix(agent): put input schemas on tool_search cards by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1302
+* fix(agent): load tool_search hits onto the next infer by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1303
+
+
+**Full Changelog**: https://github.com/corbitsdev/corbits-code/compare/v0.3.32...v0.3.33
+
 ## [0.3.32] - 2026-09-29
 
 ### What's Changed
