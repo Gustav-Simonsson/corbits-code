@@ -130,6 +130,7 @@ export class SubAgentDirector extends DefaultDirector {
   private readonly compaction: CompactionGovernor;
   private readonly retryPolicy: RetryPolicy;
   private readonly _systemPrompt: string;
+  private advertisedTools: ToolDefinition[];
   /** When true (CritiqueDirector), empty readCounts is not a successful complete. */
   private readonly requireEvidence: boolean;
   /** When true (planner / intent=plan), stub plan Findings is not a complete. */
@@ -226,6 +227,11 @@ export class SubAgentDirector extends DefaultDirector {
     this.isAskPending = isPending;
   }
 
+  /** Replace the advertised wire set after tool_search / promote-on-execute. */
+  updateToolDefinitions(toolDefinitions: ToolDefinition[]): void {
+    this.advertisedTools = toolDefinitions;
+  }
+
   /** Run state every intervention record carries, for judging it afterwards. */
   private interventionState(): {
     turnsCompleted: number;
@@ -261,6 +267,7 @@ export class SubAgentDirector extends DefaultDirector {
         : systemPrompt;
     super(composedPrompt, toolDefinitions, {});
     this._systemPrompt = composedPrompt;
+    this.advertisedTools = toolDefinitions;
     this.compaction = createCompactionGovernor(
       requestContinuation,
       composedPrompt,
@@ -288,6 +295,7 @@ export class SubAgentDirector extends DefaultDirector {
           ...(options ?? {}),
           retryPolicy: options?.retryPolicy ?? this.retryPolicy,
           systemPrompt: options?.systemPrompt ?? this._systemPrompt,
+          tools: this.advertisedTools,
         }),
     };
     // A real parent follow-up re-opens the brief; empty continuations do not.

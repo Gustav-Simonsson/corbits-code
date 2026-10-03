@@ -53,7 +53,7 @@ export const DOCS_TOOLS = [
   ...PRODUCT_WRITE_TOOLS,
 ] as const;
 
-/** Review / planner / explorer: read surface + path writes. */
+/** Review / planner / warden / prober: read surface + path writes. */
 export const REVIEW_TOOLS = [...READ_TOOLS, ...PRODUCT_WRITE_TOOLS] as const;
 
 /**

@@ -17,6 +17,7 @@ import {
   type ToolProfile,
 } from "./tool-aliases.js";
 import { canonicalToolName } from "./canonical-tool-name.js";
+import { ORCHESTRATOR_TOOLS, READ_TOOLS } from "./directors/tool-sets.js";
 
 // Tools whose full schema is always advertised to the model. Everything else is
 // registered but discovered on demand via tool_search, which returns ranked
@@ -118,6 +119,43 @@ export function advertisedToolNamesForSessionMode(
     ...coreToolNamesForSessionMode(mode, availability),
     ...CATALOG_TOOL_NAMES,
   ];
+}
+
+const WORKER_WIRE_ALWAYS: readonly string[] = [
+  "tool_search",
+  "ask_director",
+  "submit_result",
+];
+
+/**
+ * Advertised wire prefix for a spawned worker: the director's tool allowlist
+ * plus `tool_search` and the leaf reporting channel. No shared preset across
+ * roles. MCP stays off this list until tool_search / promote-on-execute.
+ * Model-specific names (apply_patch) fold later via tool profile.
+ */
+export function advertisedToolNamesForWorker(opts: {
+  allow?: readonly string[];
+  orchestrator?: boolean;
+  languageServerAvailable?: boolean;
+}): readonly string[] {
+  const base =
+    opts.allow !== undefined && opts.allow.length > 0
+      ? opts.allow
+      : opts.orchestrator === true
+        ? ORCHESTRATOR_TOOLS
+        : READ_TOOLS;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of [...base, ...WORKER_WIRE_ALWAYS]) {
+    if (name === "ask_operator" || name === "search_agents") continue;
+    if (name === "wait_agents") continue;
+    if (name === "lsp" && opts.languageServerAvailable !== true) continue;
+    if (name.startsWith("mcp__")) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
 }
 
 // Built-in file/search/web tools advertised alongside the core set. They carry full
