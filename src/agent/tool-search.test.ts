@@ -917,7 +917,8 @@ describe("promote-on-execute", () => {
       ),
     );
     const called = listed[TOOL_SEARCH_SCHEMA_CARDS];
-    if (called === undefined) throw new Error("expected a hit past the load cap");
+    if (called === undefined)
+      throw new Error("expected a hit past the load cap");
     const loaded = listed.slice(0, TOOL_SEARCH_SCHEMA_CARDS);
     const result = await dispatch(runner, called);
     expect(result.content).toBe(`ran:${called}`);
