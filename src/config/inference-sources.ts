@@ -81,14 +81,18 @@ export function buildInferenceSourceForRef(
   if (baseURL === undefined) return null;
 
   const configured = ref.reasoningEffort ?? ctx.reasoningEffort;
+  // The provider-declared effort ladder is honored ONLY on the plain
+  // openai-compatible fall-through at the bottom (where a custom provider
+  // lands). First-class/OAuth/Go/Zen/Anthropic/Bifrost builders resolve the
+  // configured level against the family table, never an operator ladder — a
+  // hand-edited settings.json row on those providers must not leak the
+  // custom-form fields into them.
   const effort =
     configured !== undefined
       ? resolveSessionEffort(
           ref.model,
           configured,
           entry?.codexProfile !== undefined,
-          entry?.reasoningEfforts,
-          entry?.defaultReasoningEffort,
         )
       : undefined;
 
@@ -181,6 +185,19 @@ export function buildInferenceSourceForRef(
   }
 
   const quirks = openAISourceQuirks(baseURL, ref.model);
+  // Custom OpenAI-compatible providers (the manual form) land here. Honor the
+  // operator-declared ladder + default only on this branch — the special
+  // builders above already returned with the family-table `effort`.
+  const customEffort =
+    configured !== undefined
+      ? resolveSessionEffort(
+          ref.model,
+          configured,
+          false,
+          entry?.reasoningEfforts,
+          entry?.defaultReasoningEffort,
+        )
+      : undefined;
   return buildOpenAISource({
     id: ref.provider,
     baseURL,
@@ -190,7 +207,7 @@ export function buildInferenceSourceForRef(
         ? { apiKey: providerSettings.apiKey }
         : {}),
     model: ref.model,
-    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+    ...(customEffort !== undefined ? { reasoningEffort: customEffort } : {}),
     ...(quirks !== undefined ? { quirks } : {}),
   });
 }

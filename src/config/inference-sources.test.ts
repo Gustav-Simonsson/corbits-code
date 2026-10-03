@@ -520,6 +520,35 @@ describe("reasoning effort on the wire", () => {
       "reasoning_effort",
     );
   });
+
+  test("a hand-edited first-class row does not leak the operator ladder", () => {
+    // The ladder override is a custom-OpenAI-compatible-provider concept. A
+    // first-class row (OpenCode Go here) that somehow carries reasoningEfforts
+    // (hand-edited settings.json) must not honor them — its source builder
+    // resolves the configured level against the family table instead.
+    const leakedCatalog: ProviderCatalogEntry[] = [
+      {
+        name: "opencode-go",
+        baseURL: "https://opencode.ai/zen/go/v1",
+        apiKey: "sk-test",
+        models: ["gpt-5"],
+        defaultModel: "gpt-5",
+        opencodeGo: true,
+        reasoningEfforts: ["xhigh"],
+        defaultReasoningEffort: "xhigh",
+      },
+    ];
+    // Explicit low leg on a Go row: the family table includes low, so the
+    // operator ladder must not restrict it to xhigh.
+    const low = buildInferenceSourceForRef(
+      { provider: "opencode-go", model: "gpt-5", reasoningEffort: "low" },
+      { sessionId: "s1", catalog: leakedCatalog },
+      undefined,
+    );
+    expect(low?.defaults?.providerOptions).toMatchObject({
+      reasoning_effort: "low",
+    });
+  });
 });
 
 describe("session source bundles", () => {
