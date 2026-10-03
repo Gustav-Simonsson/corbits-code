@@ -20,6 +20,21 @@ release that deserves narration. Passing `--notes <file>` overrides both for
 the GitHub body. Sections below this line predate generation and were written
 by hand.
 
+## [0.3.34] - 2026-10-03
+
+### What's Changed
+* fix(subagent): surface scrubbed xAI worker diagnostics by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1306
+* fix(skills): assign substantive workflow work to specialists by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1310
+* fix(dispatch): delegate substantive work to specialists by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1311
+* fix(provider): normalize cached Chat Completions usage by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1312
+* fix(agent): rewrite present schema for Muse Spark by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1305
+* feat(provider): let custom providers set sampling and token knobs by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1308
+* fix(subagent): shrink worker toolsets and sanitize Grok schemas by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1309
+* feat(provider): let custom providers declare reasoning effort levels by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1307
+
+
+**Full Changelog**: https://github.com/corbitsdev/corbits-code/compare/v0.3.33...v0.3.34
+
 ## [0.3.33] - 2026-10-03
 
 ### What's Changed
