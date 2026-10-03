@@ -125,6 +125,8 @@ describe("live provider context windows", () => {
         apiKey: "",
         model: "connected-model",
         oauthProfile: "",
+        reasoningEfforts: ["low"],
+        defaultReasoningEffort: "low",
         contextWindow: "16000",
         maxTokens: "",
         temperature: "",

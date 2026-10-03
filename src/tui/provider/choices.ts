@@ -21,8 +21,13 @@ import {
   selectableZenModelIds,
 } from "../../provider/model-catalogs.js";
 import { isZenProviderId } from "../../../packages/zen/src/index.js";
+import type { ReasoningEffort } from "../../provider/reasoning-effort.js";
 import { buildModelsFirstCatalog, modelOptionRef } from "../model-catalog.js";
-import type { ResidualCatalogEntry } from "../residuals.js";
+import {
+  residualIdFromSelection,
+  residualListFromCatalog,
+  type ResidualCatalogEntry,
+} from "../residuals.js";
 import type { CliRenderer } from "@opentui/core";
 import { createOverlayList } from "../shell/overlay-list.js";
 import type {
@@ -58,6 +63,14 @@ export function providerListHeight(renderer: CliRenderer): number {
 
 /** Catalog id for the manual path. Never written to settings as a name. */
 export const CUSTOM_CHOICE_ID = "custom";
+export const CUSTOM_REASONING_EFFORTS: readonly ReasoningEffort[] = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 /** Pick-list row that drops the model step back to free text. */
 export const TYPE_MODEL_ID = "__type_model__";
@@ -351,6 +364,10 @@ export function chooseProviderRow(
   state.ollamaDiscovery = "idle";
   state.choice = picked;
   state.values.apiKey = "";
+  state.values.reasoningEfforts = picked.custom
+    ? [...CUSTOM_REASONING_EFFORTS]
+    : [];
+  state.values.defaultReasoningEffort = "";
   state.values.contextWindow = "";
   state.values.maxTokens = "";
   state.values.temperature = "";
@@ -414,4 +431,87 @@ export function enterProviderRows(
     items: providerListHeight(renderer),
     activeIndex: active,
   });
+}
+
+const EFFORT_CHECK = "✓";
+
+/**
+ * Custom endpoints declare their own subset rather than inheriting the
+ * Codex-only extensions to the global ladder.
+ */
+export function effortChoiceRows(
+  enabled: readonly string[],
+): readonly ResidualCatalogEntry[] {
+  return CUSTOM_REASONING_EFFORTS.map((level) => ({
+    id: level,
+    label: enabled.includes(level) ? `${level} ${EFFORT_CHECK}` : level,
+  }));
+}
+
+/**
+ * Defaults must come from the same enabled set the requests will use.
+ */
+export function defaultEffortChoiceRows(
+  enabled: readonly string[],
+): readonly ResidualCatalogEntry[] {
+  const levels = CUSTOM_REASONING_EFFORTS.filter((level) =>
+    enabled.includes(level),
+  );
+  return levels.map((level) => ({ id: level, label: level }));
+}
+
+/** Rebuild the toggle rows for the custom "efforts" step. */
+export function enterEffortsRows(
+  state: SetupState,
+  renderer: CliRenderer,
+  activeIndex = 0,
+): void {
+  state.listRows = effortChoiceRows(state.values.reasoningEfforts);
+  state.list = createOverlayList(renderer, {
+    count: state.listRows.length,
+    items: providerListHeight(renderer),
+    activeIndex,
+  });
+}
+
+/** Rebuild the select rows for the custom "default effort" step. */
+export function enterDefaultEffortRows(
+  state: SetupState,
+  renderer: CliRenderer,
+): void {
+  state.listRows = defaultEffortChoiceRows(state.values.reasoningEfforts);
+  state.list = createOverlayList(renderer, {
+    count: state.listRows.length,
+    items: providerListHeight(renderer),
+    activeIndex: Math.max(
+      0,
+      state.listRows.findIndex(
+        (row) => row.id === state.values.defaultReasoningEffort,
+      ),
+    ),
+  });
+}
+
+/** Toggle the highlighted effort level on the custom "efforts" step. */
+export function toggleEffortRow(
+  state: SetupState,
+  renderer: CliRenderer,
+): void {
+  const { itemIds } = residualListFromCatalog(state.listRows);
+  const id = residualIdFromSelection(
+    { index: state.list.activeIndex },
+    itemIds,
+  );
+  if (id === undefined) return;
+  const activeIndex = state.list.activeIndex;
+  const enabled = new Set(state.values.reasoningEfforts);
+  if (enabled.has(id)) enabled.delete(id);
+  else enabled.add(id);
+  state.values.reasoningEfforts = CUSTOM_REASONING_EFFORTS.filter((level) =>
+    enabled.has(level),
+  );
+  if (!enabled.has(state.values.defaultReasoningEffort)) {
+    state.values.defaultReasoningEffort = "";
+  }
+  enterEffortsRows(state, renderer, activeIndex);
 }

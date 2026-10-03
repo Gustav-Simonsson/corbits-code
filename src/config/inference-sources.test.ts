@@ -490,6 +490,131 @@ describe("protocol flag routing", () => {
 });
 
 describe("reasoning effort on the wire", () => {
+  test("edited settings override a stale catalog's disabled effort", () => {
+    const entry: ProviderCatalogEntry = {
+      name: "custom",
+      baseURL: "https://custom.example/v1",
+      keyless: true,
+      models: ["custom-model"],
+      reasoningEfforts: ["medium"],
+      defaultReasoningEffort: "medium",
+    };
+    const source = buildInferenceSourceForRef(
+      { provider: "custom", model: "custom-model" },
+      { sessionId: "s1", catalog: [entry], reasoningEffort: "medium" },
+      {
+        providers: {
+          custom: {
+            ...entry,
+            reasoningEfforts: ["low", "max"],
+            defaultReasoningEffort: "max",
+          },
+        },
+      },
+    );
+    expect(source?.defaults?.providerOptions?.reasoning_effort).toBe("max");
+  });
+
+  test("custom defaults reach startup and rebuilt session requests without a session pin", () => {
+    const custom: ProviderCatalogEntry = {
+      name: "custom",
+      baseURL: "https://custom.example/v1",
+      keyless: true,
+      models: ["custom-model"],
+      reasoningEfforts: ["low", "max"],
+      defaultReasoningEffort: "max",
+    };
+    for (const sessionId of ["new-session", "resumed-session"]) {
+      const bundle = buildMainSessionSources({
+        settings: { providers: { custom } },
+        catalog: [custom],
+        activeProvider: "custom",
+        activeModel: "custom-model",
+        sessionId,
+      });
+      const source = bundle.sources[0];
+      if (source === undefined) throw new Error("missing source");
+      const adapter = createOpenAICompatibleAdapter({
+        sourceId: source.id,
+        provider: source.provider,
+        model: source.model,
+      });
+      const body = JSON.parse(
+        adapter.buildRequest([], source.model, source.defaults ?? {}).body,
+      ) as Record<string, unknown>;
+      expect(body.reasoning_effort).toBe("max");
+    }
+  });
+
+  test("custom defaults can be read from settings when the catalog is absent", () => {
+    const source = buildInferenceSourceForRef(
+      { provider: "custom", model: "custom-model" },
+      { sessionId: "s1", catalog: [] },
+      {
+        providers: {
+          custom: {
+            baseURL: "https://custom.example/v1",
+            keyless: true,
+            models: ["custom-model"],
+            reasoningEfforts: ["low", "max"],
+            defaultReasoningEffort: "max",
+          },
+        },
+      },
+    );
+    expect(source?.defaults?.providerOptions?.reasoning_effort).toBe("max");
+  });
+
+  test("no declaration does not invent a request default", () => {
+    const source = buildInferenceSourceForRef(
+      { provider: "fp", model: "gpt-5" },
+      ctx(),
+      undefined,
+    );
+    expect(source).not.toBeNull();
+    expect(source?.defaults?.providerOptions).not.toHaveProperty(
+      "reasoning_effort",
+    );
+  });
+
+  test.each([
+    {
+      name: "codex/work",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      codexProfile: "work",
+    },
+    { name: "xai/work", baseURL: "https://api.x.ai/v1", xaiProfile: "work" },
+    { name: "go", baseURL: "https://opencode.ai/zen/go/v1", opencodeGo: true },
+    { name: "zen", baseURL: ZEN_DEFAULT_BASE_URL },
+    {
+      name: "anthropic",
+      baseURL: "https://api.anthropic.com",
+      anthropic: true,
+    },
+    {
+      name: "bifrost",
+      baseURL: "https://bifrost.example/v1",
+      bifrostVirtualKey: true,
+    },
+  ])("noncustom protocols do not invent defaults: $name", (protocol) => {
+    const entry: ProviderCatalogEntry = {
+      ...protocol,
+      apiKey: "test-token",
+      models: ["custom-model"],
+      reasoningEfforts: ["max"],
+      defaultReasoningEffort: "max",
+    };
+    const source = buildInferenceSourceForRef(
+      { provider: entry.name, model: "custom-model" },
+      { sessionId: "s1", catalog: [entry] },
+      { providers: { [entry.name]: entry } },
+    );
+    expect(source).not.toBeNull();
+    expect(source?.defaults?.providerOptions).not.toHaveProperty(
+      "reasoning_effort",
+    );
+  });
+
   const effortSettings: Settings = {
     providers: {
       openai: {
@@ -580,6 +705,35 @@ describe("reasoning effort on the wire", () => {
     expect(unset?.defaults?.providerOptions).not.toHaveProperty(
       "reasoning_effort",
     );
+  });
+
+  test("a hand-edited first-class row does not leak the operator ladder", () => {
+    // The ladder override is a custom-OpenAI-compatible-provider concept. A
+    // first-class row (OpenCode Go here) that somehow carries reasoningEfforts
+    // (hand-edited settings.json) must not honor them — its source builder
+    // resolves the configured level against the family table instead.
+    const leakedCatalog: ProviderCatalogEntry[] = [
+      {
+        name: "opencode-go",
+        baseURL: "https://opencode.ai/zen/go/v1",
+        apiKey: "sk-test",
+        models: ["gpt-5"],
+        defaultModel: "gpt-5",
+        opencodeGo: true,
+        reasoningEfforts: ["xhigh"],
+        defaultReasoningEffort: "xhigh",
+      },
+    ];
+    // Explicit low leg on a Go row: the family table includes low, so the
+    // operator ladder must not restrict it to xhigh.
+    const low = buildInferenceSourceForRef(
+      { provider: "opencode-go", model: "gpt-5", reasoningEffort: "low" },
+      { sessionId: "s1", catalog: leakedCatalog },
+      undefined,
+    );
+    expect(low?.defaults?.providerOptions).toMatchObject({
+      reasoning_effort: "low",
+    });
   });
 });
 

@@ -76,6 +76,7 @@ import {
   type CapabilityUnavailable,
 } from "./capability-preflight.js";
 import { isCodexProviderName } from "../config/codex-providers.js";
+import { customReasoningSettings } from "../config/providers.js";
 import { buildDispatchBrief, type TaskIntent } from "./report.js";
 import {
   DEFAULT_CANCEL_REASON,
@@ -1036,10 +1037,16 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
           return `Error: ${label} requires settings with configured providers.`;
         }
         if (resolved.reasoningEffort !== undefined) {
+          const reasoning = customReasoningSettings(
+            resolved.provider,
+            settings.providers[resolved.provider],
+            catalog?.find((entry) => entry.name === resolved.provider),
+          );
           const verdict = validateEffort(
             resolved.model,
             resolved.reasoningEffort,
             isCodexProviderName(resolved.provider),
+            reasoning?.reasoningEfforts,
           );
           if (!verdict.ok) {
             return `Error: ${label} has incompatible inference: ${verdict.error}`;
@@ -1162,6 +1169,11 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
 
       const orchestrator = resolved.orchestrator;
       const nestedSpawnAllowlist = resolved.nestedSpawnAllowlist;
+      const reasoning = customReasoningSettings(
+        provider.providerName,
+        settings?.providers[provider.providerName],
+        catalog?.find((entry) => entry.name === provider.providerName),
+      );
       const effort = resolveEffortForRole({
         orchestrator,
         ...(resolved.effortPin !== undefined
@@ -1173,6 +1185,9 @@ export function createSpawnAgentTool(deps: AgentFleetDeps): AgentTool {
         ...(parentEffort !== undefined ? { parentEffort } : {}),
         model: provider.model,
         isCodex: isCodexProviderName(provider.providerName),
+        ...(reasoning?.reasoningEfforts !== undefined
+          ? { providerEfforts: reasoning.reasoningEfforts }
+          : {}),
       });
       if (effort !== undefined) {
         provider = { ...provider, reasoningEffort: effort };

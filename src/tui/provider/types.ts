@@ -65,6 +65,10 @@ export interface ProviderFormValues {
    * edits `name` free-form.
    */
   oauthProfile: string;
+  /** Explicit enabled levels; an empty custom set cannot be saved. */
+  reasoningEfforts: string[];
+  /** Operator-picked default effort level for new sessions ("" = none chosen). */
+  defaultReasoningEffort: string;
   /**
    * Optional sampling/token knobs for the custom path. Kept as blank-by-default
    * strings so an empty input means "leave unset" rather than a forced value;

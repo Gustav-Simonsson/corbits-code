@@ -509,7 +509,11 @@ export function createSurface(
       return;
     }
     footer.content = selectors.isListStep()
-      ? "↑↓ move · enter choose · ctrl+c cancel"
+      ? selectors.currentStep() === "efforts" &&
+        state.choice !== null &&
+        state.choice.custom
+        ? "↑↓ move · space toggle · enter continue · ctrl+c cancel"
+        : "↑↓ move · enter choose · ctrl+c cancel"
       : state.stepIndex === 0
         ? "enter confirm · ctrl+c cancel"
         : "enter confirm · esc back · ctrl+c cancel";

@@ -10,6 +10,7 @@ import {
   mergeProviderIntoSettings,
   saveGlobalSettings,
   saveLocalSettings,
+  type ProviderSettings,
   type Settings,
 } from "../../config/settings.js";
 import { COMMAND_NAME } from "../../branding.js";
@@ -22,6 +23,10 @@ import type { ProviderSetupSubmit } from "./types.js";
 import { NOOP_TELEMETRY, type Telemetry } from "../../telemetry/index.js";
 import { classifyAuthProvider } from "../../telemetry/classify.js";
 import { captureAuthSuccess } from "../../telemetry/product-events.js";
+import {
+  isReasoningEffort,
+  normalizeProviderEfforts,
+} from "../../provider/reasoning-effort.js";
 import { ProviderInferenceOptionsSchema } from "../../config/provider-inference-options.js";
 
 const CustomInferenceInputsSchema = type({
@@ -117,6 +122,21 @@ export function buildProviderSubmitHandler(
     const persistedBaseURL = isOllama
       ? normalizeOllamaRootURL(trimmedBaseURL)
       : trimmedBaseURL;
+    const effortLevels = normalizeProviderEfforts(values.reasoningEfforts);
+    const trimmedDefaultEffort = values.defaultReasoningEffort.trim();
+    if (preset === undefined && oauth === undefined) {
+      if (effortLevels.length === 0) {
+        throw new Error("Enable at least one reasoning effort.");
+      }
+      if (
+        !isReasoningEffort(trimmedDefaultEffort) ||
+        !effortLevels.includes(trimmedDefaultEffort)
+      ) {
+        throw new Error(
+          "Choose a default reasoning effort from the enabled levels.",
+        );
+      }
+    }
 
     // OAuth credentials stay staged until setup validation authorizes durable
     // persistence. Definitive API-scope or credential failures block the save;
@@ -192,7 +212,11 @@ export function buildProviderSubmitHandler(
       preset !== undefined && preset.models.includes(selectedModel)
         ? [...preset.models]
         : [selectedModel];
-    const newProvider = {
+    // Custom provider effort declaration: the operator's enabled levels and
+    // picked default flow through to the catalog so /model cycling and
+    // session resolution use the operator set. Only the custom path carries
+    // these values (presets/OAuth never set them on the form).
+    const newProvider: ProviderSettings = {
       baseURL: persistedBaseURL,
       models,
       defaultModel: selectedModel,
@@ -201,6 +225,12 @@ export function buildProviderSubmitHandler(
         : { keyless: true }),
       ...(preset?.anthropic === true ? { anthropic: true } : {}),
       ...(preset?.opencodeGo === true ? { opencodeGo: true } : {}),
+      ...(preset === undefined && effortLevels.length > 0
+        ? { reasoningEfforts: effortLevels }
+        : {}),
+      ...(preset === undefined && isReasoningEffort(trimmedDefaultEffort)
+        ? { defaultReasoningEffort: trimmedDefaultEffort }
+        : {}),
       ...inferenceOptions,
       // "Save anyway" (Ctrl+S) persists a credential the connection test
       // never passed. Mark it so the running session can warn on first use

@@ -20,6 +20,8 @@ import {
   addProviderSelectorChoices,
   connectedAccountCount,
   CUSTOM_CHOICE_ID,
+  defaultEffortChoiceRows,
+  effortChoiceRows,
   instanceSlugsForKind,
   modelChoiceRows,
   modelFromRowId,
@@ -60,6 +62,8 @@ const EMPTY: ProviderFormValues = {
   apiKey: "",
   model: "",
   oauthProfile: "",
+  reasoningEfforts: [],
+  defaultReasoningEffort: "",
   contextWindow: "",
   maxTokens: "",
   temperature: "",
@@ -164,6 +168,20 @@ beforeEach(() => {
 });
 
 describe("provider setup pure helpers", () => {
+  test("effort rows reflect only enabled controls and defaults never invent a level", () => {
+    const disabled = effortChoiceRows([]);
+    const enabled = effortChoiceRows(["low"]);
+    expect(
+      enabled
+        .filter((row, i) => row.label !== disabled[i]?.label)
+        .map((row) => row.id),
+    ).toEqual(["low"]);
+    expect(defaultEffortChoiceRows([])).toEqual([]);
+    expect(
+      defaultEffortChoiceRows(["max", "low"]).map((row) => row.id),
+    ).toEqual(["low", "max"]);
+  });
+
   test("offers Ollama as a keyless provider with an editable root URL", () => {
     const ollama = providerChoiceById("ollama");
     expect(ollama).toBeDefined();
@@ -277,6 +295,8 @@ describe("provider setup pure helpers", () => {
       "maxTokens",
       "temperature",
       "topP",
+      "efforts",
+      "defaultEffort",
     ]);
   });
 
@@ -528,6 +548,14 @@ async function connectOpenAI(harness: Harness, key = "sk-key"): Promise<void> {
   await harness.renderOnce();
 }
 
+/** Leave the custom token and sampling options unset. */
+async function skipCustomNumericFields(harness: Harness): Promise<void> {
+  for (let i = 0; i < 4; i++) {
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+  }
+}
+
 /** Walk the custom path end to end. */
 async function connectCustom(harness: Harness): Promise<void> {
   await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
@@ -540,13 +568,11 @@ async function connectCustom(harness: Harness): Promise<void> {
   type(harness, "fp-small");
   harness.pressKey("Enter");
   await harness.renderOnce();
-  // The four optional token/sampling steps: Enter accepts blank (leave unset).
+  await skipCustomNumericFields(harness);
+  // Accept the efforts toggle list (all levels on by default).
   harness.pressKey("Enter");
   await harness.renderOnce();
-  harness.pressKey("Enter");
-  await harness.renderOnce();
-  harness.pressKey("Enter");
-  await harness.renderOnce();
+  // Pick the highlighted default effort (first enabled level) and submit.
   harness.pressKey("Enter");
   await harness.renderOnce();
 }
@@ -1219,6 +1245,8 @@ describe("runProviderSetup", () => {
       baseURL: "https://api.openai.com/v1",
       apiKey: "sk-key",
       model: openai?.defaultModel ?? "",
+      reasoningEfforts: [],
+      defaultReasoningEffort: "",
       oauthProfile: "default",
       contextWindow: "",
       maxTokens: "",
@@ -1237,7 +1265,7 @@ describe("runProviderSetup", () => {
       opts.push(o);
     });
     await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
-    expect(harness.captureCharFrame()).toContain("step 2 of 9");
+    expect(harness.captureCharFrame()).toContain("step 2 of 11");
     type(harness, "firepass");
     harness.pressKey("Enter");
     type(harness, "https://api.example.com");
@@ -1246,10 +1274,13 @@ describe("runProviderSetup", () => {
     harness.pressKey("Enter");
     type(harness, "fp-small");
     harness.pressKey("Enter");
-    // Token/sampling knobs are optional — leave all four blank.
+    await harness.renderOnce();
+    await skipCustomNumericFields(harness);
+    // The efforts list step: Enter accepts the default (all levels on).
+    expect(harness.captureCharFrame()).toContain("reasoning efforts");
     harness.pressKey("Enter");
-    harness.pressKey("Enter");
-    harness.pressKey("Enter");
+    await harness.renderOnce();
+    // The default-effort pick: Enter selects the highlighted level and submits.
     harness.pressKey("Enter");
     await harness.renderOnce();
 
@@ -1259,6 +1290,8 @@ describe("runProviderSetup", () => {
       baseURL: "https://api.example.com",
       apiKey: "sk-key",
       model: "fp-small",
+      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+      defaultReasoningEffort: "none",
       oauthProfile: "",
       contextWindow: "",
       maxTokens: "",
@@ -1266,6 +1299,138 @@ describe("runProviderSetup", () => {
       topP: "",
     });
     expect(opts[0]?.preset).toBeUndefined();
+  });
+
+  test("the custom path persists toggled effort levels and a picked default", async () => {
+    const seen: ProviderFormValues[] = [];
+    const { done, harness } = await mountSetup(async (values) => {
+      seen.push({ ...values });
+    });
+    await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
+    type(harness, "firepass");
+    harness.pressKey("Enter");
+    type(harness, "https://api.example.com");
+    harness.pressKey("Enter");
+    type(harness, "sk-key");
+    harness.pressKey("Enter");
+    type(harness, "fp-small");
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+
+    await skipCustomNumericFields(harness);
+    // Efforts list starts on "none" (first row). Space toggles it off.
+    expect(harness.captureCharFrame()).toContain("reasoning efforts");
+    harness.pressKey(" ");
+    await harness.renderOnce();
+    // Move to the next row ("low") and toggle it off too.
+    harness.pressKey("ARROW_DOWN");
+    harness.pressKey(" ");
+    await harness.renderOnce();
+    // Accept the remaining ladder, then pick "xhigh" as the default and submit.
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+    // Enabled rows after toggles: medium, high, xhigh, max.
+    harness.pressKey("ARROW_DOWN");
+    harness.pressKey("ARROW_DOWN");
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+
+    expect(await done).toBe(true);
+    const seenValue = seen[0];
+    expect(seenValue).toBeDefined();
+    expect(seenValue?.reasoningEfforts).not.toContain("none");
+    expect(seenValue?.reasoningEfforts).not.toContain("low");
+    expect(seenValue?.reasoningEfforts).toContain("medium");
+    expect(seenValue?.defaultReasoningEffort).toBe("xhigh");
+  });
+
+  test("custom toggles retain focus and cannot continue with all levels disabled", async () => {
+    let submitted = false;
+    const { done, harness } = await mountSetup(async () => {
+      submitted = true;
+    });
+    await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
+    for (const value of [
+      "custom",
+      "https://custom.example/v1",
+      "",
+      "custom-model",
+    ]) {
+      type(harness, value);
+      harness.pressKey("Enter");
+    }
+    await skipCustomNumericFields(harness);
+    await harness.renderOnce();
+    harness.pressKey("ARROW_DOWN");
+    await harness.renderOnce();
+    const selected = activeListMarker(harness.captureCharFrame());
+    harness.pressKey(" ");
+    await harness.renderOnce();
+    expect(activeListMarker(harness.captureCharFrame())?.split(" ")[1]).toBe(
+      selected?.split(" ")[1],
+    );
+    harness.pressKey(" ");
+    await harness.renderOnce();
+    harness.pressKey("ARROW_UP");
+    for (let i = 0; i < 6; i++) {
+      harness.pressKey(" ");
+      harness.pressKey("ARROW_DOWN");
+    }
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+    expect(harness.captureCharFrame()).toContain("step 10 of 11");
+    expect(submitted).toBe(false);
+    harness.pressKey(" ");
+    harness.pressKey("Enter");
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+    expect(await done).toBe(true);
+  });
+
+  test("switching away from and back to Custom resets hidden reasoning choices", async () => {
+    const seen: ProviderFormValues[] = [];
+    const { done, harness } = await mountSetup(async (values) => {
+      seen.push({ ...values });
+    });
+    await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
+    for (const value of [
+      "custom",
+      "https://custom.example/v1",
+      "",
+      "custom-model",
+    ]) {
+      type(harness, value);
+      harness.pressKey("Enter");
+    }
+    await skipCustomNumericFields(harness);
+    harness.pressKey(" ");
+    await harness.renderOnce();
+    for (let i = 0; i < 9; i++) await pressEscape(harness);
+    const customIndex = PROVIDER_IDS.indexOf(CUSTOM_CHOICE_ID);
+    const openAIIndex = PROVIDER_IDS.indexOf("openai");
+    for (let i = customIndex; i > openAIIndex; i--)
+      harness.pressKey("ARROW_UP");
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+    await pressEscape(harness);
+    for (let i = openAIIndex; i < customIndex; i++)
+      harness.pressKey("ARROW_DOWN");
+    harness.pressKey("Enter");
+    for (const value of [
+      "custom",
+      "https://custom.example/v1",
+      "",
+      "custom-model",
+    ]) {
+      type(harness, value);
+      harness.pressKey("Enter");
+    }
+    await skipCustomNumericFields(harness);
+    harness.pressKey("Enter");
+    harness.pressKey("Enter");
+    await harness.renderOnce();
+    expect(await done).toBe(true);
+    expect(seen[0]?.reasoningEfforts).toContain("none");
   });
 
   test.each(["openai", CUSTOM_CHOICE_ID])(
@@ -1321,6 +1486,8 @@ describe("runProviderSetup", () => {
             harness.pressKey("Enter");
             await harness.renderOnce();
           }
+          harness.pressKey("Enter");
+          harness.pressKey("Enter");
         }
         await done;
         expect(seen[0]).toMatchObject({
@@ -1380,7 +1547,7 @@ describe("runProviderSetup", () => {
     await pickRow(harness, PROVIDER_IDS, CUSTOM_CHOICE_ID);
     harness.pressKey("Enter");
     await harness.renderOnce();
-    expect(harness.captureCharFrame()).toContain("step 2 of 9");
+    expect(harness.captureCharFrame()).toContain("step 2 of 11");
     harness.pressKey("Ctrl+C");
     await done;
   });

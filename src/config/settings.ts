@@ -74,6 +74,13 @@ export interface ProviderSettings {
   // already-working setup as unverified. Only paths that persist a
   // credential without testing it write `false` explicitly.
   verified?: boolean;
+  // Operator-declared reasoning-effort ladder for a custom OpenAI-compatible
+  // provider. When present, the runtime uses exactly these levels for cycling
+  // and validation instead of the family table. Absent means "family table".
+  reasoningEfforts?: ReasoningEffort[];
+  // The level new sessions start at for a custom provider, when the operator
+  // picked one. Only meaningful alongside `reasoningEfforts`.
+  defaultReasoningEffort?: ReasoningEffort;
 }
 
 // Provider+model identity used by the models-first picker (recent / favorites).
@@ -263,6 +270,12 @@ function providerSelectionMetadata(
     ...(provider.anthropic === true ? { anthropic: true } : {}),
     ...(provider.opencodeGo === true ? { opencodeGo: true } : {}),
     ...(provider.verified !== undefined ? { verified: provider.verified } : {}),
+    ...(provider.reasoningEfforts !== undefined
+      ? { reasoningEfforts: provider.reasoningEfforts }
+      : {}),
+    ...(provider.defaultReasoningEffort !== undefined
+      ? { defaultReasoningEffort: provider.defaultReasoningEffort }
+      : {}),
   };
 }
 
@@ -636,7 +649,23 @@ const ProviderSettingsSchema = type({
   "anthropic?": "boolean",
   "opencodeGo?": "boolean",
   "verified?": "boolean",
-}).and(ProviderInferenceOptionsSchema);
+  "reasoningEfforts?": type
+    .enumerated(...REASONING_EFFORTS)
+    .array()
+    .narrow(
+      (levels, ctx) =>
+        levels.length > 0 || ctx.reject("at least one reasoning effort"),
+    ),
+  "defaultReasoningEffort?": type.enumerated(...REASONING_EFFORTS),
+})
+  .and(ProviderInferenceOptionsSchema)
+  .narrow(
+    (provider, ctx) =>
+      provider.defaultReasoningEffort === undefined ||
+      provider.reasoningEfforts?.includes(provider.defaultReasoningEffort) ===
+        true ||
+      ctx.reject("a default reasoning effort from the enabled levels"),
+  );
 
 const ModelRefSchema = type({
   provider: "string",

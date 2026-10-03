@@ -27,6 +27,8 @@ export type SetupStep =
   | "maxTokens"
   | "temperature"
   | "topP"
+  | "efforts"
+  | "defaultEffort"
   | "login";
 
 /** Known-provider path: pick, name the instance, paste key, pick model. */
@@ -68,6 +70,8 @@ export const CUSTOM_STEPS: readonly SetupStep[] = [
   "maxTokens",
   "temperature",
   "topP",
+  "efforts",
+  "defaultEffort",
 ];
 
 export const STEP_LABELS: Record<SetupStep, string> = {
@@ -80,6 +84,8 @@ export const STEP_LABELS: Record<SetupStep, string> = {
   maxTokens: "max output tokens",
   temperature: "temperature",
   topP: "top p",
+  efforts: "reasoning efforts",
+  defaultEffort: "default effort",
   login: "sign in",
 };
 
@@ -95,6 +101,9 @@ export const STEP_PROMPTS: Record<SetupStep, string> = {
   maxTokens: "max output tokens — optional, leave blank to use the default",
   temperature: "temperature (0..2) — optional; mutually exclusive with top p",
   topP: "top p (0..1) — optional; mutually exclusive with temperature",
+  efforts:
+    "toggle the reasoning effort levels this provider accepts — space toggles, enter continues",
+  defaultEffort: "pick the default reasoning effort for new sessions",
   login: "authorize in the browser — this window waits for you",
 };
 

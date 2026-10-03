@@ -132,6 +132,16 @@ function settledValue(
       ? values.oauthProfile
       : values.name;
   }
+  if (step === "efforts") {
+    return values.reasoningEfforts.length > 0
+      ? values.reasoningEfforts.join(", ")
+      : "—";
+  }
+  if (step === "defaultEffort") {
+    return values.defaultReasoningEffort.length > 0
+      ? values.defaultReasoningEffort
+      : "—";
+  }
   if (step === "baseURL") return values.baseURL;
   if (step === "contextWindow") {
     return values.contextWindow.trim().length > 0 ? values.contextWindow : "—";

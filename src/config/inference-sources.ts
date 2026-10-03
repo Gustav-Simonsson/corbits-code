@@ -21,6 +21,7 @@ import {
 } from "../provider/reasoning-effort.js";
 import { isOpenCodeGoProvider } from "../../packages/opencode-go/src/index.js";
 import { isZenProvider } from "../../packages/zen/src/index.js";
+import { customReasoningSettings } from "./providers.js";
 
 export interface BuildSourceContext {
   sessionId: string;
@@ -81,6 +82,12 @@ export function buildInferenceSourceForRef(
   if (baseURL === undefined) return null;
 
   const configured = ref.reasoningEffort ?? ctx.reasoningEffort;
+  // The provider-declared effort ladder is honored ONLY on the plain
+  // openai-compatible fall-through at the bottom (where a custom provider
+  // lands). First-class/OAuth/Go/Zen/Anthropic/Bifrost builders resolve the
+  // configured level against the family table, never an operator ladder — a
+  // hand-edited settings.json row on those providers must not leak the
+  // custom-form fields into them.
   const effort =
     configured !== undefined
       ? resolveSessionEffort(
@@ -179,9 +186,29 @@ export function buildInferenceSourceForRef(
   }
 
   const quirks = openAISourceQuirks(baseURL, ref.model);
-  const maxTokens = entry?.maxTokens ?? providerSettings?.maxTokens;
-  const temperature = entry?.temperature ?? providerSettings?.temperature;
-  const topP = entry?.topP ?? providerSettings?.topP;
+  // Custom OpenAI-compatible providers (the manual form) land here. Honor the
+  // operator-declared ladder + default only on this branch — the special
+  // builders above already returned with the family-table `effort`.
+  const reasoning = customReasoningSettings(
+    ref.provider,
+    providerSettings,
+    entry,
+  );
+  const customEffort =
+    configured !== undefined || reasoning !== undefined
+      ? resolveSessionEffort(
+          ref.model,
+          configured,
+          false,
+          reasoning?.reasoningEfforts,
+          reasoning?.defaultReasoningEffort,
+        )
+      : undefined;
+  // A cleared sampling field must not revive its stale catalog value.
+  const inferenceOptions = providerSettings ?? entry;
+  const maxTokens = inferenceOptions?.maxTokens;
+  const temperature = inferenceOptions?.temperature;
+  const topP = inferenceOptions?.topP;
   return buildOpenAISource({
     id: ref.provider,
     baseURL,
@@ -191,7 +218,7 @@ export function buildInferenceSourceForRef(
         ? { apiKey: providerSettings.apiKey }
         : {}),
     model: ref.model,
-    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+    ...(customEffort !== undefined ? { reasoningEffort: customEffort } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(temperature !== undefined ? { temperature } : {}),
     ...(topP !== undefined ? { topP } : {}),

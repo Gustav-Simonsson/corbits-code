@@ -42,6 +42,7 @@ import { truncateSessionLabel } from "../../session/session-label.js";
 import { attachClipboardImage, setPromptModelLabel } from "../shell/prompt.js";
 import { yoloModeLabel } from "../components/prompt-action-bar-label.js";
 import { isCodexProviderName } from "../../config/codex-providers.js";
+import { customReasoningSettings } from "../../config/providers.js";
 import { resolveSessionEffort } from "../../provider/reasoning-effort.js";
 import type { InferenceAttemptIdentity } from "./state.js";
 import {
@@ -115,10 +116,19 @@ export function createCommandLayer(
     setSkipPermissions: (value: boolean) => {
       services.permissionGate.setSkipPermissions(value);
       state.config.dangerouslySkipPermissions = value;
+      const reasoning = customReasoningSettings(
+        state.config.providerName,
+        state.config.settings?.providers[state.config.providerName],
+        state.config.providers.find(
+          (entry) => entry.name === state.config.providerName,
+        ),
+      );
       const effort = resolveSessionEffort(
         state.config.model,
         state.config.reasoningEffort,
         isCodexProviderName(state.config.providerName),
+        reasoning?.reasoningEfforts,
+        reasoning?.defaultReasoningEffort,
       );
       setPromptModelLabel(hostOf(state).shell, {
         profile: state.config.providerName,
