@@ -194,7 +194,13 @@ const EVENT_PROPERTY_ALLOWLIST: Record<TelemetryEvent, readonly string[]> = {
   ],
 
   permission_prompt: ["decision", "permission_kind"],
-  compaction: ["mode", "duration_ms", "turns_before", "turns_after"],
+  compaction: [
+    "mode",
+    "duration_ms",
+    "turns_before",
+    "turns_after",
+    "live_tokens",
+  ],
   // provider/model are the canonical runtime ids (same trust class as
   // $ai_provider/$ai_model); error_kind is the summarizer's first-party
   // failure enum, never the provider's error text.
