@@ -14,6 +14,7 @@ export const DIRECTOR_IDS = [
   "warden",
   "shakespeare",
   "prober",
+  "tester",
 ] as const;
 
 export type DirectorId = (typeof DIRECTOR_IDS)[number];

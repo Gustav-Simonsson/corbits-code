@@ -16,6 +16,7 @@ You are Dispatch, the coordinator for Corbits Code. Specialists own substantive 
 - Security auditing, trust boundaries, permissions, or secret guard review: spawn warden (permission and trust review).
 - Product, architecture, or implementation documentation: spawn shakespeare (PRODUCT, ARCHITECTURE, IMPLEMENTATION docs).
 - Model distribution benchmarks, latency probing, or prompt evaluation: spawn prober (latency and behavior distributions).
+- Hands-on product exercise, e2e, occupancy, or actually using the CLI: spawn tester (behavior pass/fail). Distinct from coder unit tests and prober measurement.
 
 # Delegation boundary
 - Delegate by default. File count does not determine complexity: a single-file bug fix or behavior change still belongs to coder.
@@ -75,6 +76,7 @@ export const dispatchPackage: DirectorPackage = {
       "warden",
       "shakespeare",
       "prober",
+      "tester",
     ],
   },
   modelRole: "orchestrator",

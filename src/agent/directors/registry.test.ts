@@ -13,9 +13,9 @@ import {
 } from "./registry.js";
 
 describe("director registry", () => {
-  test("closed set has exactly 10 directors", () => {
-    expect(DIRECTOR_IDS).toHaveLength(10);
-    expect(listDirectors()).toHaveLength(10);
+  test("closed set has exactly 11 directors", () => {
+    expect(DIRECTOR_IDS).toHaveLength(11);
+    expect(listDirectors()).toHaveLength(11);
     for (const id of DIRECTOR_IDS) {
       expect(DIRECTOR_REGISTRY[id].id).toBe(id);
     }
@@ -116,7 +116,7 @@ describe("director registry", () => {
 
   test("directorProfiles is the spawn catalog (closed set minus dispatch)", () => {
     const profiles = directorProfiles();
-    expect(profiles).toHaveLength(9);
+    expect(profiles).toHaveLength(10);
     expect(profiles.map((p) => p.id)).not.toContain("dispatch");
   });
 
@@ -157,7 +157,7 @@ describe("director registry", () => {
     expect(s.tools?.allow).toContain("write_file");
     expect(s.tools?.allow).toContain("edit_file");
     expect(s.tools?.allow).toContain("delete_file");
-    expect(s.spawn.allowlist).toHaveLength(9);
+    expect(s.spawn.allowlist).toHaveLength(10);
   });
 
   test("tier agrees with spawn.maySpawn for every director", () => {
@@ -180,6 +180,32 @@ describe("director registry", () => {
     }
     expect(isDirectorId("prober")).toBe(true);
     expect(tierForDirectorId("prober")).toBe("leaf");
+  });
+
+  test("tester is a hands-on leaf, not prober, with no spawn", () => {
+    const r = resolveDirector({ agentId: "tester" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.package.id).toBe("tester");
+      expect(r.package.tier).toBe("leaf");
+      expect(r.package.spawn.maySpawn).toBe(false);
+      expect(r.package.modelRole).toBe("test");
+      expect(r.package.tools?.allow).toContain("write_file");
+      expect(r.package.systemPrompt).toMatch(/hands-on/i);
+      expect(r.package.systemPrompt).toMatch(/corbits exec/i);
+      expect(r.package.systemPrompt).toMatch(/bun test \.\/e2e/);
+      expect(r.package.systemPrompt).toMatch(/eval:capability/);
+      expect(r.package.systemPrompt).toMatch(/occupancy/i);
+      expect(r.package.systemPrompt).toMatch(/never author unit tests/i);
+      expect(r.package.systemPrompt).toMatch(
+        /never measure family\/model latency/i,
+      );
+      expect(r.package.systemPrompt).toMatch(/never fix product code/i);
+      expect(r.package).not.toBe(DIRECTOR_REGISTRY.prober);
+    }
+    expect(isDirectorId("tester")).toBe(true);
+    expect(tierForDirectorId("tester")).toBe("leaf");
+    expect(DIRECTOR_REGISTRY.dispatch.spawn.allowlist).toContain("tester");
   });
 
   test("dispatch card has no parallelization cap; duplicate is the same live job", () => {
