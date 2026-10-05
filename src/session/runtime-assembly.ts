@@ -579,6 +579,7 @@ export function createSessionPruningCompactor(
         duration_ms: Date.now() - startedAt,
         turns_before: turnsBefore,
         turns_after: result.output.length,
+        live_tokens: result.record.decisions.liveTokenEstimate,
       });
       return result;
     },

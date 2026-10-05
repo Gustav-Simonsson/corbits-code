@@ -30,7 +30,11 @@ import {
   PATH_KEYED_READ_TOOLS,
   SEARCH_QUERY_TOOLS,
 } from "../agent/tool-classification.js";
-import { estimateContentBlockTokens } from "../agent/context-estimate.js";
+import {
+  estimateContentBlockTokens,
+  estimateContextTokens,
+} from "../agent/context-estimate.js";
+import { THINKING_ONLY_OMITTED } from "../provider/replay-sanitizer.js";
 
 // ---------------------------------------------------------------------------
 // Compactor
@@ -710,31 +714,49 @@ function excerptTailText(
   };
 }
 
-// Excerpted live copy of a tail turn: large tool_result text parts shrink to
-// head+tail excerpts, everything else (user text, attachments, tool calls,
-// error results stay whole — errors are resume state, not bulk) passes
-// through untouched.
+// Excerpted live copy of a tail turn: thinking/redacted_thinking are dropped
+// from the live copy (full bodies stay in the archive) because uncapped
+// thinking on the newest pair was pinning occupancy near 45%. Drop whole
+// blocks so signatures are not sent with truncated text. Large tool_result
+// text parts shrink to head+tail excerpts; everything else (user text,
+// attachments, tool calls, error results stay whole — errors are resume
+// state, not bulk) passes through untouched.
 function excerptTailTurn(
   turn: ConversationTurn,
   shape: CompactionShape,
-): { turn: ConversationTurn; shortenedOutputs: number } {
+): { turn: ConversationTurn; shortenedOutputs: number; changed: boolean } {
   let shortenedOutputs = 0;
   let changed = false;
-  const content = turn.content.map(
-    (block): ConversationTurn["content"][number] => {
-      if (block.type !== "tool_result" || block.isError === true) return block;
-      const parts = block.content.map((c) => {
-        if (c.type !== "text") return c;
-        const excerpted = excerptTailText(c.text, shape);
-        if (!excerpted.shortened) return c;
-        shortenedOutputs += 1;
-        changed = true;
-        return { ...c, text: excerpted.text };
-      });
-      return changed ? { ...block, content: parts } : block;
-    },
-  );
-  return { turn: changed ? { ...turn, content } : turn, shortenedOutputs };
+  const content = turn.content.flatMap((block): ConversationTurn["content"] => {
+    if (block.type === "thinking" || block.type === "redacted_thinking") {
+      changed = true;
+      return [];
+    }
+    if (block.type !== "tool_result" || block.isError === true) return [block];
+    let blockChanged = false;
+    const parts = block.content.map((c) => {
+      if (c.type !== "text") return c;
+      const excerpted = excerptTailText(c.text, shape);
+      if (!excerpted.shortened) return c;
+      shortenedOutputs += 1;
+      blockChanged = true;
+      changed = true;
+      return { ...c, text: excerpted.text };
+    });
+    return [blockChanged ? { ...block, content: parts } : block];
+  });
+  // Dropping thinking/redacted_thinking can leave a thinking-only assistant
+  // with empty content. Adapters 400 on that; keep the turn (role
+  // alternation) and reuse the replay-sanitizer marker.
+  const liveContent =
+    content.length === 0
+      ? [{ type: "text" as const, text: THINKING_ONLY_OMITTED }]
+      : content;
+  return {
+    turn: changed ? { ...turn, content: liveContent } : turn,
+    shortenedOutputs,
+    changed,
+  };
 }
 
 interface TailSelection {
@@ -804,8 +826,12 @@ function selectTail(
   const turnCost = (idx: number): { tokens: number; shortened: number } => {
     const turn = turns[idx];
     if (turn === undefined) return { tokens: 0, shortened: 0 };
-    const { turn: live, shortenedOutputs } = excerptTailTurn(turn, shape);
-    if (shortenedOutputs > 0) excerpted.set(idx, live);
+    const {
+      turn: live,
+      shortenedOutputs,
+      changed,
+    } = excerptTailTurn(turn, shape);
+    if (changed) excerpted.set(idx, live);
     return {
       tokens: excerptedTurnTokens(turn, shape),
       shortened: shortenedOutputs,
@@ -1002,6 +1028,7 @@ export function createPruningCompactor(
               shortenedToolOutputs: tail.shortenedToolOutputs,
               agedImageCount: aged.agedImageCount,
               supersededReadCount: supersededReads.size,
+              liveTokenEstimate: estimateContextTokens(output),
             },
           },
           ...(aged.blobs.length > 0 ? { blobs: aged.blobs } : {}),
@@ -1194,6 +1221,7 @@ export function createPruningCompactor(
             agedImageCount: aged.agedImageCount,
             supersededReadCount: supersededReads.size,
             repeatedErrorCount: repeatedErrors.size,
+            liveTokenEstimate: estimateContextTokens(liveOutput),
             ...(summarizeFallback !== undefined
               ? {
                   summarizeFailed: 1,
