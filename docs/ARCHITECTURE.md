@@ -288,17 +288,17 @@ Every shipped specialist is a **director package** — a prompt-first `DirectorP
 
 **Specialists**
 
-| Director    | Owns                                                                 | Does not own           |
-| ----------- | -------------------------------------------------------------------- | ---------------------- |
-| explorer    | Read-only codebase mapping                                           | Product edits          |
-| planner     | PRD.md, SOLUTION_SCOPE.md, BUILD_PLAN.md authoring                   | Code                   |
-| coder       | Minimal safe diffs, root-cause fixes, tests                          | Pure docs, pure review |
-| reviewer    | Evidence-based defect and quality review with temp-test verification | Fixing product code    |
-| designer    | DESIGN.md, design laws, tokens, interface polish                     | Non-UI product code    |
-| artist      | SVGs, diagrams, generative graphic prompts                           | Product code           |
-| warden      | Trust review of permission, provider-auth, and plugin-loader diffs   | Fixes, general review  |
-| shakespeare | Docs maintenance (PRODUCT / ARCHITECTURE / IMPLEMENTATION)           | Product code           |
-| prober      | Measure-only latency and behavior probe per family/model             | Fixes, product edits   |
+| Director    | Owns                                                                 | Does not own                       |
+| ----------- | -------------------------------------------------------------------- | ---------------------------------- |
+| explorer    | Read-only codebase mapping                                           | Product edits                      |
+| planner     | PRD.md, SOLUTION_SCOPE.md, BUILD_PLAN.md authoring                   | Code                               |
+| coder       | Minimal safe diffs, root-cause fixes, tests                          | Pure docs, pure review             |
+| reviewer    | Evidence-based defect and quality review with temp-test verification | Fixing product code                |
+| designer    | DESIGN.md, design laws, tokens, interface polish                     | Non-UI product code                |
+| artist      | SVGs, diagrams, generative graphic prompts                           | Product code                       |
+| warden      | Trust review of permission, provider-auth, and plugin-loader diffs   | Fixes, general review              |
+| shakespeare | Docs maintenance (PRODUCT / ARCHITECTURE / IMPLEMENTATION)           | Product code                       |
+| prober      | Measure-only latency and behavior probe per family/model             | Fixes, product edits               |
 | tester      | Hands-on product exercise: CLI, e2e, occupancy, capability pass/fail | Unit tests, latency, product fixes |
 
 **Intent → director** (`spawn_agent(intent=…)` when `agent` is omitted). implement/review (and their default directors) fail closed without non-empty `success_criteria`.
