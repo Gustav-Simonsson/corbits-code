@@ -19,6 +19,18 @@ test("chat system prompt keeps the routing, spawn-brief, and rules sections", ()
   expect(prompt).toContain("manage_tasks");
 });
 
+test("dispatch card is spawn-first with no parallelization cap", () => {
+  const prompt = buildChatSystemPrompt();
+  expect(prompt).toContain("# Spawn");
+  expect(prompt).toContain("no parallelization cap");
+  expect(prompt).toMatch(/first assistant turn/i);
+  expect(prompt).toMatch(/same turn/i);
+  expect(prompt).toMatch(/same live job/i);
+  expect(prompt).not.toMatch(/Do not duplicate a live worker/i);
+  expect(prompt).not.toMatch(/diagnostic fleet/i);
+  expect(prompt).not.toMatch(/single explorer worker/i);
+});
+
 const envBase: EnvironmentInfo = {
   cwd: "/tmp/proj",
   platform: "test",

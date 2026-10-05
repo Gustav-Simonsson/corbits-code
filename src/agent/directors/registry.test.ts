@@ -182,6 +182,20 @@ describe("director registry", () => {
     expect(tierForDirectorId("prober")).toBe("leaf");
   });
 
+  test("dispatch card has no parallelization cap; duplicate is the same live job", () => {
+    const card = DIRECTOR_REGISTRY.dispatch.systemPrompt;
+    expect(card).toContain("no parallelization cap");
+    expect(card).toMatch(/same live job/i);
+    expect(card).not.toMatch(/Do not duplicate a live worker/i);
+  });
+
+  test("dispatch outOfLane spawns explorers instead of walking the repo", () => {
+    const lanes = DIRECTOR_REGISTRY.dispatch.outOfLane.join("\n");
+    expect(lanes).not.toMatch(/diagnostic fleet/i);
+    expect(lanes).not.toMatch(/single explorer worker/i);
+    expect(lanes).toMatch(/spawn explorer/i);
+  });
+
   test("every director profile declares matching agent id in system prompt", () => {
     for (const id of DIRECTOR_IDS) {
       const profile = packageToProfile(DIRECTOR_REGISTRY[id]);

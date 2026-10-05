@@ -34,7 +34,7 @@ const PROMPT_SIZE_BASELINE: Record<
   DirectorId,
   { chars: number; bytes: number }
 > = {
-  dispatch: { chars: 3551, bytes: 3555 },
+  dispatch: { chars: 5277, bytes: 5281 },
   explorer: { chars: 4041, bytes: 4059 },
   planner: { chars: 4439, bytes: 4447 },
   coder: { chars: 4705, bytes: 4715 },
