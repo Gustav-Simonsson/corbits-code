@@ -44,7 +44,7 @@ const PROMPT_SIZE_BASELINE: Record<
   warden: { chars: 4113, bytes: 4127 },
   shakespeare: { chars: 5993, bytes: 6015 },
   prober: { chars: 5428, bytes: 5454 },
-  tester: { chars: 5226, bytes: 5246 },
+  "qa-lead": { chars: 5226, bytes: 5246 },
 };
 
 /**

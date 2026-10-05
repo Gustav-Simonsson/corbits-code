@@ -6,9 +6,9 @@ import { dispatchPackage } from "./dispatch/package.js";
 import { explorerPackage } from "./explorer/package.js";
 import { plannerPackage } from "./planner/package.js";
 import { proberPackage } from "./prober/package.js";
+import { qaLeadPackage } from "./qa-lead/package.js";
 import { reviewerPackage } from "./reviewer/package.js";
 import { shakespearePackage } from "./shakespeare/package.js";
-import { testerPackage } from "./tester/package.js";
 import { wardenPackage } from "./warden/package.js";
 import { formatDirectorSystemPrompt } from "./identity.js";
 import {
@@ -47,7 +47,7 @@ export const DIRECTOR_REGISTRY: Readonly<Record<DirectorId, DirectorPackage>> =
     warden: wardenPackage,
     shakespeare: shakespearePackage,
     prober: proberPackage,
-    tester: testerPackage,
+    "qa-lead": qaLeadPackage,
   };
 
 export function isDirectorId(value: unknown): value is DirectorId {

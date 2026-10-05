@@ -299,7 +299,7 @@ Every shipped specialist is a **director package** — a prompt-first `DirectorP
 | warden      | Trust review of permission, provider-auth, and plugin-loader diffs   | Fixes, general review              |
 | shakespeare | Docs maintenance (PRODUCT / ARCHITECTURE / IMPLEMENTATION)           | Product code                       |
 | prober      | Measure-only latency and behavior probe per family/model             | Fixes, product edits               |
-| tester      | Hands-on product exercise: CLI, e2e, occupancy, capability pass/fail | Unit tests, latency, product fixes |
+| qa-lead     | QA Lead: hands-on CLI, e2e, occupancy, capability proof              | Unit tests, latency, product fixes |
 
 **Intent → director** (`spawn_agent(intent=…)` when `agent` is omitted). implement/review (and their default directors) fail closed without non-empty `success_criteria`.
 

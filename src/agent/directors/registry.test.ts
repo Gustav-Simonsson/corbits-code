@@ -182,15 +182,17 @@ describe("director registry", () => {
     expect(tierForDirectorId("prober")).toBe("leaf");
   });
 
-  test("tester is a hands-on leaf, not prober, with no spawn", () => {
-    const r = resolveDirector({ agentId: "tester" });
+  test("qa-lead is a hands-on leaf, not prober, with no spawn", () => {
+    const r = resolveDirector({ agentId: "qa-lead" });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.package.id).toBe("tester");
+      expect(r.package.id).toBe("qa-lead");
       expect(r.package.tier).toBe("leaf");
       expect(r.package.spawn.maySpawn).toBe(false);
       expect(r.package.modelRole).toBe("test");
       expect(r.package.tools?.allow).toContain("write_file");
+      expect(r.package.description).toMatch(/QA Lead/);
+      expect(r.package.systemPrompt).toMatch(/QA Lead/);
       expect(r.package.systemPrompt).toMatch(/hands-on/i);
       expect(r.package.systemPrompt).toMatch(/corbits exec/i);
       expect(r.package.systemPrompt).toMatch(/bun test \.\/e2e/);
@@ -203,9 +205,11 @@ describe("director registry", () => {
       expect(r.package.systemPrompt).toMatch(/never fix product code/i);
       expect(r.package).not.toBe(DIRECTOR_REGISTRY.prober);
     }
-    expect(isDirectorId("tester")).toBe(true);
-    expect(tierForDirectorId("tester")).toBe("leaf");
-    expect(DIRECTOR_REGISTRY.dispatch.spawn.allowlist).toContain("tester");
+    expect(isDirectorId("qa-lead")).toBe(true);
+    expect(isDirectorId("tester")).toBe(false);
+    expect(tierForDirectorId("qa-lead")).toBe("leaf");
+    expect(DIRECTOR_REGISTRY.dispatch.spawn.allowlist).toContain("qa-lead");
+    expect(DIRECTOR_REGISTRY.dispatch.spawn.allowlist).not.toContain("tester");
   });
 
   test("dispatch card has no parallelization cap; duplicate is the same live job", () => {

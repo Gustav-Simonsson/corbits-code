@@ -157,10 +157,10 @@ Capabilities beyond the core toolset are opt-in plugins, enabled per workspace t
 
 The primary session is always **orchestrator** (single-agent mode is gone). Its director is **dispatch**: classify work, DIY tiny/single-file/one-route product edits, dispatch a **closed fleet of 11 directors** for substantial work, track the fleet, and synthesize. Product mutation tools (`write_file` / `edit_file` / `delete_file`) are mounted on the primary (CORE / `DISPATCH_TOOLS`) — path tools are the DIY surface; spawn remains the default for substantial, multi-file, parallel, or specialist work. Shell file-writes stay denied. MCP tools are not re-filtered by a product-write deny list (that list is gone). There is no static per-package write-path declaration (CL-6952 removed it — no shipped director ever set one). A concurrent dispatch landing on the same working directory as another still-running lane is recorded as a `conflict` intervention, not blocked. Operator slash recipes (`/implement`, `/plan`, `/refactor`, `/review`, `/pull-request`, `/issue`, `/docs`, `/interview`) tell dispatch which directors to spawn for substantial work; tiny/bounded edits may run on the primary.
 
-| Role       | Directors                                                                                 |
-| ---------- | ----------------------------------------------------------------------------------------- |
-| Primary    | dispatch                                                                                  |
-| Specialist | explorer, planner, coder, reviewer, designer, artist, warden, shakespeare, prober, tester |
+| Role       | Directors                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------ |
+| Primary    | dispatch                                                                                   |
+| Specialist | explorer, planner, coder, reviewer, designer, artist, warden, shakespeare, prober, qa-lead |
 
 There is **no catch-all worker**. `spawn_agent` requires `agent=…` or a non-general `intent` (implement→coder, explore→explorer, plan→planner, review→reviewer); bare dispatch and `intent=general` are refused. Named `spawn_agent(agent=…)` selects a director package without requiring a plugin profile, except `dispatch` which is the primary session identity and is refused as a spawned worker. Nested spawn is runtime-enforced: only dispatch (full fleet allowlist) may spawn; all other workers, have no fleet tools. Primary omits an allowlist so plugin profiles remain reachable from the main session.
 
