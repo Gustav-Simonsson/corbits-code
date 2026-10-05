@@ -14,6 +14,7 @@ import {
 import { HANDOFF_LATEST_KEY } from "./session/compaction-handoff.js";
 import { compactionThresholdFor } from "./provider/context-window.js";
 import { estimateContextTokens } from "./agent/context-estimate.js";
+import { THINKING_ONLY_OMITTED } from "./provider/replay-sanitizer.js";
 import { createModelSummarizer } from "./session/summarizer.js";
 import {
   createCompactionGovernor,
@@ -1184,5 +1185,136 @@ describe("CL-9489 zero-verbatim fold", () => {
     expect(estimateContextTokens(result.output)).toBeLessThan(
       compactionThresholdFor(undefined),
     );
+  });
+
+  test("a newest-pair thinking block is dropped from the live tail", async () => {
+    const thinking = "t".repeat(160_000);
+    const filler = "x".repeat(1_500);
+    const turns: ConversationTurn[] = [];
+    for (let i = 0; i < 6; i++) {
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [{ type: "text", text: `dummy ask ${i} ${filler}` }],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [{ type: "text", text: `dummy reply ${i} ${filler}` }],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking,
+            signature: "sig-thinking-1",
+          },
+          {
+            type: "tool_call",
+            id: "c-newest",
+            name: "read_file",
+            arguments: { path: "src/app.ts" },
+          },
+        ],
+      }),
+    );
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            callId: "c-newest",
+            content: [{ type: "text", text: "export const app = 1;\n" }],
+          },
+        ],
+      }),
+    );
+
+    const result = await createPruningCompactor({
+      summarize: async () =>
+        "Folded dummy pairs. Next: resume the newest tool.",
+    }).apply(turns, mockStrategyCtx);
+
+    const liveTypes = result.output.flatMap((t) =>
+      t.content.map((b) => b.type),
+    );
+    expect(liveTypes).not.toContain("thinking");
+    expect(liveTypes).not.toContain("redacted_thinking");
+    expect(estimateContextTokens(result.output)).toBeLessThan(12_800);
+    expect(
+      result.output.some((t) =>
+        t.content.some((b) => b.type === "tool_call" && b.id === "c-newest"),
+      ),
+    ).toBe(true);
+    expect(
+      result.output.some((t) =>
+        t.content.some(
+          (b) => b.type === "tool_result" && b.callId === "c-newest",
+        ),
+      ),
+    ).toBe(true);
+    expect(result.record.decisions.liveTokenEstimate).toBe(
+      estimateContextTokens(result.output),
+    );
+  });
+
+  test("a thinking-only live turn is replaced with THINKING_ONLY_OMITTED", async () => {
+    const thinking = "t".repeat(20_000);
+    const filler = "x".repeat(1_500);
+    const turns: ConversationTurn[] = [];
+    for (let i = 0; i < 6; i++) {
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [{ type: "text", text: `dummy ask ${i} ${filler}` }],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [{ type: "text", text: `dummy reply ${i} ${filler}` }],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking,
+            signature: "sig-thinking-only",
+          },
+        ],
+      }),
+    );
+
+    const result = await createPruningCompactor({
+      summarize: async () =>
+        "Folded dummy pairs. Next: resume after thinking-only.",
+    }).apply(turns, mockStrategyCtx);
+
+    const liveTypes = result.output.flatMap((t) =>
+      t.content.map((b) => b.type),
+    );
+    expect(liveTypes).not.toContain("thinking");
+    expect(liveTypes).not.toContain("redacted_thinking");
+    expect(result.output.every((t) => t.content.length > 0)).toBe(true);
+    expect(
+      result.output.some(
+        (t) =>
+          t.role === "assistant" &&
+          t.content.some(
+            (b) => b.type === "text" && b.text === THINKING_ONLY_OMITTED,
+          ),
+      ),
+    ).toBe(true);
+    expect(estimateContextTokens(result.output)).toBeLessThan(12_800);
   });
 });
