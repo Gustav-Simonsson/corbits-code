@@ -451,7 +451,7 @@
     "src/agent/directors/prober/package.test.ts": 1,
     "src/agent/directors/rand/package.test.ts": 1,
     "src/agent/directors/shakespeare/package.test.ts": 1,
-    "src/agent/directors/tester/package.test.ts": 1,
+    "src/agent/directors/qa-lead/package.test.ts": 1,
     "src/agent/directors/warden/package.test.ts": 1,
     "src/agent/grok-residual.test.ts": 1,
     "src/agent/tool-classification.test.ts": 1,

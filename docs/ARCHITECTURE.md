@@ -278,7 +278,7 @@ Enforcement is runtime code at the existing tool-mount point, not prompt wording
 
 #### Closed director fleet (`src/agent/directors/`)
 
-Every shipped specialist is a **director package** — a prompt-first `DirectorPackage` (system prompt, tool envelope, spawn rights, nudge budget, report contract, `modelRole`, fleet authority `tier`) registered in a **closed** set of 10 ids. There is no catch-all worker: `spawn_agent` without `agent` or non-general `intent`, and `spawn_agent(intent="general")`, fail closed so the primary reclassifies. Nested directors with a spawn allowlist reject off-list children at `spawn_agent` dispatch time (not prompt-only). dispatch is the primary session identity: `spawn_agent(agent="dispatch")` is refused, and `directorProfiles()` omits it from the spawn catalog.
+Every shipped specialist is a **director package** — a prompt-first `DirectorPackage` (system prompt, tool envelope, spawn rights, nudge budget, report contract, `modelRole`, fleet authority `tier`) registered in a **closed** set of 11 ids. There is no catch-all worker: `spawn_agent` without `agent` or non-general `intent`, and `spawn_agent(intent="general")`, fail closed so the primary reclassifies. Nested directors with a spawn allowlist reject off-list children at `spawn_agent` dispatch time (not prompt-only). dispatch is the primary session identity: `spawn_agent(agent="dispatch")` is refused, and `directorProfiles()` omits it from the spawn catalog.
 
 **Primary**
 
@@ -288,17 +288,18 @@ Every shipped specialist is a **director package** — a prompt-first `DirectorP
 
 **Specialists**
 
-| Director    | Owns                                                                 | Does not own           |
-| ----------- | -------------------------------------------------------------------- | ---------------------- |
-| explorer    | Read-only codebase mapping                                           | Product edits          |
-| planner     | PRD.md, SOLUTION_SCOPE.md, BUILD_PLAN.md authoring                   | Code                   |
-| coder       | Minimal safe diffs, root-cause fixes, tests                          | Pure docs, pure review |
-| reviewer    | Evidence-based defect and quality review with temp-test verification | Fixing product code    |
-| designer    | DESIGN.md, design laws, tokens, interface polish                     | Non-UI product code    |
-| artist      | SVGs, diagrams, generative graphic prompts                           | Product code           |
-| warden      | Trust review of permission, provider-auth, and plugin-loader diffs   | Fixes, general review  |
-| shakespeare | Docs maintenance (PRODUCT / ARCHITECTURE / IMPLEMENTATION)           | Product code           |
-| prober      | Measure-only latency and behavior probe per family/model             | Fixes, product edits   |
+| Director    | Owns                                                                 | Does not own                       |
+| ----------- | -------------------------------------------------------------------- | ---------------------------------- |
+| explorer    | Read-only codebase mapping                                           | Product edits                      |
+| planner     | PRD.md, SOLUTION_SCOPE.md, BUILD_PLAN.md authoring                   | Code                               |
+| coder       | Minimal safe diffs, root-cause fixes, tests                          | Pure docs, pure review             |
+| reviewer    | Evidence-based defect and quality review with temp-test verification | Fixing product code                |
+| designer    | DESIGN.md, design laws, tokens, interface polish                     | Non-UI product code                |
+| artist      | SVGs, diagrams, generative graphic prompts                           | Product code                       |
+| warden      | Trust review of permission, provider-auth, and plugin-loader diffs   | Fixes, general review              |
+| shakespeare | Docs maintenance (PRODUCT / ARCHITECTURE / IMPLEMENTATION)           | Product code                       |
+| prober      | Measure-only latency and behavior probe per family/model             | Fixes, product edits               |
+| qa-lead     | QA Lead: hands-on CLI, e2e, occupancy, capability proof              | Unit tests, latency, product fixes |
 
 **Intent → director** (`spawn_agent(intent=…)` when `agent` is omitted). implement/review (and their default directors) fail closed without non-empty `success_criteria`.
 
