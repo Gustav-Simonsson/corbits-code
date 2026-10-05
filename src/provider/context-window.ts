@@ -161,13 +161,14 @@ export const COMPACTION_WINDOW_FRACTION = 0.6;
 // keep 80 in warning and start danger at 81.
 export const CONTEXT_METER_DANGER_FRACTION = 0.8;
 
-// Wide resume gap after a compact that stayed over the high watermark: the
-// governor does not re-arm on growth alone until usage climbs this fraction
-// of the window past the post-compact measurement. Anchored to the meter
-// bands — danger (0.8) minus threshold (0.6) — so a still-over session must
-// climb a full warning band before another fold instead of looping a compact
-// on every small growth step. Re-arming sooner requires fold evidence: usage
-// back at or under the threshold (isAtOrUnderCompactThreshold).
+// Wide resume gap after a compact: the governor does not re-arm on growth
+// alone until usage climbs this fraction of the window past the post-compact
+// measurement. Anchored to the meter bands — danger (0.8) minus threshold
+// (0.6) — so a session that folded only marginally under the high watermark
+// (or stayed over it) must climb a full warning band before another fold
+// instead of looping a compact on every small growth step. Under-threshold
+// usage restores consecutive/overflow/non-converged rails; it does not skip
+// this gap.
 export const COMPACTION_WIDE_RESUME_FRACTION = 0.2;
 
 export type ContextMeterBand = "quiet" | "warning" | "danger";
@@ -191,8 +192,8 @@ export function compactionThresholdFor(model: string | undefined): number {
   return Math.floor(window * COMPACTION_WINDOW_FRACTION);
 }
 
-/** Tokens of growth past the last post-compact measurement before a
- * still-over session may re-arm. */
+/** Tokens of growth past the last post-compact measurement before the
+ * latched proactive path may re-arm. */
 export function compactionWideResumeDeltaFor(
   model: string | undefined,
 ): number {
@@ -201,9 +202,10 @@ export function compactionWideResumeDeltaFor(
   return Math.floor(window * COMPACTION_WIDE_RESUME_FRACTION);
 }
 
-/** Low-watermark clear for the post-compact latch: usage back at or under the
- * compaction threshold is fold evidence — the summarizing fold got under — so
- * the governor re-arms on the next crossing with no gap required. */
+/** Fold evidence for restoring consecutive/overflow/non-converged rails:
+ * usage back at or under the compaction threshold means the summarizing fold
+ * got under. It does not drop the growth latch — re-arming still requires
+ * hasWideResumeGap past the post-compact snapshot. */
 export function isAtOrUnderCompactThreshold(
   contextTokens: number,
   model: string | undefined,
@@ -211,12 +213,13 @@ export function isAtOrUnderCompactThreshold(
   return contextTokens <= compactionThresholdFor(model);
 }
 
-/** Shared re-arm rule for a session latched above the threshold after a
- * compact (automatic, operator, or overflow recovery): growth alone never
- * re-arms — only a wide resume gap past the post-compact measurement does.
- * The proactive threshold path routes through this single predicate; the
- * overflow path shares the reset rule (under-threshold folds restore the
- * recovery budget) but fires on overflow errors regardless of this latch. */
+/** Shared re-arm rule for a session latched after a compact (automatic,
+ * operator, or overflow recovery), whether the fold landed under or over
+ * the threshold: growth alone never re-arms — only a wide resume gap past
+ * the post-compact measurement does. The proactive threshold path routes
+ * through this single predicate; the overflow path shares the reset rule
+ * (under-threshold folds restore the recovery budget) but fires on overflow
+ * errors regardless of this latch. */
 export function hasWideResumeGap(
   postCompactTokens: number,
   contextTokens: number,

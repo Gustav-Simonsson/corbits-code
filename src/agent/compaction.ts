@@ -169,11 +169,12 @@ export function createCompactionGovernor(
   let usingEstimate = false;
   let lastModel: string | undefined;
   let turnCount = 0;
-  // Latch after a compact that remained over the high watermark: snapshot the
-  // post-compact infer's usage, then do not re-arm on growth alone — only a
-  // wide resume gap past the snapshot (hasWideResumeGap) or usage back at or
-  // under the threshold clears it. Every compact sets this latch (threshold,
-  // operator, and overflow alike); only fold evidence moves past it.
+  // Growth latch: snapshot the first inference.done after a compact, then do
+  // not re-arm on growth alone — only a wide resume gap past the snapshot
+  // (hasWideResumeGap) re-arms the proactive path. Every compact sets this
+  // latch (threshold, operator, and overflow alike). Under-threshold folds
+  // keep the snapshot; they restore consecutive/overflow/non-converged rails
+  // but do not drop the latch.
   let tokensAtLastCompact: number | undefined;
   let awaitingPostCompactMeasurement = false;
   // Set when a fold's post-compact measurement is still at or above the
@@ -279,12 +280,13 @@ export function createCompactionGovernor(
         consecutiveThresholdCompacts = MAX_CONSECUTIVE_THRESHOLD_COMPACTS;
       }
     }
-    // Fold evidence: usage back at or under the threshold clears the latch
-    // and restores both rails (consecutive threshold compacts, overflow
-    // recoveries). Nothing else resets them — neither tool-call occupancy nor
-    // a still-over measurement — or compact→infer→compact would loop forever.
+    // Fold evidence: usage back at or under the threshold restores both rails
+    // (consecutive threshold compacts, overflow recoveries) and clears
+    // foldNonConverged. The growth latch stays — only a wide resume gap
+    // re-arms the proactive path. Nothing else resets the rails — neither
+    // tool-call occupancy nor a still-over measurement — or
+    // compact→infer→compact would loop forever.
     if (isAtOrUnderCompactThreshold(contextTokens, lastModel)) {
-      tokensAtLastCompact = undefined;
       consecutiveThresholdCompacts = 0;
       overflowRecoveries = 0;
       foldNonConverged = false;

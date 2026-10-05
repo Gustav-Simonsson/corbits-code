@@ -593,25 +593,58 @@ describe("compaction governor", () => {
     expect(governor.usingEstimate).toBe(false);
   });
 
-  test("clears the latch once usage drops under the high watermark", () => {
+  test("a deep post-compact fold still re-arms at the next 60% crossing", () => {
     const governor = createCompactionGovernor(() => undefined);
     governor.noteInferenceDone(inferenceDone(overThreshold), tenTurns);
     expect(
       governor.interceptActions(toolDone(), inferAction, capabilities),
     ).not.toBeNull();
 
-    governor.noteInferenceDone(inferenceDone(overThreshold), tenTurns);
-    expect(
-      governor.interceptActions(toolDone(), inferAction, capabilities),
-    ).toBeNull();
-
+    // Post-compact measurement is a deep fold, far under the watermark.
+    // hasWideResumeGap is already satisfied at the next 60% crossing
+    // (1000 + 0.2*window << threshold), so that crossing still arms.
     governor.noteInferenceDone(inferenceDone(1000), tenTurns);
     expect(
       governor.interceptActions(toolDone(), inferAction, capabilities),
     ).toBeNull();
 
-    // Next crossing of high arms immediately — no growth delta required.
     governor.noteInferenceDone(inferenceDone(overThreshold), tenTurns);
+    const actions = governor.interceptActions(
+      toolDone(),
+      inferAction,
+      capabilities,
+    );
+    expect(actions).not.toBeNull();
+    expect(actions?.some((a) => a.type === "compact")).toBe(true);
+  });
+
+  test("a marginal post-compact fold does not re-arm at the next 60% crossing", () => {
+    const governor = createCompactionGovernor(() => undefined);
+    // ~45% of a 128k window; under the 60% high watermark, but close enough
+    // that overThreshold - postCompact < wideDelta.
+    const marginalInput = Math.floor(compactionThresholdFor("m") * 0.75);
+    governor.noteInferenceDone(inferenceDone(overThreshold), tenTurns);
+    expect(
+      governor.interceptActions(toolDone(), inferAction, capabilities),
+    ).not.toBeNull();
+
+    governor.noteInferenceDone(inferenceDone(marginalInput), tenTurns);
+    expect(
+      governor.interceptActions(toolDone(), inferAction, capabilities),
+    ).toBeNull();
+
+    // Next 60% crossing must not re-arm — the growth latch survived the
+    // under-threshold fold.
+    governor.noteInferenceDone(inferenceDone(overThreshold), tenTurns);
+    expect(
+      governor.interceptActions(toolDone(), inferAction, capabilities),
+    ).toBeNull();
+
+    // Re-arm only once usage has climbed a wide resume gap past the snapshot.
+    governor.noteInferenceDone(
+      inferenceDone(marginalInput + wideDelta),
+      tenTurns,
+    );
     const actions = governor.interceptActions(
       toolDone(),
       inferAction,
@@ -627,6 +660,31 @@ describe("compaction governor", () => {
     expect(
       governor.interceptActions(toolDone(), inferAction, capabilities),
     ).not.toBeNull();
+
+    governor.noteInferenceDone(inferenceDone(overThreshold), tenTurns);
+    expect(
+      governor.interceptActions(toolDone(), inferAction, capabilities),
+    ).toBeNull();
+
+    const actions = governor.interceptOverflow(overflowError(), capabilities);
+    expect(actions).not.toBeNull();
+    expect(actions?.some((a) => a.type === "compact")).toBe(true);
+  });
+
+  test("overflow still compacts while an under-threshold latch blocks the proactive path", () => {
+    const governor = createCompactionGovernor(() => undefined);
+    const marginalInput = Math.floor(compactionThresholdFor("m") * 0.75);
+    governor.noteInferenceDone(inferenceDone(overThreshold), tenTurns);
+    expect(
+      governor.interceptActions(toolDone(), inferAction, capabilities),
+    ).not.toBeNull();
+
+    // Post-compact measurement is a marginal under-threshold fold. The
+    // growth latch must survive it so the next 60% crossing stays inert.
+    governor.noteInferenceDone(inferenceDone(marginalInput), tenTurns);
+    expect(
+      governor.interceptActions(toolDone(), inferAction, capabilities),
+    ).toBeNull();
 
     governor.noteInferenceDone(inferenceDone(overThreshold), tenTurns);
     expect(
