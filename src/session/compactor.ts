@@ -777,13 +777,10 @@ function lastAssistantToolCallIndex(
 ): number | undefined {
   for (let i = turns.length - 1; i >= 0; i--) {
     const turn = turns[i];
-    if (
-      turn !== undefined &&
-      turn.role === "assistant" &&
-      turn.content.some((block) => block.type === "tool_call")
-    ) {
-      return i;
-    }
+    if (turn === undefined || turn.role !== "assistant") continue;
+    return turn.content.some((block) => block.type === "tool_call")
+      ? i
+      : undefined;
   }
   return undefined;
 }

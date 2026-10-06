@@ -1446,6 +1446,97 @@ describe("CL-9489 zero-verbatim fold", () => {
     ).toBe(true);
   });
 
+  test("earlier live tool-use thinking is dropped when the last assistant is text-only", async () => {
+    const toolThinking = "tool-use-thinking-block";
+    const lastThinking = "text-only-thinking-block";
+    const filler = "x".repeat(1_500);
+    const turns: ConversationTurn[] = [];
+    for (let i = 0; i < 6; i++) {
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [{ type: "text", text: `dummy ask ${i} ${filler}` }],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [{ type: "text", text: `dummy reply ${i} ${filler}` }],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: toolThinking,
+            signature: "sig-tool-use",
+          },
+          {
+            type: "tool_call",
+            id: "c-earlier",
+            name: "read_file",
+            arguments: { path: "src/app.ts" },
+          },
+        ],
+      }),
+    );
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            callId: "c-earlier",
+            content: [{ type: "text", text: "export const app = 1;\n" }],
+          },
+        ],
+      }),
+    );
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: lastThinking,
+            signature: "sig-text-only",
+          },
+          { type: "text", text: "here is the answer" },
+        ],
+      }),
+    );
+
+    const result = await createPruningCompactor({
+      summarize: async () =>
+        "Folded dummy pairs. Next: resume after a text reply.",
+    }).apply(turns, mockStrategyCtx);
+
+    const liveTypes = result.output.flatMap((t) =>
+      t.content.map((b) => b.type),
+    );
+    expect(liveTypes).not.toContain("thinking");
+    expect(liveTypes).not.toContain("redacted_thinking");
+    expect(
+      result.output.some(
+        (t) =>
+          t.role === "assistant" &&
+          t.content.some((b) => b.type === "tool_call" && b.id === "c-earlier"),
+      ),
+    ).toBe(true);
+    expect(
+      result.output.some(
+        (t) =>
+          t.role === "assistant" &&
+          t.content.some(
+            (b) => b.type === "text" && b.text === "here is the answer",
+          ),
+      ),
+    ).toBe(true);
+  });
+
   test("a thinking-only live turn is replaced with THINKING_ONLY_OMITTED", async () => {
     const thinking = "t".repeat(20_000);
     const filler = "x".repeat(1_500);
