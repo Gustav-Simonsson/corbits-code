@@ -20,6 +20,20 @@ release that deserves narration. Passing `--notes <file>` overrides both for
 the GitHub body. Sections below this line predate generation and were written
 by hand.
 
+## [0.3.35] - 2026-10-06
+
+### What's Changed
+* fix(compaction): keep growth latch after under-threshold folds by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1315
+* fix(compaction): drop thinking blocks from the live tail by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1320
+* feat(dispatch): spawn first with no parallelization cap by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1317
+* feat(dispatch): concise default with a touch of personality by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1318
+* fix(provider): skip top p when custom setup temperature is set by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1314
+* feat(dispatch): add QA Lead director for hands-on product proof by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1319
+* fix(compaction): keep thinking on the last live tool-use assistant by @TheGreatAxios in https://github.com/corbitsdev/corbits-code/pull/1354
+
+
+**Full Changelog**: https://github.com/corbitsdev/corbits-code/compare/v0.3.34...v0.3.35
+
 ## [0.3.34] - 2026-10-03
 
 ### What's Changed
