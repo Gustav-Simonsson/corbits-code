@@ -1187,7 +1187,7 @@ describe("CL-9489 zero-verbatim fold", () => {
     );
   });
 
-  test("a newest-pair thinking block is dropped from the live tail", async () => {
+  test("the last live tool-use assistant keeps thinking unmodified", async () => {
     const thinking = "t".repeat(160_000);
     const filler = "x".repeat(1_500);
     const turns: ConversationTurn[] = [];
@@ -1241,17 +1241,25 @@ describe("CL-9489 zero-verbatim fold", () => {
         "Folded dummy pairs. Next: resume the newest tool.",
     }).apply(turns, mockStrategyCtx);
 
-    const liveTypes = result.output.flatMap((t) =>
-      t.content.map((b) => b.type),
-    );
-    expect(liveTypes).not.toContain("thinking");
-    expect(liveTypes).not.toContain("redacted_thinking");
-    expect(estimateContextTokens(result.output)).toBeLessThan(12_800);
-    expect(
-      result.output.some((t) =>
+    const lastToolUse = result.output.find(
+      (t) =>
+        t.role === "assistant" &&
         t.content.some((b) => b.type === "tool_call" && b.id === "c-newest"),
-      ),
-    ).toBe(true);
+    );
+    expect(lastToolUse).toBeDefined();
+    expect(lastToolUse?.content).toEqual([
+      {
+        type: "thinking",
+        thinking,
+        signature: "sig-thinking-1",
+      },
+      {
+        type: "tool_call",
+        id: "c-newest",
+        name: "read_file",
+        arguments: { path: "src/app.ts" },
+      },
+    ]);
     expect(
       result.output.some((t) =>
         t.content.some(
@@ -1262,6 +1270,271 @@ describe("CL-9489 zero-verbatim fold", () => {
     expect(result.record.decisions.liveTokenEstimate).toBe(
       estimateContextTokens(result.output),
     );
+  });
+
+  test("older live-tail tool-use thinking is dropped when a newer last assistant has a tool call", async () => {
+    const olderThinking = "older-thinking-block";
+    const newerThinking = "newer-thinking-block";
+    const filler = "x".repeat(1_500);
+    const turns: ConversationTurn[] = [];
+    for (let i = 0; i < 6; i++) {
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [{ type: "text", text: `dummy ask ${i} ${filler}` }],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [{ type: "text", text: `dummy reply ${i} ${filler}` }],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: olderThinking,
+            signature: "sig-older",
+          },
+          {
+            type: "tool_call",
+            id: "c-older",
+            name: "read_file",
+            arguments: { path: "src/old.ts" },
+          },
+        ],
+      }),
+    );
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            callId: "c-older",
+            content: [{ type: "text", text: "export const old = 1;\n" }],
+          },
+        ],
+      }),
+    );
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: newerThinking,
+            signature: "sig-newer",
+          },
+          {
+            type: "tool_call",
+            id: "c-newer",
+            name: "read_file",
+            arguments: { path: "src/new.ts" },
+          },
+        ],
+      }),
+    );
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            callId: "c-newer",
+            content: [{ type: "text", text: "export const neu = 1;\n" }],
+          },
+        ],
+      }),
+    );
+
+    const result = await createPruningCompactor({
+      summarize: async () =>
+        "Folded dummy pairs. Next: resume the newest tool.",
+    }).apply(turns, mockStrategyCtx);
+
+    const older = result.output.find(
+      (t) =>
+        t.role === "assistant" &&
+        t.content.some((b) => b.type === "tool_call" && b.id === "c-older"),
+    );
+    const newer = result.output.find(
+      (t) =>
+        t.role === "assistant" &&
+        t.content.some((b) => b.type === "tool_call" && b.id === "c-newer"),
+    );
+    expect(older).toBeDefined();
+    expect(newer).toBeDefined();
+    expect(older?.content.some((b) => b.type === "thinking")).toBe(false);
+    expect(older?.content).toEqual([
+      {
+        type: "tool_call",
+        id: "c-older",
+        name: "read_file",
+        arguments: { path: "src/old.ts" },
+      },
+    ]);
+    expect(newer?.content).toEqual([
+      {
+        type: "thinking",
+        thinking: newerThinking,
+        signature: "sig-newer",
+      },
+      {
+        type: "tool_call",
+        id: "c-newer",
+        name: "read_file",
+        arguments: { path: "src/new.ts" },
+      },
+    ]);
+  });
+
+  test("a text-only last assistant drops all live-tail thinking", async () => {
+    const thinking = "t".repeat(20_000);
+    const filler = "x".repeat(1_500);
+    const turns: ConversationTurn[] = [];
+    for (let i = 0; i < 6; i++) {
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [{ type: "text", text: `dummy ask ${i} ${filler}` }],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [{ type: "text", text: `dummy reply ${i} ${filler}` }],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking,
+            signature: "sig-text-only",
+          },
+          { type: "text", text: "here is the answer" },
+        ],
+      }),
+    );
+
+    const result = await createPruningCompactor({
+      summarize: async () =>
+        "Folded dummy pairs. Next: resume after a text reply.",
+    }).apply(turns, mockStrategyCtx);
+
+    const liveTypes = result.output.flatMap((t) =>
+      t.content.map((b) => b.type),
+    );
+    expect(liveTypes).not.toContain("thinking");
+    expect(liveTypes).not.toContain("redacted_thinking");
+    expect(
+      result.output.some(
+        (t) =>
+          t.role === "assistant" &&
+          t.content.some(
+            (b) => b.type === "text" && b.text === "here is the answer",
+          ),
+      ),
+    ).toBe(true);
+  });
+
+  test("earlier live tool-use thinking is dropped when the last assistant is text-only", async () => {
+    const toolThinking = "tool-use-thinking-block";
+    const lastThinking = "text-only-thinking-block";
+    const filler = "x".repeat(1_500);
+    const turns: ConversationTurn[] = [];
+    for (let i = 0; i < 6; i++) {
+      turns.push(
+        makeTurn({
+          role: "user",
+          content: [{ type: "text", text: `dummy ask ${i} ${filler}` }],
+        }),
+      );
+      turns.push(
+        makeTurn({
+          role: "assistant",
+          content: [{ type: "text", text: `dummy reply ${i} ${filler}` }],
+        }),
+      );
+    }
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: toolThinking,
+            signature: "sig-tool-use",
+          },
+          {
+            type: "tool_call",
+            id: "c-earlier",
+            name: "read_file",
+            arguments: { path: "src/app.ts" },
+          },
+        ],
+      }),
+    );
+    turns.push(
+      makeTurn({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            callId: "c-earlier",
+            content: [{ type: "text", text: "export const app = 1;\n" }],
+          },
+        ],
+      }),
+    );
+    turns.push(
+      makeTurn({
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: lastThinking,
+            signature: "sig-text-only",
+          },
+          { type: "text", text: "here is the answer" },
+        ],
+      }),
+    );
+
+    const result = await createPruningCompactor({
+      summarize: async () =>
+        "Folded dummy pairs. Next: resume after a text reply.",
+    }).apply(turns, mockStrategyCtx);
+
+    const liveTypes = result.output.flatMap((t) =>
+      t.content.map((b) => b.type),
+    );
+    expect(liveTypes).not.toContain("thinking");
+    expect(liveTypes).not.toContain("redacted_thinking");
+    expect(
+      result.output.some(
+        (t) =>
+          t.role === "assistant" &&
+          t.content.some((b) => b.type === "tool_call" && b.id === "c-earlier"),
+      ),
+    ).toBe(true);
+    expect(
+      result.output.some(
+        (t) =>
+          t.role === "assistant" &&
+          t.content.some(
+            (b) => b.type === "text" && b.text === "here is the answer",
+          ),
+      ),
+    ).toBe(true);
   });
 
   test("a thinking-only live turn is replaced with THINKING_ONLY_OMITTED", async () => {
