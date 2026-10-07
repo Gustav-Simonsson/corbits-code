@@ -287,8 +287,14 @@ describe("CL-7990 shell-child reap: sessions holding a live shell child settle",
       const outcome = await runWithStubAgent(agent, async () => {
         const { runPromise, handles } = await runWithShellChildAgent(agent, {
           persist: false,
+          // Test injection: the run's own bounded teardown fires after this
+          // short deadline instead of the production 30s bound, so the
+          // wedged close is proven to settle the run in ~0.4s, not 30s.
+          // Kept above the close bound below so the close error surfaces
+          // before the run settles.
+          teardownDeadlineMs: 400,
         });
-        const closeError = await handles.close(500).then(
+        const closeError = await handles.close(200).then(
           () => undefined,
           (err: unknown) => err,
         );

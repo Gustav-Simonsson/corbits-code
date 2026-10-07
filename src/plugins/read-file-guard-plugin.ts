@@ -62,6 +62,12 @@ export interface ReadFileGuardPluginOptions {
   canExecuteHostCommands?: () => boolean;
   /** Model-facing path for diagnosis text (the call argument, not the absolute). */
   displayPath?: string;
+  /**
+   * Test-injectable scan ceiling in bytes. Production leaves this unset and
+   * keeps READ_FILE_MAX_SCAN_BYTES, so the ceiling is a constant in shipped
+   * code; tests lower it to keep oversized fixtures small.
+   */
+  maxScanBytes?: number;
 }
 
 // A truncated read tells the model to continue with the same path and the
@@ -140,6 +146,7 @@ function readStreamBounded(
     wrapLongLines?: boolean;
     windowHugeLines?: boolean;
     diagnoseFirstChunk?: (chunk: Buffer) => string | undefined;
+    maxScanBytes?: number;
   } = {},
 ): Promise<BoundedRead> {
   return new Promise<BoundedRead>((resolveP, rejectP) => {
@@ -148,7 +155,9 @@ function readStreamBounded(
       wrapLongLines = false,
       windowHugeLines = false,
       diagnoseFirstChunk,
+      maxScanBytes,
     } = options;
+    const scanCeiling = maxScanBytes ?? READ_FILE_MAX_SCAN_BYTES;
     const decoder = new StringDecoder("utf8");
     const contentBudget = READ_FILE_MAX_BYTES - NOTICE_RESERVE_BYTES;
 
@@ -290,7 +299,7 @@ function readStreamBounded(
         } else {
           done({
             content: `[reached the ${
-              READ_FILE_MAX_SCAN_BYTES / (1024 * 1024)
+              scanCeiling / (1024 * 1024)
             }MB scan limit before offset ${offset}; the file is larger than read_file scans in one pass. Use a smaller offset or grep to locate content.]`,
             isError: true,
           });
@@ -300,7 +309,7 @@ function readStreamBounded(
 
       let content = out.join("\n");
       if (truncReason !== undefined) {
-        content += `\n\n${continuationNotice(truncReason, offset + 1, lastEmittedLine, limit)}`;
+        content += `\n\n${continuationNotice(truncReason, offset + 1, lastEmittedLine, limit, scanCeiling)}`;
       }
       done({ content });
     };
@@ -331,7 +340,7 @@ function readStreamBounded(
         finishOk();
         return;
       }
-      if (scanned >= READ_FILE_MAX_SCAN_BYTES) {
+      if (scanned >= scanCeiling) {
         flushRemainder();
         if (truncReason === undefined) truncReason = "scan";
         finishOk();
@@ -368,7 +377,7 @@ export function readFileBounded(
   signal: AbortSignal,
   inspection?: Pick<
     ReadFileGuardPluginOptions,
-    "whichExtractor" | "canExecuteHostCommands" | "displayPath"
+    "whichExtractor" | "canExecuteHostCommands" | "displayPath" | "maxScanBytes"
   >,
 ): Promise<BoundedRead> {
   const labeledPath = inspection?.displayPath ?? absolutePath;
@@ -381,6 +390,9 @@ export function readFileBounded(
     {
       mapStreamError: (err) => mapFilesystemStreamError(labeledPath, err),
       windowHugeLines: true,
+      ...(inspection?.maxScanBytes !== undefined
+        ? { maxScanBytes: inspection.maxScanBytes }
+        : {}),
       diagnoseFirstChunk: (chunk) => {
         const kind = inspectionKindFromFirstChunk(absolutePath, chunk);
         if (kind === undefined) return undefined;
@@ -434,6 +446,7 @@ function continuationNotice(
   firstLine: number,
   lastLine: number,
   limit: number,
+  scanCeiling: number,
 ): string {
   const next = `Use offset=${lastLine} to continue.`;
   if (reason === "lines") {
@@ -445,7 +458,7 @@ function continuationNotice(
     }KB output limit. ${next}]`;
   }
   return `[Showing lines ${firstLine}-${lastLine}; stopped at the ${
-    READ_FILE_MAX_SCAN_BYTES / (1024 * 1024)
+    scanCeiling / (1024 * 1024)
   }MB scan limit. ${next}]`;
 }
 
@@ -475,10 +488,12 @@ export function readFileGuardPlugin(
   cwd: string,
   options: ReadFileGuardPluginOptions = {},
 ): ToolPlugin {
-  const { blobReader, whichExtractor, canExecuteHostCommands } = options;
+  const { blobReader, whichExtractor, canExecuteHostCommands, maxScanBytes } =
+    options;
   const inspection = {
     ...(whichExtractor !== undefined ? { whichExtractor } : {}),
     ...(canExecuteHostCommands !== undefined ? { canExecuteHostCommands } : {}),
+    ...(maxScanBytes !== undefined ? { maxScanBytes } : {}),
   };
   return {
     middleware: (next) => async (call, signal) => {

@@ -19,6 +19,18 @@ import { fileURLToPath } from "node:url";
 // gate fails closed when the scanned file count drops below that config's
 // floor.
 
+// Test injection (same pattern as teardownDeadlineMs / maxScanBytes): a
+// subprocess test that needs the real gate without paying for the ~1.5s tsc
+// file-count run can pass the deterministic count itself. Production never
+// sets it, so the gate always computes the count in normal runs.
+const scannedFilesEnv = "DEAD_EXPORT_GUARD_SCANNED_FILES";
+
+// Test injection (same pattern as scannedFilesEnv): a subprocess test that
+// needs the wired-up gate without paying for the ~5s full-project ts-prune
+// run can point the pinned scan at a smaller tsconfig. Production never sets
+// it, so the gate always scans the pinned tsconfig in normal runs.
+const tsconfigEnv = "DEAD_EXPORT_GUARD_TSCONFIG";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(here);
 const allowlistPath = join(here, "dead-export-allowlist.txt");
@@ -284,6 +296,22 @@ export function tsPruneSpawn(
   return { command: "node", args: [tsPruneBinPath, ...tsPruneArgs] };
 }
 
+// Parses the test-injection env override. Undefined means compute the count
+// as usual; anything else must be a positive integer or the gate fails
+// closed rather than trusting a bogus number.
+export function parseInjectedScannedFiles(
+  value: string | undefined,
+): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(
+      `${scannedFilesEnv} must be a positive integer when set (test injection only)`,
+    );
+  }
+  return parsed;
+}
+
 // Counts the TypeScript files the pinned tsconfig pulls into its program via
 // tsc --listFilesOnly: the same project ts-prune analyzes. A narrowed
 // tsconfig (or a moved scan root) shrinks this count, and the gate fails
@@ -329,6 +357,19 @@ function main(): void {
   } catch (err) {
     fail(`dead-export guard: invalid guard config: ${(err as Error).message}`);
   }
+  const overrideTsconfig = process.env[tsconfigEnv];
+  if (overrideTsconfig !== undefined) {
+    if (!existsSync(join(repoRoot, overrideTsconfig))) {
+      fail(
+        `dead-export guard: tsconfig override not found: ${overrideTsconfig}`,
+      );
+    }
+    config = {
+      ...config,
+      tsconfig: overrideTsconfig,
+      tsPruneArgs: ["-p", overrideTsconfig],
+    };
+  }
   const allowlistText = readFileSync(allowlistPath, "utf8");
   const allowlistProblems = [
     ...validateAllowlistText(allowlistText),
@@ -356,12 +397,17 @@ function main(): void {
   }
   const outcome = evaluateGuard(rules, String(pruned.stdout));
   let scannedFiles: number;
-  try {
-    scannedFiles = countScannedFiles(repoRoot, config.tsconfig);
-  } catch (err) {
-    fail(
-      `dead-export guard: could not count scanned files: ${(err as Error).message}`,
-    );
+  const injectedCount = parseInjectedScannedFiles(process.env[scannedFilesEnv]);
+  if (injectedCount !== undefined) {
+    scannedFiles = injectedCount;
+  } else {
+    try {
+      scannedFiles = countScannedFiles(repoRoot, config.tsconfig);
+    } catch (err) {
+      fail(
+        `dead-export guard: could not count scanned files: ${(err as Error).message}`,
+      );
+    }
   }
   console.log(
     `dead-export guard: ${outcome.dead} consumer-less exports, ${outcome.dead - outcome.violations.length} allowlisted, ${outcome.violations.length} violations, ${scannedFiles} scanned files (floor ${config.minScannedFiles})`,
