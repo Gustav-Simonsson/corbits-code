@@ -44,7 +44,6 @@ function isENOENT(err: unknown): boolean {
 //   x = random (62 bits total)
 //   y = variant (10xx = RFC 4122)
 // ---------------------------------------------------------------------------
-
 export function generateSessionId(): string {
   const ts = Date.now();
   const bytes = new Uint8Array(16);
@@ -81,7 +80,6 @@ export function generateSessionId(): string {
 // ---------------------------------------------------------------------------
 // Canonical layout: ~/.corbits/projects/<project-key>/<session-id>/
 // Legacy in-repo layout: <cwd>/.agent-state/<session-id>/ (dual-read + migrate)
-
 /** Legacy in-repo session base (compat / dual-read only). */
 export const LEGACY_SESSION_BASE = ".agent-state";
 
