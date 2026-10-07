@@ -29,12 +29,10 @@ export interface SubAgentProvider {
   keyless?: boolean;
   model: string;
   // Resolved effort for this spawn (pin > role default > parent); leaves
-  // default to medium, orchestrators to high, so a primary /agent high
-  // selection does not force every leaf onto high.
+  // default to medium, orchestrators to high.
   reasoningEffort?: ReasoningEffort;
-  // Mirrors ProviderCatalogEntry.bifrostVirtualKey; without it the dispatch
-  // path builds a plain openai-compatible source and the gateway never gets
-  // the x-bf-vk header.
+  // Mirrors ProviderCatalogEntry.bifrostVirtualKey; without it the gateway
+  // never gets the x-bf-vk header.
   bifrostVirtualKey?: boolean;
 }
 
@@ -51,21 +49,17 @@ export interface SubAgentSandboxDeps {
   /** Project settings.env, merged into the sub-agent's run_shell spawn environment. */
   shellEnv?: Record<string, string>;
   /**
-   * Parent's secret-guard runtime denylist (the active --config path), so
-   * workers cannot silently use skip-permissions the primary itself is
-   * denied. Inherited down the dispatch chain.
+   * Parent's secret-guard runtime denylist, so workers cannot silently use
+   * skip-permissions the primary itself is denied. Inherited down the
+   * dispatch chain.
    */
   secretGuardExtraDeniedPaths?: readonly string[];
-  /**
-   * Plugin skill dirs, same list the primary passes to createUseSkillTool,
-   * so workers resolve attached/optional skill bodies through them.
-   */
+  /** Plugin skill dirs, same list the primary passes to createUseSkillTool. */
   skillDirs?: readonly string[];
   /**
-   * The dispatcher's already-discovered skill catalog; a worker whose lane
-   * cwd matches the discovery cwd reuses it instead of rescanning. run.ts
-   * falls back to the cached discovery when unset or when the lane's
-   * worktree has a different cwd.
+   * The dispatcher's already-discovered skill catalog; a lane cwd matching
+   * the discovery cwd reuses it instead of rescanning. run.ts falls back
+   * when unset or the worktree cwd differs.
    */
   skillSnapshot?: readonly SkillSummary[];
 }
@@ -90,12 +84,11 @@ export type NestedDispatchDeps = SubAgentSandboxDeps & {
   // worktree like their orchestrator.
   useWorktree?: boolean;
   /**
-   * When set, nested `spawn_agent` may only spawn these director/profile
-   * ids; omitted = no allowlist filter (primary). No closed director sets
-   * one today.
+   * Nested `spawn_agent` may only spawn these director/profile ids;
+   * omitted = no filter (primary). No closed director sets one today.
    */
   spawnAllowlist?: readonly string[];
-  /** Same process admission queue as the parent spawn. Tests inject. */
+  /** Same process admission queue as spawn. Tests inject. */
   admission?: AdmissionQueue;
 };
 
@@ -104,10 +97,10 @@ export type RunSubAgentParams = {
   cwd: string;
   workdirBase: string;
   /**
-   * Stable id for the worker's on-disk trace directory (subagents/<id>).
-   * Must match the SubAgentSessionStore record id when the caller tracks
-   * one, so read_agent_trace reuses the store's parentSessionId chain.
-   * Falls back to a fresh id when unset or unsafe as a path segment.
+   * Stable id for the worker's trace directory (subagents/<id>); must match
+   * the store record id when tracked, so read_agent_trace reuses the
+   * parentSessionId chain. Falls back to a fresh id when unset or unsafe as
+   * a path segment.
    */
   id?: string;
   provider: SubAgentProvider;
@@ -116,8 +109,8 @@ export type RunSubAgentParams = {
   description: string;
   context?: string;
   prompt: string;
-  // Optional ordered goals for the worker to track; surfaced in the dispatch
-  // brief as a suggested manage_tasks seed — the child keeps its own list.
+  // Ordered goals for the worker to track; surfaced in the brief as a
+  // manage_tasks seed — the child keeps its own list.
   goals?: readonly string[];
   /** Spawn intent for the brief; tool filtering is owned by the dispatcher. */
   intent?: TaskIntent;
@@ -132,12 +125,12 @@ export type RunSubAgentParams = {
   admission?: AdmissionQueue;
   /**
    * Override the outer provider-failure backoff. Tests inject a short delay
-   * so retry suites skip the production 500ms wait.
+   * to skip the production 500ms wait.
    */
   outerRetryDelayMs?: number;
   /**
    * Override the per-attempt retry policy inside a live send. Tests inject
-   * a fast policy so retry suites skip the production backoff.
+   * a fast policy to skip the production backoff.
    */
   retryPolicy?: RetryPolicy;
   onEvent?: (event: ReactorEmittedEvent) => void;
@@ -154,7 +147,7 @@ export type RunSubAgentParams = {
    * Skill allowlist for the worker's skill_search + use_skill mounts,
    * resolved by agent-fleet.ts as the union of DirectorPackage.attachedSkills
    * and optionalSkills. Set: tools see only these names (unknown names
-   * refuse). Unset: the worker sees every discovered skill.
+   * refuse). Unset: every discovered skill.
    */
   allowedSkillNames?: readonly string[];
   /**
@@ -204,11 +197,10 @@ export type RunSubAgentParams = {
    */
   deadlineMs?: number;
   /**
-   * Resolved director tier, independent of `orchestratorTier` (only set
-   * when `orchestrator` is true); set by agent-fleet.ts from
-   * `DirectorPackage.tier`. runSubAgent mounts `submit_result` only when
-   * this is `"leaf"`, gated by the existing tier machinery, not a new
-   * mechanism.
+   * Resolved director tier, independent of `orchestratorTier`; set by
+   * agent-fleet.ts from `DirectorPackage.tier`. runSubAgent mounts
+   * `submit_result` only when this is `"leaf"`, gated by the existing tier
+   * machinery, not a new mechanism.
    */
   tier?: SubagentTier;
   /** DirectorPackage.reportContract.outputType, when the resolved leaf declares one. */
@@ -217,8 +209,7 @@ export type RunSubAgentParams = {
    * When true, a clean success skips end-of-turn teardown
    * (agent.close() / posixTools.dispose()) so the session stays open and
    * reusable; failures and aborts still tear down. The caller must
-   * eventually close the session (close_agent) or it leaks its posix tools
-   * / workdir lock.
+   * eventually close_agent or it leaks its posix tools / workdir lock.
    */
   persist?: boolean;
   /**
@@ -246,17 +237,14 @@ export type RunSubAgentParams = {
    *
    *  - `close`: bounded teardown for close_agent.
    *  - `interrupt`: stops the in-flight `agent.send()` via a signal scoped
-   *    to that call only — unlike `close`'s AbortController it never touches
-   *    agent.close() or the workdir lock; the reactor keeps running in the
-   *    background, only the caller stops waiting.
-   *  - `followup`: sends a new message into the same live agent (same
-   *    history, same context store) once the current turn is inactive —
-   *    what `resume_agent` builds on, reusing `agent.send`'s FIFO send
-   *    queue.
+   *    to that call only — never touches agent.close() or the workdir lock;
+   *    the reactor keeps running, only the caller stops waiting.
+   *  - `followup`: sends a new message into the same live agent once the
+   *    current turn is inactive — what `resume_agent` builds on.
    *
-   * Always fired regardless of `persist`, so a caller can act on a
-   * still-running session too. `close`'s deadline bounds teardown; a wedged
-   * close fails rather than reporting success while children are still live.
+   * Always fired regardless of `persist`. `close`'s deadline bounds
+   * teardown; a wedged close fails rather than reporting success while
+   * children are still live.
    */
   onAgentReady?: (handles: {
     close: (deadlineMs?: number) => Promise<void>;
