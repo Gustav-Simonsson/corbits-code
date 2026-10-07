@@ -18,9 +18,8 @@ export function createOpenAICompatibleAdapter(
 ): ProviderAdapter {
   const base = createOpenAIAdapter(source, quirks);
   // Set by buildRequest for the model the current request targets; only
-  // DeepSeek/NIM streams need the null-delta-field patch below, so every
-  // other provider's frames skip the reparse and hit base.parseResponse
-  // exactly once instead of twice.
+  // DeepSeek/NIM streams need the null-delta-field patch below, so other
+  // providers' frames skip the reparse and hit base.parseResponse once.
   let needsDeepSeekPatch = false;
 
   const ensureAccept = (req: BuiltRequest): BuiltRequest => {
@@ -41,8 +40,8 @@ export function createOpenAICompatibleAdapter(
     const providerOptions = options.providerOptions;
     const hasProviderOptions =
       providerOptions !== undefined && Object.keys(providerOptions).length > 0;
-    // DeepSeek returns HTTP 400 if `reasoning_content` appears in input messages,
-    // whereas the base adapter emits it for any model with thinking enabled.
+    // DeepSeek returns HTTP 400 if `reasoning_content` appears in input
+    // messages; the base adapter emits it for any model with thinking enabled.
     const stripReasoning = model.toLowerCase().includes("deepseek");
     needsDeepSeekPatch = stripReasoning;
     if (!hasProviderOptions && !stripReasoning) return ensureAccept(built);
@@ -60,8 +59,8 @@ export function createOpenAICompatibleAdapter(
   };
 
   // DeepSeek via NVIDIA NIM sends null for delta fields the upstream schema
-  // requires to be non-null; every other provider's frames skip the reparse
-  // and hit base.parseResponse exactly once instead of twice.
+  // requires to be non-null; other providers' frames skip the reparse and
+  // hit base.parseResponse once.
   const parseResponse: ProviderAdapter["parseResponse"] = (sseData: string) => {
     if (!needsDeepSeekPatch) return base.parseResponse(sseData);
     return base.parseResponse(normalizeNullDeltaFields(sseData));
