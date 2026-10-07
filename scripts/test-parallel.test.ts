@@ -23,8 +23,10 @@ function processAlive(pid: number): boolean {
 // remaining tests drive children that never emit output, so their stall is
 // declared deterministically on the watchdog's first tick; they use a short
 // window so the suite does not pay the tick test's headroom in wall clock.
+// The silent-child window stays a few bun -e spawn times wide so a retried
+// child's first output cannot be mistaken for a stall under load.
 const TEST_STALL_MS = 500;
-const SILENT_CHILD_STALL_MS = 250;
+const SILENT_CHILD_STALL_MS = 200;
 
 describe("runWithWatchdog", () => {
   test("passes through a successful run without retrying", async () => {

@@ -103,9 +103,14 @@ describe("codex shared-credential refresh race", () => {
       if (arrivals === 1) {
         // Rendezvous: hold the first grant until the second refresh arrives
         // (or a timeout), forcing the two refreshes to overlap the way two
-        // concurrent headless runs do.
+        // concurrent headless runs do. The store serializes refreshes, so in
+        // the passing implementation the second session blocks on the lock
+        // and never starts a second grant: the hold always times out, so the
+        // ceiling is pure wall clock. 200ms is far past the few-ms window
+        // between two Promise.all-launched refreshes in a broken (unserialized)
+        // implementation, and the serialized path is unaffected.
         const start = Date.now();
-        while (arrivals < 2 && Date.now() - start < 1_000)
+        while (arrivals < 2 && Date.now() - start < 200)
           await new Promise((resolve) => setTimeout(resolve, 5));
       }
       const presented = new URLSearchParams(String(init?.body ?? "")).get(
