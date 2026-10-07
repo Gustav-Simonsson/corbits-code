@@ -19,6 +19,7 @@ import {
   loadGuardConfig,
   parseAllowlistText,
   parseGuardConfig,
+  parseInjectedScannedFiles,
   parseTsPruneLine,
   tsPruneSpawn,
   validateAllowlistEntry,
@@ -27,6 +28,19 @@ import {
 } from "./check-dead-exports.js";
 
 const repoRoot = join(import.meta.dir, "..");
+
+// tsc --listFilesOnly costs ~1.5s per spawn and the count is deterministic
+// for a clean tree. The floor tests and the end-to-end probe share one run
+// through this cache; each caller computes it on first use, so no test
+// depends on another having run.
+let cachedScannedFileCount: number | undefined;
+function liveScannedFileCount(): number {
+  cachedScannedFileCount ??= countScannedFiles(
+    repoRoot,
+    loadGuardConfig().tsconfig,
+  );
+  return cachedScannedFileCount;
+}
 
 // A probe dead export in one of the scoped files must fail the guard: the
 // exact-name exemptions cover only the remaining deferred-cleanup flags
@@ -310,6 +324,17 @@ describe("pinned scan invocation", () => {
     expect(() => parseGuardConfig(null)).toThrow();
     expect(() => parseGuardConfig([])).toThrow();
   });
+
+  test("the scanned-files injection accepts no override or a positive integer", () => {
+    expect(parseInjectedScannedFiles(undefined)).toBeUndefined();
+    expect(parseInjectedScannedFiles("1217")).toBe(1217);
+  });
+
+  test("the scanned-files injection fails closed on a bogus value", () => {
+    for (const bad of ["", "0", "-5", "1.5", "abc"]) {
+      expect(() => parseInjectedScannedFiles(bad)).toThrow();
+    }
+  });
 });
 
 describe("scan coverage floor", () => {
@@ -321,14 +346,14 @@ describe("scan coverage floor", () => {
 
   test("the live program file count clears the checked-in floor", () => {
     const config = loadGuardConfig();
-    const scanned = countScannedFiles(repoRoot, config.tsconfig);
-    expect(scanned).toBeGreaterThanOrEqual(config.minScannedFiles);
+    expect(liveScannedFileCount()).toBeGreaterThanOrEqual(
+      config.minScannedFiles,
+    );
   }, 120_000);
 
   test("the checked-in floor stays tight to the live count", () => {
     const config = loadGuardConfig();
-    const scanned = countScannedFiles(repoRoot, config.tsconfig);
-    expect(scanned).toBeLessThan(config.minScannedFiles * 1.1);
+    expect(liveScannedFileCount()).toBeLessThan(config.minScannedFiles * 1.1);
   }, 120_000);
 });
 
@@ -347,7 +372,17 @@ describe("violation end to end", () => {
       const ran = spawnSync(
         process.execPath,
         ["scripts/check-dead-exports.ts"],
-        { cwd: repoRoot, encoding: "utf8" },
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          // The file-count subprocess is exercised by the floor tests above;
+          // inject the same deterministic value so this run pays only
+          // ts-prune.
+          env: {
+            ...process.env,
+            DEAD_EXPORT_GUARD_SCANNED_FILES: String(liveScannedFileCount()),
+          },
+        },
       );
       expect(ran.status).toBe(1);
       expect(`${ran.stdout}\n${ran.stderr}`).toContain(
