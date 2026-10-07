@@ -1986,7 +1986,9 @@ async function runSubAgentInner(
     }
     if (!persisting) {
       // Bounded like close_agent: a session teardown wedged by a live shell
-      // descendant fails the run instead of parking it forever.
+      // descendant fails the run instead of parking it forever. Tests inject
+      // a short deadline so wedged-close suites do not pay the production
+      // 30s bound; production never sets it and keeps the default.
       await awaitBoundedTeardown(
         disposeSubAgentSession({
           signal: runController.signal,
@@ -1995,7 +1997,7 @@ async function runSubAgentInner(
           ...(streamPromise !== undefined ? { streamPromise } : {}),
           posixTools,
         }),
-        DEFAULT_CLOSE_DEADLINE_MS,
+        params.teardownDeadlineMs ?? DEFAULT_CLOSE_DEADLINE_MS,
       );
     }
   }

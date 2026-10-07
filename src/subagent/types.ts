@@ -235,6 +235,13 @@ export type RunSubAgentParams = {
    */
   persist?: boolean;
   /**
+   * Override the bounded teardown deadline (ms) for the run's own
+   * end-of-turn teardown on the non-persist path. Tests inject a short
+   * deadline so wedged-close suites do not pay the production 30s bound;
+   * production never sets it and keeps the default.
+   */
+  teardownDeadlineMs?: number;
+  /**
    * Narrow session-store port for leaf `ask_director`. The store owns the
    * pending Promise; this run only registers and awaits. Omit when the
    * caller has no mailbox (tests, non-fleet dispatches).
