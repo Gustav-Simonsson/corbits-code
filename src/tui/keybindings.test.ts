@@ -325,7 +325,7 @@ const PROBES: Readonly<
     group: "surfaces",
     probe: ({ h, shell, chords }) => {
       setChromeZones(shell, { task: [{ label: "a", status: "todo" }] });
-      // CL-5847: hidden by default — first press shows, second hides.
+      // Hidden by default — first press shows, second hides.
       expect(shell.taskBox.visible).toBe(false);
       press(h, chords[0]);
       expect(shell.taskBox.visible).toBe(true);
