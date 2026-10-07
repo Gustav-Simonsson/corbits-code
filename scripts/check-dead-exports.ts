@@ -25,6 +25,12 @@ import { fileURLToPath } from "node:url";
 // sets it, so the gate always computes the count in normal runs.
 const scannedFilesEnv = "DEAD_EXPORT_GUARD_SCANNED_FILES";
 
+// Test injection (same pattern as scannedFilesEnv): a subprocess test that
+// needs the wired-up gate without paying for the ~5s full-project ts-prune
+// run can point the pinned scan at a smaller tsconfig. Production never sets
+// it, so the gate always scans the pinned tsconfig in normal runs.
+const tsconfigEnv = "DEAD_EXPORT_GUARD_TSCONFIG";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(here);
 const allowlistPath = join(here, "dead-export-allowlist.txt");
@@ -350,6 +356,19 @@ function main(): void {
     config = loadGuardConfig();
   } catch (err) {
     fail(`dead-export guard: invalid guard config: ${(err as Error).message}`);
+  }
+  const overrideTsconfig = process.env[tsconfigEnv];
+  if (overrideTsconfig !== undefined) {
+    if (!existsSync(join(repoRoot, overrideTsconfig))) {
+      fail(
+        `dead-export guard: tsconfig override not found: ${overrideTsconfig}`,
+      );
+    }
+    config = {
+      ...config,
+      tsconfig: overrideTsconfig,
+      tsPruneArgs: ["-p", overrideTsconfig],
+    };
   }
   const allowlistText = readFileSync(allowlistPath, "utf8");
   const allowlistProblems = [

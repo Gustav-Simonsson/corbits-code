@@ -1,7 +1,7 @@
 {
   "version": 1,
   "files": {
-    "scripts/check-dead-exports.test.ts": 6178,
+    "scripts/check-dead-exports.test.ts": 1769,
     "scripts/test-parallel.test.ts": 2496,
     "src/plugins/shell-guard-plugin.test.ts": 1883,
     "src/tui/tool-execution-watchdog.test.ts": 1853,

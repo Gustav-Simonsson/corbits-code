@@ -362,12 +362,34 @@ describe("scan coverage floor", () => {
 // scripts/ tree, the real guard runs as a subprocess, and the run must exit
 // nonzero naming the probe. The probe lives only for the test (never
 // committed) so the keep-alive check cannot itself become a dead export.
+//
+// The guard normally scans the full project via ts-prune (~5s); the probe's
+// temp tsconfig includes only the probe file, so this run pays only ts-prune
+// startup while still exercising the same wired-up gate (config load,
+// allowlist validation, node-spawned ts-prune, output parsing, coverage
+// floor, exit code).
 describe("violation end to end", () => {
   test("a temp dead export fails the guard, which names it", () => {
     const probeFile = `dead-export-guard-probe-${process.pid}.ts`;
     const probeName = `deadExportGuardProbe${process.pid}`;
     const probePath = join(repoRoot, "scripts", probeFile);
+    const narrowTsconfigFile = `dead-export-guard-tsconfig-${process.pid}.json`;
+    const narrowTsconfigPath = join(repoRoot, "scripts", narrowTsconfigFile);
     writeFileSync(probePath, `export const ${probeName} = 1;\n`);
+    writeFileSync(
+      narrowTsconfigPath,
+      JSON.stringify({
+        compilerOptions: {
+          noEmit: true,
+          target: "ESNext",
+          module: "ESNext",
+          moduleResolution: "bundler",
+          skipLibCheck: true,
+        },
+        // Relative to the narrow tsconfig's own directory (scripts/).
+        files: [probeFile],
+      }),
+    );
     try {
       const ran = spawnSync(
         process.execPath,
@@ -381,6 +403,7 @@ describe("violation end to end", () => {
           env: {
             ...process.env,
             DEAD_EXPORT_GUARD_SCANNED_FILES: String(liveScannedFileCount()),
+            DEAD_EXPORT_GUARD_TSCONFIG: `scripts/${narrowTsconfigFile}`,
           },
         },
       );
@@ -390,6 +413,7 @@ describe("violation end to end", () => {
       );
     } finally {
       rmSync(probePath, { force: true });
+      rmSync(narrowTsconfigPath, { force: true });
     }
   }, 120_000);
 });
