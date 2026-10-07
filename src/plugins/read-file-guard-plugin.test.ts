@@ -484,17 +484,24 @@ describe("CL-8979 large-file pagination", () => {
   });
 
   test("windows a single file line past the scan ceiling with exact reassembly", async () => {
+    // The windowing contract is ceiling-relative, so the test injects a small
+    // ceiling and keeps the fixture at ceiling+4096 instead of 8MB+4096.
+    // Paging is line-offset based: each hop re-reads the file from the start,
+    // so an 8MB fixture costs quadratic I/O (168 hops x up to 8MB).
+    const maxScanBytes = 256 * 1024;
     const filler = "0123456789ABCDEF".repeat(
-      Math.ceil((READ_FILE_MAX_SCAN_BYTES + 4096) / 16),
+      Math.ceil((maxScanBytes + 4096) / 16),
     );
     const payload = `HEAD-${filler}-TAIL`;
-    expect(payload.length).toBeGreaterThan(READ_FILE_MAX_SCAN_BYTES);
+    expect(payload.length).toBeGreaterThan(maxScanBytes);
     const p = await fixture("cl8979-scan-giant.txt", `${payload}\nEND\n`);
     const rows: string[] = [];
     let offset = 0;
     let hops = 0;
     for (;;) {
-      const res = await readFileBounded(p, offset, 2000, neverAbort());
+      const res = await readFileBounded(p, offset, 2000, neverAbort(), {
+        maxScanBytes,
+      });
       hops += 1;
       expect(res.isError).toBeUndefined();
       const content = String(res.content);
