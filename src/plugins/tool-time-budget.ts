@@ -27,16 +27,15 @@ export function formatSearchTimeoutMessage(
   return `${trimmed}\n\n${notice}`;
 }
 
-// A search_files pattern that walks the whole tree: recursive descent or a
-// bare star with no literal constraint. Tighter globs (`*.ts`, `*config*`)
-// still match a bounded name space and stay allowed at the root.
+// Whole-tree search_files patterns: recursive descent or a bare star with no
+// literal constraint. Tighter globs (`*.ts`, `*config*`) stay allowed at root.
 export function isUnboundedSearchGlob(pattern: string): boolean {
   return pattern === "*" || pattern.includes("**");
 }
 
-// The raw path argument resolved against the session root: omitted, empty,
-// ".", and the root itself all land on the workspace root. Non-filesystem
-// targets (archive:///, tool-output:///) resolve elsewhere and never match.
+// The raw path resolved against the session root: omitted, empty, ".", and the
+// root itself all land on the workspace root. Non-filesystem targets
+// (archive:///, tool-output:///) resolve elsewhere and never match.
 export function isWorkspaceRootSearch(
   path: string | undefined,
   cwd: string,
