@@ -330,7 +330,13 @@ describe("readFileBounded", () => {
 });
 
 describe("CL-8979 large-file pagination", () => {
-  const BIG_LINES = 45_000;
+  // The paging contract is ceiling-relative, so the chain tests inject a
+  // small ceiling (same as the single-line windowing test) and keep the
+  // fixture above it instead of 45k rows over the 8MB default. Paging is
+  // line-offset based: every hop re-reads the file from the start, so
+  // fixture size drives quadratic I/O (225 hops x up to 11MB before).
+  const BIG_SCAN_CEILING = 256 * 1024;
+  const BIG_LINES = 4_000;
   const bigRow = (i: number): string => `L${i}-` + "p".repeat(243);
 
   async function bigFixture(name: string): Promise<string> {
@@ -355,7 +361,9 @@ describe("CL-8979 large-file pagination", () => {
     id: string,
     args: Record<string, unknown>,
   ) => Promise<ToolResult> {
-    const plugin = readFileGuardPlugin(dir, {});
+    const plugin = readFileGuardPlugin(dir, {
+      maxScanBytes: BIG_SCAN_CEILING,
+    });
     const middleware = plugin.middleware;
     if (middleware === undefined) throw new Error("expected middleware");
     const fallback = async (call: ToolCall): Promise<ToolResult> => ({
@@ -374,6 +382,7 @@ describe("CL-8979 large-file pagination", () => {
   ): (id: string, args: Record<string, unknown>) => Promise<ToolResult> {
     const plugin = readFileGuardPlugin(dir, {
       blobReader: createBlobReader({ readBlob }),
+      maxScanBytes: BIG_SCAN_CEILING,
     });
     const middleware = plugin.middleware;
     if (middleware === undefined) throw new Error("expected middleware");
@@ -390,9 +399,11 @@ describe("CL-8979 large-file pagination", () => {
 
   test("reads a deep page of a file larger than the scan ceiling", async () => {
     const p = await bigFixture("cl8979-big.txt");
-    const res = await readFileBounded(p, 43_000, 5, neverAbort());
+    const res = await readFileBounded(p, 3_500, 5, neverAbort(), {
+      maxScanBytes: BIG_SCAN_CEILING,
+    });
     expect(res.isError).toBeUndefined();
-    expect(String(res.content)).toContain(bigRow(43_000));
+    expect(String(res.content)).toContain(bigRow(3_500));
     expect(String(res.content)).not.toContain("scan limit");
   });
 
