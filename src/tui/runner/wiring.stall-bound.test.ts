@@ -19,12 +19,10 @@ import {
 } from "../../subagent/session-store.js";
 import { cancelWorkersForStop, createFleetStallPollTick } from "./wiring.js";
 
-// A silent primary turn (wake text sent, inference never starts) must not
-// freeze the message queue and parked worker questions forever. The stall
-// poll tick bounds that turn via shouldAbortForStall (including
-// awaiting-first-token): past the stall threshold it aborts, the queued
-// operator message gets a fresh turn, and parked asks either re-surface
-// (escalated) or settle exactly once via the ask deadline.
+// A silent primary turn (wake sent, inference never starts) must not freeze
+// the queue and parked questions forever: the stall poll aborts it past the
+// threshold, the queued message gets a fresh turn, and parked asks either
+// re-surface (escalated) or settle exactly once via the ask deadline.
 
 const STALL_TIMEOUT_MS = 1_000;
 
@@ -83,7 +81,7 @@ function wakeDeliveries(
     .map((call) => call.item.text);
 }
 
-/** Assert an interrupt happened, then count wake deliveries issued after it. */
+/** Wake deliveries issued after the interrupt. */
 function wakeDeliveriesAfterInterrupt(
   port: ReturnType<typeof createRecordingPort>,
 ): number {
@@ -106,7 +104,7 @@ interface StallFixture {
   reportFleet: () => void;
 }
 
-/** The production poll-tick shape, wired to this fixture's store and bridge. */
+/** The production poll-tick shape, wired to this fixture. */
 function stallTick(
   fixture: Pick<StallFixture, "store" | "bridge" | "reportFleet">,
 ): () => void {
@@ -137,7 +135,7 @@ async function withStallBridge(
       stallTimeoutMs: STALL_TIMEOUT_MS,
       schedule: schedule ?? (() => () => undefined),
     });
-    // Production report: fresh snapshot reconciles bridge delivery state.
+    // Production report: fresh snapshot reconciles delivery state.
     const reportFleet = (): void => {
       bridge.handle({
         type: "agent-ask",
@@ -159,12 +157,12 @@ describe("stall-bound primary turn (CL-8016)", () => {
       async ({ store, port, bridge, clock, reportFleet }) => {
         parkWorker(store, "a");
         parkWorker(store, "b");
-        // Both workers parked: the wake text sends as a primary turn.
+        // Both parked: the wake sends as a primary turn.
         reportFleet();
         expect(bridge.turn.isProcessing).toBe(true);
         expect(wakeDeliveries(port)).toHaveLength(1);
 
-        // The operator queues behind the silent turn; nothing moves.
+        // The operator queues behind the silent turn.
         bridge.submit("operator: status?", "queue");
         expect(bridge.turn.isProcessing).toBe(true);
         expect(wakeDeliveries(port)).toHaveLength(1);
@@ -180,13 +178,12 @@ describe("stall-bound primary turn (CL-8016)", () => {
         const tick = stallTick({ store, bridge, reportFleet });
         tick();
 
-        // The silent turn aborted past the bound ...
+        // Silent turn aborted, inference interrupted before any new deliver,
+        // queued message reached the port, and mail got a fresh running turn.
         expect(bridge.turnMarkers().map((marker) => marker.path)).toContain(
           "stall-abort:awaiting-first-token",
         );
-        // ... the hung inference was interrupted before any new deliver ...
         expect(wakeDeliveriesAfterInterrupt(port)).toBe(0);
-        // ... the queued operator message reached the port ...
         expect(
           port.calls.some(
             (call) =>
@@ -194,12 +191,11 @@ describe("stall-bound primary turn (CL-8016)", () => {
               call.item.text.includes("operator: status?"),
           ),
         ).toBe(true);
-        // ... and the queued mail got a fresh running turn.
         expect(mailDrives).toBe(1);
         expect(bridge.turn.isProcessing).toBe(true);
         expect(bridge.turn.status).toBe("running");
 
-        // Settling the mail turn re-surfaces the still-parked asks, escalated.
+        // Settling the mail turn re-surfaces the parked asks, escalated.
         bridge.handle({ type: "inference.start", data: {} });
         bridge.handle({ type: "inference.done", data: {} });
         const wakes = wakeDeliveries(port);
@@ -231,9 +227,8 @@ describe("stall-bound primary turn (CL-8016)", () => {
         expect(monitorTick).toBeDefined();
         monitorTick?.();
 
-        // Production abort is the #1095 monitor tick → doInterrupt, not the
-        // 5s fleet poll. Occupancy must win that next turn; a re-surface wake
-        // must not start processing first.
+        // The #1095 monitor tick, not the 5s fleet poll, aborts; occupancy
+        // must win the next turn, not a re-surface wake.
         expect(wakeDeliveriesAfterInterrupt(port)).toBe(0);
         expect(mailDrives).toBe(1);
         expect(wakeDeliveries(port)).toHaveLength(1);
@@ -262,8 +257,7 @@ describe("stall-bound primary turn (CL-8016)", () => {
 
         const tick = stallTick({ store, bridge, reportFleet });
 
-        // Past the turn bound but inside the ask deadline: the wake turn
-        // aborts and re-surfaces; nobody settles yet.
+        // Past the turn bound, inside the ask deadline: abort and re-surface only.
         clock.now += STALL_TIMEOUT_MS + 500;
         tick();
         expect(wakeDeliveries(port)).toHaveLength(2);
@@ -272,8 +266,8 @@ describe("stall-bound primary turn (CL-8016)", () => {
           expect(worker.rejected).toHaveLength(0);
         }
 
-        // Past the ask deadline: each question settles exactly once with an
-        // explicit timeout error naming its question and session.
+        // Past the ask deadline: each question settles once with a timeout
+        // error naming its question and session.
         clock.now += ASK_DEADLINE_MS;
         tick();
         for (const worker of workers) {
@@ -285,8 +279,8 @@ describe("stall-bound primary turn (CL-8016)", () => {
           expect(store.resolveAsk(worker.sessionId, "late")).toBe(false);
           expect(store.hasPendingAsk(worker.sessionId)).toBe(false);
         }
-        // Expiring the asks must also end the silent wake — disarm without
-        // abort would leave isProcessing hung with nothing left to re-surface.
+        // Expiring the asks must also end the silent wake; disarm alone would
+        // hang isProcessing with nothing left to re-surface.
         expect(bridge.turn.isProcessing).toBe(false);
       },
     );
@@ -298,8 +292,7 @@ describe("stall-bound primary turn (CL-8016)", () => {
       async ({ store, port, bridge, clock, reportFleet }) => {
         const worker = parkWorker(store, "late");
         const askedAt = clock.now;
-        // The wake lands late: just inside the ask deadline, so the silent
-        // turn is still inside its stall window when the deadline hits.
+        // The wake lands just inside the ask deadline, still inside its stall window.
         clock.now = askedAt + ASK_DEADLINE_MS - 500;
         reportFleet();
         expect(bridge.turn.isProcessing).toBe(true);
@@ -307,9 +300,8 @@ describe("stall-bound primary turn (CL-8016)", () => {
 
         const tick = stallTick({ store, bridge, reportFleet });
 
-        // Past the ask deadline but still inside the wake turn's stall window:
-        // the deadline settles the question and the silent turn must end idle
-        // without waiting for the stall bound.
+        // Past the deadline but inside the stall window: settle, end idle,
+        // no stall bound.
         clock.now = askedAt + ASK_DEADLINE_MS + 1;
         tick();
 
@@ -322,7 +314,7 @@ describe("stall-bound primary turn (CL-8016)", () => {
         expect(paths.some((path) => path.startsWith("stall-abort"))).toBe(
           false,
         );
-        // Nothing left to re-surface: the expired wake does not send again.
+        // Nothing left to re-surface; the expired wake does not resend.
         expect(wakeDeliveries(port)).toHaveLength(1);
         expect(bridge.abortStalledWakeTurn()).toBe(false);
         expect(bridge.abortExpiredWakeTurn(true)).toBe(false);
@@ -377,7 +369,7 @@ describe("stall-bound primary turn (CL-8016)", () => {
       });
       expect(bridge.turn.isProcessing).toBe(true);
 
-      // Stop through the production path, not the clears by hand.
+      // Stop through the production path, not hand-clears.
       await cancelWorkersForStop({
         subAgentSessions: store,
         fleetRecords: mailbox,
@@ -392,7 +384,7 @@ describe("stall-bound primary turn (CL-8016)", () => {
         if (outcome.ok) continue;
         expect(outcome.hint).toContain("Session closed");
       }
-      // The aborted wake turn is disarmed with the queue: nothing left to bound.
+      // The aborted wake turn is disarmed with the queue.
       expect(bridge.abortStalledWakeTurn()).toBe(false);
     });
   });
