@@ -5,7 +5,7 @@
     "scripts/test-parallel.test.ts": 2496,
     "src/plugins/shell-guard-plugin.test.ts": 1883,
     "src/tui/tool-execution-watchdog.test.ts": 1853,
-    "src/auth/codex/refresh-lock.test.ts": 1840,
+    "src/auth/codex/refresh-lock.test.ts": 930,
     "src/tui/provider-setup.test.ts": 1562,
     "src/tui/url-click.test.ts": 1442,
     "e2e/exec-signal-finalize.test.ts": 1299,

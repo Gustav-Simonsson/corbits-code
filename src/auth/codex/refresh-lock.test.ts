@@ -164,7 +164,10 @@ describe("codex refresh lock", () => {
       import.meta.url,
     ).pathname;
     const lock = join(dir, "refresh.lock");
-    const proc = Bun.spawn(["bun", "run", holderPath, lock, "1500"], {
+    // Hold 600ms: the parent's 300ms acquisition attempt below must run
+    // entirely while the holder still holds (2x headroom), and the parent
+    // then waits for the holder to release, so the hold is the test's floor.
+    const proc = Bun.spawn(["bun", "run", holderPath, lock, "600"], {
       stdout: "pipe",
       stderr: "pipe",
     });
