@@ -2,8 +2,8 @@ import type { DirectorPackage } from "../types.js";
 import { REVIEW_TOOLS } from "../tool-sets.js";
 
 /**
- * Warden trust-review worker (CL-7657).
- * Permission / provider-auth / plugin-loader diffs only; findings, never fixes.
+ * Warden trust-review worker. Permission / provider-auth / plugin-loader
+ * diffs only; findings, never fixes.
  */
 export const wardenPackage: DirectorPackage = {
   id: "warden",

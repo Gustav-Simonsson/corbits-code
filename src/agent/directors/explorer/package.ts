@@ -2,8 +2,8 @@ import type { DirectorPackage } from "../types.js";
 import { READ_TOOLS } from "../tool-sets.js";
 
 /**
- * Explorer worker (CL-7020 / CL-7015 rename from explore).
- * Map/read against the brief — scannable findings only; never implement, review, or discover the fleet.
+ * Explorer worker. Map/read against the brief — scannable findings only;
+ * never implement, review, or discover the fleet.
  */
 export const explorerPackage: DirectorPackage = {
   id: "explorer",

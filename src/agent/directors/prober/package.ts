@@ -2,9 +2,8 @@ import type { DirectorPackage } from "../types.js";
 import { REVIEW_TOOLS } from "../tool-sets.js";
 
 /**
- * Prober worker (CL-7656).
- * Measure-only latency/behavior prober — report distributions per
- * family/model; never ship product code, never tune prompts or policy.
+ * Prober worker. Measure-only latency/behavior prober — report distributions
+ * per family/model; never ship product code, never tune prompts or policy.
  */
 export const proberPackage: DirectorPackage = {
   id: "prober",

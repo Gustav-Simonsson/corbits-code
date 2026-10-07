@@ -2,9 +2,9 @@ import type { DirectorPackage } from "../types.js";
 import { DOCS_TOOLS } from "../tool-sets.js";
 
 /**
- * Shakespeare worker (CL-7029).
- * Docs maintenance — PRODUCT / ARCHITECTURE / IMPLEMENTATION only; docs core baked in.
- * Package id/path stays `shakespeare` (global rename is out of scope).
+ * Shakespeare worker. Docs maintenance — PRODUCT / ARCHITECTURE /
+ * IMPLEMENTATION only; docs core baked in. Package id/path stays
+ * `shakespeare` (global rename is out of scope).
  */
 export const shakespearePackage: DirectorPackage = {
   id: "shakespeare",
