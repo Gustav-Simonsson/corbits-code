@@ -15,6 +15,7 @@
     "scratch/**",
     "node_modules/**",
     "CHANGELOG.md",
+    "GPLv2-AI-Exception.md",
     "tmp/**",
     ".claude/**",
     ".tmp/**",

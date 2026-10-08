@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ABK Labs. All rights reserved.
 //
-// SPDX-License-Identifier: GPL-2.0-only WITH AI-Exception-1.0
+// SPDX-License-Identifier: GPL-2.0-only WITH AI-Exception-2.0
 //
 // CL-8744: fat handoff file + thin live spine with pointer.
 //
