@@ -260,8 +260,8 @@ describe("attachSessionBridge", () => {
         expect(port.calls.some((c) => c.op === "interrupt")).toBe(true);
         expect(shell.session.interruptFlash).toBe(true);
         expect(shell.session.run).toBe("idle");
-        // Handed over here rather than left waiting on an idle event the stop
-        // may never produce.
+        // Handed over here, not left waiting on an idle event the stop may
+        // never produce.
         expect(
           port.calls.flatMap((c) => (c.op === "deliver" ? [c.item.text] : [])),
         ).toEqual(["b", "a"]);
@@ -430,9 +430,8 @@ describe("attachSessionBridge", () => {
   });
 
   test("queued item delivers on a tool-less turn (inference.done, no tool calls)", async () => {
-    // Regression: reactor.done fires only once, at agent shutdown, never
-    // between turns — a plain-text reply with no tool calls must still drain
-    // the queue, or a queued message sits forever.
+    // Regression: reactor.done fires only at agent shutdown, never between
+    // turns — a plain reply with no tool calls must still drain the queue.
     await withBridge({ run: "busy" }, async ({ shell, port, bridge }) => {
       bridge.submit("follow up", "queue");
       expect(badgeCount(shell.session)).toBe(1);
@@ -457,9 +456,9 @@ describe("attachSessionBridge", () => {
 
   test("run and the phase ramp both return to idle after a tool-less inference.done, with no connector.reply", async () => {
     // Regression: a self-continuing workflow may never emit connector.reply,
-    // the only other event that clears `run` and `isProcessing`. Without this,
-    // every future Enter resolves to "queue" (busy is sticky), the queued
-    // message is never drained, and the ramp can say "working" forever.
+    // the only other event that clears `run` and `isProcessing`; else busy
+    // sticks, the queued message never drains, and the ramp says "working"
+    // forever.
     await withBridge({ run: "busy" }, async ({ shell, port, bridge }) => {
       bridge.handle({ type: "inference.start" });
       bridge.handle({
@@ -535,8 +534,8 @@ describe("attachSessionBridge", () => {
         type: "inference.text.delta",
         data: { token: "the answer." },
       });
-      // Deltas coalesce: the accumulated text lands at the next renderer
-      // frame, not per token.
+      // Deltas coalesce: the accumulated text lands at the next frame, not
+      // per token.
       await h.renderOnce();
 
       const assistant = shell.streamLog.filter((r) => r.role === "assistant");
@@ -864,8 +863,7 @@ describe("same-turn retry after inference.error", () => {
       bridge.handle({ type: "tool.boundary" });
       expect(port.calls.some((c) => c.op === "deliver")).toBe(true);
       // Same-attempt failure: the retry rolls back to the attempt mark. The
-      // delivered row must survive — retracting it would show a transcript
-      // the runtime never saw.
+      // delivered row must survive.
       bridge.handle({
         type: "inference.error",
         data: {
@@ -946,8 +944,8 @@ describe("same-turn retry after inference.error", () => {
 describe("parallel sub-agent dispatch on the live session bridge", () => {
   // The live main-session path tracks a call's row by callId
   // (applyToolCall/applyToolResult), independent of tool-rows.ts's name-based
-  // pendingCallIndex — pinned so a change to either path cannot silently
-  // reintroduce misattribution on the parent transcript.
+  // pendingCallIndex — pinned so neither path can silently reintroduce
+  // misattribution.
   test("three parallel spawn_agent calls resolve to three rows, each with its own result", async () => {
     await withBridge({ run: "idle" }, async ({ shell, bridge }) => {
       const events = [
@@ -1118,9 +1116,8 @@ describe("idle-with-fleet (CL-7057)", () => {
       bridge.handle({ type: "fleet", running: 1 });
       port.clear();
       settleToollessTurn(bridge);
-      // The parent the steer was addressing has stopped, so it delivers
-      // as its own turn right away instead of sitting out the hold — the run
-      // stays held by the live fleet.
+      // The parent the steer was addressing has stopped, so it delivers as
+      // its own turn instead of sitting out the hold.
       expect(shell.session.run).toBe("busy");
       expect(badgeCount(shell.session)).toBe(0);
       const deliver = port.calls.find((c) => c.op === "deliver");
@@ -1416,8 +1413,8 @@ describe("fleet-dry open-task drive (CL-7540)", () => {
       expect(shell.streamLog.filter((r) => r.role === "user").length).toBe(
         userRowsAfterSubmit,
       );
-      // Fleet-dry continuations are internal runtime→agent traffic and
-      // paint no row; the abort must not have swallowed the inbound.
+      // Fleet-dry continuations are internal runtime→agent traffic, paint no
+      // row; the abort must not have swallowed the inbound.
       expect(
         shell.streamLog.filter(
           (r) => r.role === "system" && r.text === DRY_OPEN_TASK_PROMPT,
@@ -1769,8 +1766,8 @@ describe("in-flight tool row elapsed time", () => {
             },
           },
         });
-        // The elapsed clock was scaffolding for the wait, not a fact worth
-        // keeping — the answer's own addendum takes the row over.
+        // The elapsed clock was wait scaffolding, not a fact worth keeping —
+        // the answer's addendum takes the row over.
         expect(defined(shell.streamLog[index], "tool row").stat).not.toBe(
           "1:05",
         );
@@ -2041,7 +2038,7 @@ describe("task checklist calls stay out of the transcript", () => {
       });
 
       // The list lives in the task panel; scrollback must not carry a
-      // second copy of it.
+      // second copy.
       expect(streamRowCount(shell)).toBe(before);
     });
   });
