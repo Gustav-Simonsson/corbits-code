@@ -1396,7 +1396,8 @@ export async function markOnboarded(path: string): Promise<void> {
   await saveGlobalSettings(path, { ...base, onboarded: true });
 }
 
-/** Persist the package version whose release notes were last shown (or stamped on first install). */
+/** Persist the package version whose release notes were last shown (or
+ * stamped on first install). */
 export async function markLastChangelogVersion(
   path: string,
   version: string,
