@@ -116,8 +116,8 @@ describe("supportedEfforts", () => {
     expect(supportedEfforts("glm-5.3")).toEqual(["low", "high", "max"]);
   });
 
-  // Every catalog Muse Spark id reaches supportedEfforts unnormalized, so
-  // they must all land on the same ladder — two ids pin the family rule.
+  // Every catalog Muse Spark id reaches supportedEfforts unnormalized; two
+  // ids pin the family rule.
   test.each(["muse-spark-1.3-contributor", "muse-spark-1.3-contributor-free"])(
     "Muse Spark id %s supports minimal through high",
     (model) => {
